@@ -19,7 +19,13 @@ audio = ["sherpa-onnx>=1.10", "sounddevice>=0.4"]
 # U7：设备本地触摸屏 Web UI（python-multipart：starlette 表单解析依赖）
 ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9"]
 
-dev = ["pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27"]
+# dev：单元 + e2e。e2e 在同进程内拉起真实后台（backend/app），故附带其运行依赖
+# （FastAPI 表单/Jinja2 + PyJWT/bcrypt/itsdangerous 鉴权），见 tests/e2e/conftest.py。
+dev = [
+    "pytest>=8.0", "pytest-asyncio>=0.23", "httpx>=0.27",
+    "fastapi>=0.110", "jinja2>=3.1", "python-multipart>=0.0.9",
+    "pyjwt>=2.8", "bcrypt>=4.1", "itsdangerous>=2.1",
+]
 
 [build-system]
 requires = ["setuptools>=68"]

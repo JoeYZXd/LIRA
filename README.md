@@ -46,3 +46,29 @@ python3 models/download_models.py --only kws
 cd device && .venv/bin/python -m pytest       # 单元测试
 cd backend && python3 -m pytest               # 后台测试（U8 起）
 ```
+
+## 端到端验收（U9：AE1–AE7，模拟环境）
+
+`device/tests/e2e/` 在 x86 开发机上跑通全部验收样例：整机以全 mock HAL 装配
+（麦克风 → wav 注入、LLM → stub、TTS → 录音假件），AE5/AE7 与对抗用例在
+同进程内拉起**真实后台**（FastAPI TestClient）+ 真实设备端 `SyncClient`。
+
+```bash
+# 0) 模型就绪（真实 KWS/ASR 用例需要；缺失时相应用例自动 skip，文本注入已覆盖逻辑）
+python3 models/download_models.py
+
+cd device
+.venv/bin/pip install -e ".[dev,audio,ocr-x86,llm,ui]"
+
+# 1) 一次性生成音频夹具（离线 TTS 合成唤醒词/指令 wav，随仓库提交；缺失时可再生）
+.venv/bin/python tests/e2e/make_audio_fixtures.py
+
+# 2) 一键跑全部端到端验收（37 个用例）
+.venv/bin/python -m pytest tests/e2e/ -q
+```
+
+文件布局：`conftest.py`（全 mock 装配 + SyncPump 帧泵）、`harness.py`（整机
+DeviceHarness）、`test_ae1_privacy.py` … `test_ae7_sync.py`（每个 AE 一个文件）、
+`test_sync_adversarial.py`（旧 epoch 回放 / 重复投递 / 应用中崩溃 / 库重建换新 /
+多次离线变更）、`audio_fixtures/`（TTS 合成 wav）、`make_audio_fixtures.py`。
+

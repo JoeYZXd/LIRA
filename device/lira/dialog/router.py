@@ -38,16 +38,21 @@ class RouteResult:
 
 
 class Router:
-    """三级路由器：纯调度逻辑，LLM 能力全部注入（可全面单测）。"""
+    """三级路由器：纯调度逻辑，LLM 能力全部注入（可全面单测）。
+
+    `appliances` 可传静态序列，也可传 ``Callable[[], Iterable[Appliance]]``
+    提供者（U9 装配层注入"每次匹配现读本地库"的取数函数，使同步快照
+    更新（U6/AE7）后语音匹配立即生效，无需重建 Router）。
+    """
 
     def __init__(
         self,
-        appliances: Iterable[Appliance] = (),
+        appliances: Iterable[Appliance] | Callable[[], Iterable[Appliance]] = (),
         local_llm: LlmHandler | None = None,
         remote_llm: LlmHandler | None = None,
         remote_available: Callable[[], bool] = lambda: False,
     ) -> None:
-        self._appliances: tuple[Appliance, ...] = tuple(appliances)
+        self._appliances = appliances if callable(appliances) else tuple(appliances)
         self._local_llm = local_llm
         self._remote_llm = remote_llm
         self._remote_available = remote_available
@@ -55,11 +60,12 @@ class Router:
     @property
     def appliances(self) -> tuple[Appliance, ...]:
         """当前家电表（U6 状态机澄清/未配置细分检查复用同一份）。"""
-        return self._appliances
+        return tuple(self._appliances()) if callable(self._appliances) else self._appliances  # type: ignore[return-value]
 
     async def route(self, text: str) -> RouteResult:
-        # Tier 1: 本地规则（家电/阅读/帮助/取消）
-        intent = match_local(text, self._appliances)
+        # Tier 1: 本地规则（家电/阅读/帮助/取消）；家电表经 property 现读
+        # （callable 提供者 = 每次匹配取本地库最新快照，U6/AE7 同步即时生效）
+        intent = match_local(text, self.appliances)
         if intent is not None:
             return RouteResult(RouterTier.LOCAL_RULE, intent=intent)
 

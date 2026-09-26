@@ -12,6 +12,8 @@
 
 from __future__ import annotations
 
+from typing import Sequence
+
 __all__ = [
     "WAKE_ACK",
     "LISTEN_REMIND",
@@ -40,6 +42,7 @@ __all__ = [
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
+    "disabled_announce_text",
 ]
 
 # ---------- 唤醒与聆听（R25/R20） ----------
@@ -92,6 +95,17 @@ APPLIANCE_NOT_CONFIGURED = "这个家电我还不认识。请家人在后台添�
 def ir_sent_text(desc: str) -> str:
     """R29：只陈述"指令已发出"，不得暗示家电真实状态。"""
     return IR_SENT.format(desc=desc)
+
+
+#: 快照推送后被禁用的家电播报（AE7/R7：家人改配置立即生效的口语化通知）
+DISABLED_ANNOUNCE = "{names}已被家人禁用，暂时不能用了。"
+
+
+def disabled_announce_text(names: Sequence[str]) -> str:
+    """被禁用家电名单的播报文案（names 为空返回空串=无需播报）。"""
+    if not names:
+        return ""
+    return DISABLED_ANNOUNCE.format(names="、".join(names))
 
 
 # ---------- LLM 路由与降级（R28/R27/R3） ----------

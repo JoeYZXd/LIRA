@@ -38,7 +38,7 @@ from lira.protocol import (
     parse_frame,
 )
 
-__all__ = ["SyncError", "SyncTransport", "SyncClient"]
+__all__ = ["SyncError", "SyncTransport", "SyncClient", "SnapshotAppliedHook"]
 
 
 class SyncError(Exception):
@@ -57,6 +57,10 @@ class SyncTransport(Protocol):
 
 
 LearnHandler = Callable[[str, str], Awaitable[str]]
+
+#: 快照应用后通知钩子（AE7）：(快照, 应用前各家电启用态) —— 供装配层对比
+#: 出"本次推送新禁用了哪些家电"并口语播报；同步调用，异常由实现方自行消化。
+SnapshotAppliedHook = Callable[[SnapshotMsg, dict[str, bool]], None]
 
 
 class SyncClient:
@@ -80,11 +84,13 @@ class SyncClient:
         transport: SyncTransport,
         token: str,
         learn_handler: LearnHandler | None = None,
+        on_snapshot_applied: SnapshotAppliedHook | None = None,
     ) -> None:
         self._store = store
         self._transport = transport
         self._token = token
         self._learn_handler = learn_handler
+        self._on_snapshot_applied = on_snapshot_applied
         self._authed = False
         self._pairing_code: str | None = None
         #: 拒绝记录（告警审计面，U7 状态卡/U9 断言用）
@@ -171,6 +177,25 @@ class SyncClient:
 
     # ---------- 快照应用（epoch 门禁 + 原子事务 + 幂等） ----------
 
+    def _snapshot_models(self, snap: SnapshotMsg) -> list[ApplianceModel]:
+        """DTO→模型。R32：码值是设备本地学习产物，快照不携带也**不得清空**——
+        仍存在于配置中的设备/动作保留本地已学码值；被移除的动作随配置消失
+        （store._upsert_appliance_tx 的"悬挂清理"语义）。"""
+        local_codes: dict[tuple[str, str], str] = {
+            (a.name, action): code
+            for a in self._store.get_all_appliances()
+            for action, code in a.codes.items()
+        }
+        models: list[ApplianceModel] = []
+        for dto in snap.appliances:
+            model = ApplianceModel.from_dto(dto)
+            model.codes = {
+                action: code for (name, action), code in local_codes.items()
+                if name == model.name
+            }
+            models.append(model)
+        return models
+
     def _apply_snapshot(self, snap: SnapshotMsg) -> SnapshotAckMsg:
         current_epoch = self._store.current_epoch()
         current_version = self._store.current_version()
@@ -194,8 +219,9 @@ class SyncClient:
             and secrets.compare_digest(snap.pairing_code, self._pairing_code)
         ):
             token_to_store = snap.device_token
+        prev_enabled = self._prev_enabled()
         self._store.apply_snapshot(
-            appliances=[ApplianceModel.from_dto(a) for a in snap.appliances],
+            appliances=self._snapshot_models(snap),
             scenes=[SceneModel.from_dto(s) for s in snap.scenes],
             epoch=snap.epoch,
             version=snap.version,
@@ -206,6 +232,7 @@ class SyncClient:
             self._pairing_code = None  # 一次性会话，用后即失效
         logging.info("快照已应用: epoch=%s version=%s appliances=%d scenes=%d",
                      snap.epoch, snap.version, len(snap.appliances), len(snap.scenes))
+        self._notify_applied(snap, prev_enabled)
         return SnapshotAckMsg(epoch=snap.epoch, version=snap.version, applied=True)
 
     def _handle_foreign_epoch(self, snap: SnapshotMsg, current_epoch: int) -> SnapshotAckMsg:
@@ -221,8 +248,9 @@ class SyncClient:
             return SnapshotAckMsg(epoch=snap.epoch, version=snap.version,
                                   applied=False, reason="pairing_code_mismatch")
         # 通过门禁 → 走正常应用路径（此时 epoch 不等会被视为新纪元接受）
+        prev_enabled = self._prev_enabled()
         self._store.apply_snapshot(
-            appliances=[ApplianceModel.from_dto(a) for a in snap.appliances],
+            appliances=self._snapshot_models(snap),
             scenes=[SceneModel.from_dto(s) for s in snap.scenes],
             epoch=snap.epoch,
             version=snap.version,
@@ -230,7 +258,21 @@ class SyncClient:
         )
         logging.info("重配对完成：epoch %s -> %s", current_epoch, snap.epoch)
         self._pairing_code = None
+        self._notify_applied(snap, prev_enabled)
         return SnapshotAckMsg(epoch=snap.epoch, version=snap.version, applied=True)
+
+    def _prev_enabled(self) -> dict[str, bool]:
+        """应用前各家电启用态快照（供装配层对比出"新禁用名单"）。"""
+        return {a.name: a.enabled for a in self._store.get_all_appliances()}
+
+    def _notify_applied(self, snap: SnapshotMsg, prev_enabled: dict[str, bool]) -> None:
+        """应用成功后通知装配层（hook 异常不得破坏同步主流程）。"""
+        if self._on_snapshot_applied is None:
+            return
+        try:
+            self._on_snapshot_applied(snap, prev_enabled)
+        except Exception:  # noqa: BLE001 - 通知失败不回滚已应用的安全配置
+            logging.exception("on_snapshot_applied 钩子异常（已忽略）")
 
     def _reject(self, reason: str) -> None:
         """拒绝即告警（R30/安全评审结论）：记入审计面 + WARNING 日志。"""

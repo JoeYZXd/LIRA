@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Protocol, Sequence
+from typing import Awaitable, Callable, Protocol, Sequence
 
 import cv2
 import numpy as np
@@ -197,13 +197,20 @@ class ReadingPipeline:
         on_capture_done: Callable[[bool], None],
         on_reading_finished: Callable[[], None] | None = None,
         block_chars: int = DEFAULT_BLOCK_CHARS,
+        text_polisher: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
+        """Args 补充（AE2 装配钩子，不改变 OCR 语义）：
+
+        text_polisher: 可选的文本口语化加工（注入 LlmClient 包装），在 OCR
+        之后、分块之前应用。异常或空结果一律回退原文——"不静默、不拒读"。
+        """
         self._camera = camera
         self._engine = engine
         self._speaker = speaker
         self._on_capture_done = on_capture_done
         self._on_reading_finished = on_reading_finished
         self._block_chars = block_chars
+        self._text_polisher = text_polisher
         self._session: ReadingSession | None = None
         #: 播放控制方法（main.py 直接绑到 DialogCallbacks 的六个占位）
         self.playback_pause = self._with_session(lambda s: s.pause())
@@ -231,7 +238,8 @@ class ReadingPipeline:
             logging.info("OCR 未检出文本行（R26 引导信号）")
             self._on_capture_done(False)
             return
-        blocks = chunk_lines([line.text for line in lines], self._block_chars)
+        raw_text = [line.text for line in lines]
+        blocks = chunk_lines(await self._polish(raw_text), self._block_chars)
         self._session = ReadingSession(
             blocks,
             self._speaker,
@@ -239,6 +247,20 @@ class ReadingPipeline:
         )
         self._session.start()
         self._on_capture_done(True)
+
+    async def _polish(self, raw_lines: list[str]) -> list[str]:
+        """可选口语化加工（AE2）：失败/空结果回退原文，不静默、不拒读。"""
+        if self._text_polisher is None:
+            return raw_lines
+        try:
+            polished = await self._text_polisher("\n".join(raw_lines))
+        except Exception:  # noqa: BLE001 - 加工失败按原文朗读
+            logging.exception("文本口语化失败（按原文朗读）")
+            return raw_lines
+        if not polished:
+            return raw_lines
+        polished_lines = [ln.strip() for ln in polished.splitlines() if ln.strip()]
+        return polished_lines or raw_lines
 
     async def _grab(self) -> np.ndarray | None:
         try:

@@ -24,7 +24,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Protocol
+from typing import Callable, Protocol
 
 from lira.dialog import phrasebook as pb
 from lira.dialog.intents import (
@@ -123,9 +123,21 @@ class DialogEngine:
     #: R26 拍摄失败引导重拍最多 2 次，仍失败告知请家人帮忙（U4 消费）
     MAX_CAPTURE_RETRIES = 2
 
-    def __init__(self, router: Router, callbacks: DialogCallbacks) -> None:
+    def __init__(
+        self,
+        router: Router,
+        callbacks: DialogCallbacks,
+        *,
+        wake_allowed: Callable[[], bool] = lambda: True,
+    ) -> None:
+        """Args:
+        wake_allowed: 唤醒门谓词（U7 接入点）。隐私模式开启时装配层注入
+            `lambda: not privacy.is_on`，隐私期 on_wake 一律忽略（不可唤醒，
+            R12/R19）。默认恒真，不影响 U3 既有行为。
+        """
         self._router = router
         self._cb = callbacks
+        self._wake_allowed = wake_allowed
         self.now: float = 0.0
         self.state: State = State.STANDBY
         self.transitions: list[str] = []
@@ -160,7 +172,14 @@ class DialogEngine:
             self._enter_standby()
 
     async def on_wake(self) -> None:
-        """主唤醒词命中（R16/R25）。仅 STANDBY 有效，会话中重复唤醒忽略（R20）。"""
+        """主唤醒词命中（R16/R25）。仅 STANDBY 有效，会话中重复唤醒忽略（R20）。
+
+        U7：隐私模式开启时一律忽略唤醒（不可唤醒），不留任何播报
+        （麦克风已关，不存在可播报通道；恢复由物理按键 + 隐私关闭播报承担）。
+        """
+        if not self._wake_allowed():
+            logging.info("唤醒事件被唤醒门拦截 event=wake_blocked reason=privacy")
+            return
         if self.state is not State.STANDBY:
             logging.debug("会话中唤醒事件忽略 (state=%s)", self.state.value)
             return

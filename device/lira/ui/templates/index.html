@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>LIRA 设备面板</h1>
+
+<section class="card">
+  <h2>设备状态</h2>
+  <div class="status-row">
+    <span class="pill {{ 'on' if privacy_on else 'off' }}">隐私模式：{{ '开启' if privacy_on else '关闭' }}</span>
+    <span class="pill {{ 'off' if network_ok else 'on' }}">网络：{{ '已连接' if network_ok else '未连接' }}</span>
+    <span class="pill {{ 'off' if remote_available else 'neutral' }}">远程服务：{{ '可用' if remote_available else '不可用' }}</span>
+  </div>
+</section>
+
+<section class="card">
+  <h2>隐私模式</h2>
+  {% if not passphrase_set %}
+    <p class="error">尚未设置设备口令，暂不能用屏幕开关隐私模式。</p>
+    <a href="/passphrase/setup"><button class="primary">先设置口令</button></a>
+  {% else %}
+    <p class="muted">屏幕开关需设备口令。家人协助老人退出隐私，请直接按机身按钮（无需口令）。</p>
+    {% if privacy_error %}<p class="error">{{ privacy_error }}</p>{% endif %}
+    <form method="post" action="/privacy">
+      <input type="password" name="passphrase" placeholder="设备口令" required>
+      <div class="status-row" style="margin-top:8px">
+        <button class="danger" type="submit" name="action" value="on">开启隐私</button>
+        <button class="primary" type="submit" name="action" value="off">关闭隐私</button>
+      </div>
+    </form>
+  {% endif %}
+</section>
+
+<section class="card">
+  <h2>音量 / 语速</h2>
+  {% if setting_error %}<p class="error">{{ setting_error }}</p>{% endif %}
+  <form method="post" action="/volume" class="inline">
+    <label for="volume">音量</label>
+    <input type="number" id="volume" name="value" step="0.1" min="0.1" max="2" value="{{ '%.1f'|format(volume) }}">
+    <button class="small primary" type="submit">保存</button>
+    <span class="muted">0.1 ~ 2.0</span>
+  </form>
+  <form method="post" action="/speed" class="inline" style="margin-top:8px">
+    <label for="speed">语速</label>
+    <input type="number" id="speed" name="value" step="0.1" min="0.5" max="2" value="{{ '%.1f'|format(tts_speed) }}">
+    <button class="small primary" type="submit">保存</button>
+    <span class="muted">0.5 ~ 2.0</span>
+  </form>
+</section>
+
+<section class="card">
+  <h2>家电设备（只读）</h2>
+  {% if appliances %}
+  <table>
+    <tr><th>设备</th><th>语音叫法</th><th>动作</th><th>状态</th></tr>
+    {% for a in appliances %}
+    <tr>
+      <td>{{ a.name }}</td>
+      <td>{{ a.aliases or '—' }}</td>
+      <td>{{ a.actions | join('、') }}
+        <span class="muted">已学码 {{ a.learned }}/{{ a.actions | length }}</span></td>
+      <td>
+        {% if a.is_high_risk %}<span class="tag hr">高危</span>{% endif %}
+        {% if a.enabled %}<span class="tag ok">启用</span>{% else %}<span class="tag dis">已禁用</span>{% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+  </table>
+  {% else %}
+  <p class="muted">还没有配置家电。请家人在管理后台添加。</p>
+  {% endif %}
+</section>
+
+<p class="muted">配置变更请使用子女管理后台（U8）。</p>
+{% endblock %}

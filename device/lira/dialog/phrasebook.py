@@ -35,6 +35,8 @@ __all__ = [
     "OCR_GUIDANCE",
     "OCR_GIVEUP",
     "CAPTURE_GUIDANCE",
+    "PRIVACY_ON",
+    "PRIVACY_OFF",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -104,3 +106,8 @@ DISCLAIMER_OFFLINE = "当前没有网络，我按原文读给您听。"
 OCR_GUIDANCE = "我没有看清，请把材料放平，再靠近一点。"
 OCR_GIVEUP = "我还是没看清。请找家人帮忙，或者稍后再试。"
 CAPTURE_GUIDANCE = "正在为您拍摄，请把材料放平，不要遮挡镜头。"
+
+# ---------- 隐私模式后果播报（R12/R19，U7 使用；含麦克风已关提示） ----------
+
+PRIVACY_ON = "好的，隐私模式已开启。麦克风已经关闭，我不会再听您说话，也不会把任何内容发到网上。想让我继续工作，请按一下机身上的按钮。"
+PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫我小丽拉。"

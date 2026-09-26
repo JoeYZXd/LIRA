@@ -32,7 +32,9 @@ class ApplianceStore:
     def __init__(self, db_path: str | Path) -> None:
         self._path = Path(db_path)
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self._path))
+        # check_same_thread=False：U7 UI 经 uvicorn/TestClient 线程访问口令 meta；
+        # 串行纪律不变（单进程编排器保证不并发写，见模块 docstring）
+        self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.execute("PRAGMA synchronous=FULL")

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>设置设备口令</h1>
+<section class="card">
+  {% if already_set %}
+  <p class="muted">设备口令已设置。重新设置将替换旧口令。</p>
+  {% else %}
+  <p>首次使用请为这台设备设置一个口令。以后在屏幕上开关隐私模式时需要它。</p>
+  {% endif %}
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  <form method="post" action="/passphrase/setup">
+    <input type="password" name="passphrase" placeholder="输入口令（至少 4 个字符）" required>
+    <input type="password" name="confirm" placeholder="再输入一次" required>
+    <div style="margin-top:10px">
+      <button class="primary" type="submit">保存口令</button>
+      <a href="/"><button class="small" type="button">返回</button></a>
+    </div>
+  </form>
+</section>
+{% endblock %}

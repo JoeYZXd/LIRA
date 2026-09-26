@@ -19,6 +19,7 @@ import sys
 
 from lira.config import AppConfig, ConfigError, load_config
 from lira.hal.mock import IMAGE_SUFFIXES, MockAudioIO, MockButton, MockCamera, MockDisplay, MockIrController
+from lira.privacy import PrivacyState, make_button_toggler
 
 
 def _count_mock_images(cfg: AppConfig) -> int:
@@ -44,7 +45,7 @@ def build_mock_hal(cfg: AppConfig) -> dict[str, object]:
     return {"camera": camera, "audio": audio, "ir": ir, "button": button, "display": display}
 
 
-def print_assembly(cfg: AppConfig, hal: dict[str, object]) -> None:
+def print_assembly(cfg: AppConfig, hal: dict[str, object], privacy: PrivacyState) -> None:
     """打印模块装配图（dry-run 的核心产出）。"""
     print("=" * 62)
     print("LIRA 模块装配图 (dry-run)")
@@ -65,6 +66,8 @@ def print_assembly(cfg: AppConfig, hal: dict[str, object]) -> None:
     print(f"  store       : {cfg.db_path} (SQLite WAL, synchronous=FULL)")
     sync_state = cfg.sync.ws_url if cfg.sync.ws_url else "<未配置（离线纯本地）>"
     print(f"  sync        : {sync_state}  heartbeat={cfg.sync.heartbeat_seconds}s")
+    print(f"  privacy     : {'开启' if privacy.is_on else '关闭'}"
+          f"  (按键切换通道已接；UI 隐私开关需本地口令，U7)")
     print(f"  log level   : {cfg.log_level}")
     print("  dialog/vision/audio 管线: 后续单元挂载 (U2-U6)")
     print("=" * 62)
@@ -113,8 +116,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[配置错误] {exc}", file=sys.stderr)
         return 2
 
+    # U7：隐私模式状态对象。按键通道此处即接好（R19）；音频/LLM/状态机的
+    # 订阅装配在 U9 e2e 与真实主循环中完成。
+    privacy = PrivacyState()
+    hal["button"].on_press(make_button_toggler(privacy))  # type: ignore[union-attr]
+
     logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    print_assembly(cfg, hal)
+    print_assembly(cfg, hal, privacy)
 
     if args.dry_run:
         print("dry-run 完成：装配校验通过，未进入主循环。")

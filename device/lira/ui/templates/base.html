@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LIRA 设备面板</title>
+  <style>
+    :root { --ok: #1a7f37; --warn: #b45309; --danger: #b91c1c; --muted: #6b7280; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: system-ui, "Noto Sans CJK SC", sans-serif;
+      margin: 0; background: #f3f4f6; color: #111827; font-size: 20px;
+    }
+    main { max-width: 720px; margin: 0 auto; padding: 16px; }
+    h1 { font-size: 26px; } h2 { font-size: 22px; margin-bottom: 8px; }
+    .card {
+      background: #fff; border-radius: 12px; padding: 16px; margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,.12);
+    }
+    .status-row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .pill {
+      padding: 10px 16px; border-radius: 999px; font-weight: 600; font-size: 18px;
+    }
+    .pill.on  { background: #fee2e2; color: var(--danger); }
+    .pill.off { background: #dcfce7; color: var(--ok); }
+    .pill.neutral { background: #e5e7eb; color: var(--muted); }
+    button {
+      font-size: 20px; padding: 14px 22px; border: none; border-radius: 10px;
+      cursor: pointer; font-weight: 600;
+    }
+    button.primary { background: #1d4ed8; color: #fff; }
+    button.danger  { background: var(--danger); color: #fff; }
+    button.small   { font-size: 16px; padding: 10px 16px; }
+    input[type="password"], input[type="text"], input[type="number"] {
+      font-size: 20px; padding: 12px; border: 2px solid #d1d5db;
+      border-radius: 10px; width: 100%; margin: 6px 0;
+    }
+    form.inline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    form.inline input { width: 120px; margin: 0; }
+    .error { color: var(--danger); font-weight: 600; margin: 8px 0; }
+    .muted { color: var(--muted); font-size: 16px; }
+    table { width: 100%; border-collapse: collapse; font-size: 17px; }
+    th, td { text-align: left; padding: 8px 6px; border-bottom: 1px solid #e5e7eb; }
+    .tag { font-size: 14px; padding: 2px 8px; border-radius: 6px; }
+    .tag.hr   { background: #fef3c7; color: var(--warn); }
+    .tag.dis  { background: #e5e7eb; color: var(--muted); }
+    .tag.ok   { background: #dcfce7; color: var(--ok); }
+  </style>
+  {% block extra %}{% endblock %}
+</head>
+<body>
+<main>
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

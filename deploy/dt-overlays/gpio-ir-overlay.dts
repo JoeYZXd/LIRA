@@ -1,0 +1,74 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * LIRA 红外收发设备树 overlay（Orange Pi 5 / RK3588S，U6 交付、U10 实板验证）
+ *
+ * 方案（计划 Key Technical Decisions「红外原始码方案」）：
+ *   - RX: 内核 gpio-ir（gpio-ir-receiver）—— 载波解调后的原始 pulse/space
+ *         经 LIRC 设备暴露给 `ir-ctl -r` 学习录制；
+ *   - TX: 内核 gpio-ir-tx（gpio-ir-tx-transmitter）—— 由内核产生 38kHz 载波，
+ *         `ir-ctl -s` 回放原始码（Python 用户态无法产生载波，LIRC 弃用）。
+ *
+ * 引脚约定（示例：GPIO1_A12=RX / GPIO1_A13=TX，挂在 GPIO1）。
+ * !! U10 实板接线后必须核对实际引脚与 pinctrl 复用，改这里即可 !!，
+ * Rockchip GPIO 编号：GPIO<bank>_<group><idx> -> bank*32 + group*8 + idx，
+ * 即 GPIO1_A12 = 1*32 + 0*8 + 12 = 44，GPIO1_A13 = 45。
+ *
+ * 编译与安装（板上执行，或 x86 交叉 dtc）：
+ *   1) dtc -@ -I dts -O dto -o /boot/dtbs/$(uname -r)/rockchip/gpio-ir-overlay.dtbo gpio-ir-overlay.dts
+ *      （Orange Pi 的 /boot/dtbo 路径按镜像为准，常见为 /boot/dtb/rockchip/overlay/）
+ *   2) 在 uEnv.txt / armbianEnv.txt 的 overlays= 追加 gpio-ir
+ *      或临时加载：dtoverlay $(pwd)/gpio-ir-overlay.dtbo
+ *   3) 重启后验证：
+ *      dmesg | grep -E 'gpio-ir|gpio_rcar'      # 两个设备节点就位
+ *      ls /dev/lirc*                            # lirc0(RX) / lirc1(TX)
+ *      ir-ctl -r --count=1 received.txt         # 学习一帧（RX）
+ *      ir-ctl -s received.txt                   # 回放（TX）
+ */
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/pinctrl/rockchip.h>
+
+/ {
+    metadata {
+        title = "LIRA gpio-ir RX/TX";
+        compatible = "rockchip,rk3588";
+    };
+
+    fragment@0 {
+        target-path = "/";
+        __overlay__ {
+            /* 红外接收头（HS0038 类，OUT 脚接 GPIO1_A12，低电平有效） */
+            lira_ir_receiver: lira-ir-receiver {
+                compatible = "gpio-ir-receiver";
+                gpios = <&gpio1 12 GPIO_ACTIVE_LOW>;
+                pinctrl-names = "default";
+                pinctrl-0 = <&lira_ir_rx_pins>;
+                /* RX 侧不做协议解码，原始 pulse/space 直通 ir-ctl -r */
+                status = "okay";
+            };
+
+            /* 红外发射管（GPIO1_A13，内核产生 38kHz 载波，ir-ctl -s 回放） */
+            lira_ir_transmitter: lira-ir-transmitter {
+                compatible = "gpio-ir-tx";
+                gpios = <&gpio1 13 GPIO_ACTIVE_HIGH>;
+                pinctrl-names = "default";
+                pinctrl-0 = <&lira_ir_tx_pins>;
+                status = "okay";
+            };
+        };
+    };
+
+    fragment@1 {
+        target = <&gpio1>;
+        __overlay__ {
+            lira_ir_rx_pins: lira-ir-rx-pins {
+                rockchip,pins = <1 RK_PA12 0 &pcfg_pull_up>;
+            };
+            lira_ir_tx_pins: lira-ir-tx-pins {
+                rockchip,pins = <1 RK_PA13 0 &pcfg_pull_none>;
+            };
+        };
+    };
+};

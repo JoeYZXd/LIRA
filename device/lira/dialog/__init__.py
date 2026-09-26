@@ -23,6 +23,8 @@ from lira.dialog.intents import (
     Intent,
     IntentKind,
     classify_confirmation,
+    classify_appliance_miss,
+    find_alias_hits,
     is_cancel,
     is_playback_command,
     match_local,
@@ -47,6 +49,8 @@ __all__ = [
     "is_cancel",
     "is_playback_command",
     "match_local",
+    "classify_appliance_miss",
+    "find_alias_hits",
     # router
     "LlmHandler",
     "RouteResult",

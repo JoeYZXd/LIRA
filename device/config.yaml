@@ -22,4 +22,12 @@ hal:
   mock_images_dir: assets/mock_images   # 相对路径按仓库根解析
   mock_audio_dir: assets/mock_audio
 
+# U6：本地家电配置库（R13 本地持久化；运行期产物，gitignore *.db）
+db_path: data/device.db
+
+# U6：设备↔后台配置同步（R30 设备侧）。ws_url 为空 = 未配置后台，纯本地离线运行
+sync:
+  ws_url: ""               # 如 ws://192.168.1.10:8000/ws/device（U8 后台接入后填写）
+  heartbeat_seconds: 60.0  # 心跳拉取兜底周期（安全关键变更走在线即时推送）
+
 log_level: INFO

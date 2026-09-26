@@ -62,6 +62,9 @@ def print_assembly(cfg: AppConfig, hal: dict[str, object]) -> None:
           f"  timeout={cfg.llm.timeout_seconds}s")
     api_key_state = "已配置" if cfg.llm.api_key else "<未设置（dry-run 允许）>"
     print(f"    api_key   : {api_key_state}")
+    print(f"  store       : {cfg.db_path} (SQLite WAL, synchronous=FULL)")
+    sync_state = cfg.sync.ws_url if cfg.sync.ws_url else "<未配置（离线纯本地）>"
+    print(f"  sync        : {sync_state}  heartbeat={cfg.sync.heartbeat_seconds}s")
     print(f"  log level   : {cfg.log_level}")
     print("  dialog/vision/audio 管线: 后续单元挂载 (U2-U6)")
     print("=" * 62)

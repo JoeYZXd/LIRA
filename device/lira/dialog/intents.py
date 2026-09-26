@@ -32,6 +32,8 @@ __all__ = [
     "is_cancel",
     "is_playback_command",
     "match_local",
+    "find_alias_hits",
+    "classify_appliance_miss",
 ]
 
 # ---------- 词表（R20/R23/R21，代码常量，本地安全底线的一部分） ----------
@@ -136,7 +138,7 @@ def _match_appliance(
     t: str, appliances: tuple[Appliance, ...]
 ) -> tuple[Appliance | None, str | None]:
     """别名子串命中；命中多个设备不猜（G12）；动作取最长触发词。"""
-    hits = [a for a in appliances if any(alias and alias in t for alias in a.aliases)]
+    hits = find_alias_hits(t, appliances)
     if len(hits) != 1:
         return None, None
     appliance = hits[0]
@@ -149,3 +151,24 @@ def _match_appliance(
     if best_action is None:
         return None, None
     return appliance, best_action
+
+
+def find_alias_hits(text: str, appliances: tuple[Appliance, ...]) -> list[Appliance]:
+    """别名子串命中的全部设备（G12：多命中不猜，由状态机请求澄清）。"""
+    t = text.strip()
+    return [a for a in appliances if any(alias and alias in t for alias in a.aliases)]
+
+
+def classify_appliance_miss(text: str, appliances: tuple[Appliance, ...]) -> str | None:
+    """零别名命中时的细分（U6）：文本含任意已配置动作触发词（如"打开/关闭"）
+    但设备别名零命中 → 指向了未配置设备，返回 "unconfigured"；否则 None
+    （交给上层 R24 识别失败引导 / LLM 兜底）。
+    """
+    t = text.strip()
+    if not t or find_alias_hits(t, appliances):
+        return None
+    for appliance in appliances:
+        for triggers in appliance.actions.values():
+            if any(trig and trig in t for trig in triggers):
+                return "unconfigured"
+    return None

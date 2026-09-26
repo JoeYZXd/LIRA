@@ -60,9 +60,19 @@ class HalConfig:
 
 
 @dataclass(frozen=True)
+class SyncConfig:
+    """设备↔后台同步（U6/R30 设备侧）。ws_url 为空 = 同步未配置（离线纯本地）。"""
+
+    ws_url: str
+    heartbeat_seconds: float
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LlmConfig
     hal: HalConfig
+    sync: SyncConfig
+    db_path: Path
     log_level: str
 
 
@@ -83,6 +93,13 @@ DEFAULTS: dict[str, Any] = {
         "mock_images_dir": "assets/mock_images",
         "mock_audio_dir": "assets/mock_audio",
     },
+    # U6：本地家电配置库（R13，安全规则本地持久化；gitignore *.db）
+    "db_path": "data/device.db",
+    # U6：设备↔后台同步（R30 设备侧）。ws_url 空 = 未配置后台（离线纯本地运行）
+    "sync": {
+        "ws_url": "",
+        "heartbeat_seconds": 60.0,
+    },
     "log_level": "INFO",
 }
 
@@ -97,6 +114,9 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_LLM_WAIT_FEEDBACK_SECONDS": ("llm", "wait_feedback_seconds", float),
     "LIRA_LLM_COLLOQUIAL_THRESHOLD_CHARS": ("llm", "colloquial_threshold_chars", int),
     "LIRA_HAL_BACKEND": ("hal", "backend", str),
+    "LIRA_DB_PATH": (None, "db_path", str),
+    "LIRA_SYNC_WS_URL": ("sync", "ws_url", str),
+    "LIRA_SYNC_HEARTBEAT_SECONDS": ("sync", "heartbeat_seconds", float),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
 
@@ -173,6 +193,10 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
         raise ConfigError(
             f"hal.backend={config['hal']['backend']!r} 非法，可选值: {HAL_BACKENDS}。"
         )
+    if not config["db_path"]:
+        raise ConfigError("db_path 为空。请设置本地家电配置库路径（如 data/device.db）。")
+    if config["sync"]["heartbeat_seconds"] <= 0:
+        raise ConfigError("sync.heartbeat_seconds 必须为正数（R30 心跳兜底周期）。")
 
     log_level = str(config["log_level"]).upper()
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -231,5 +255,10 @@ def load_config(
             mock_images_dir=_resolve_path(str(hal["mock_images_dir"])),
             mock_audio_dir=_resolve_path(str(hal["mock_audio_dir"])),
         ),
+        sync=SyncConfig(
+            ws_url=str(config["sync"]["ws_url"]),
+            heartbeat_seconds=float(config["sync"]["heartbeat_seconds"]),
+        ),
+        db_path=_resolve_path(str(config["db_path"])),
         log_level=str(config["log_level"]),
     )

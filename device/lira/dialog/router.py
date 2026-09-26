@@ -52,6 +52,11 @@ class Router:
         self._remote_llm = remote_llm
         self._remote_available = remote_available
 
+    @property
+    def appliances(self) -> tuple[Appliance, ...]:
+        """当前家电表（U6 状态机澄清/未配置细分检查复用同一份）。"""
+        return self._appliances
+
     async def route(self, text: str) -> RouteResult:
         # Tier 1: 本地规则（家电/阅读/帮助/取消）
         intent = match_local(text, self._appliances)

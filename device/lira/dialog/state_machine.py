@@ -30,7 +30,9 @@ from lira.dialog import phrasebook as pb
 from lira.dialog.intents import (
     Intent,
     IntentKind,
+    classify_appliance_miss,
     classify_confirmation,
+    find_alias_hits,
     is_cancel,
     is_playback_command,
 )
@@ -219,6 +221,16 @@ class DialogEngine:
     async def _on_asr_listening(self, text: str) -> None:
         if is_cancel(text):
             self._cb.speak(pb.SESSION_CANCELLED)
+            self._enter_standby()
+            return
+        # G12（U6 接线）：家电别名命中多台 → 不猜、请求澄清（留在聆听态，可换说法）
+        if len(find_alias_hits(text, self._router.appliances)) > 1:
+            self._cb.speak(pb.APPLIANCE_AMBIGUOUS)
+            self._arm(self.LISTEN_WINDOW_SECONDS)
+            return
+        # U6 接线：动作词命中但设备零别名 → 指向未配置设备，引导找家人在后台添加
+        if classify_appliance_miss(text, self._router.appliances) == "unconfigured":
+            self._cb.speak(pb.APPLIANCE_NOT_CONFIGURED)
             self._enter_standby()
             return
         result = await self._router.route(text)

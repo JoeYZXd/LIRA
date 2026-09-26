@@ -26,6 +26,8 @@ __all__ = [
     "CONFIRM_CANCELLED",
     "IR_SENT",
     "DEVICE_DISABLED",
+    "APPLIANCE_AMBIGUOUS",
+    "APPLIANCE_NOT_CONFIGURED",
     "UNAVAILABLE_REMOTE",
     "WAIT_REMOTE",
     "DISCLAIMER_MEDICAL",
@@ -79,6 +81,10 @@ def confirm_prompt_text(desc: str) -> str:
 
 IR_SENT = "好的，{desc}指令已发出。"
 DEVICE_DISABLED = "这个设备已被家人禁用，暂时不能操作。"
+# G12（U6 补）：别名命中多台设备，不猜，请老人说清楚
+APPLIANCE_AMBIGUOUS = "有好几个设备都能这样叫。请说清楚是哪一台，比如说：打开客厅台灯。"
+# U6 补：指令指向未配置设备，引导找家人在后台添加
+APPLIANCE_NOT_CONFIGURED = "这个家电我还不认识。请家人在后台添加配置后就能用了。"
 
 
 def ir_sent_text(desc: str) -> str:

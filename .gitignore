@@ -9,8 +9,9 @@ dist/
 .mypy_cache/
 .ruff_cache/
 
-# 模型文件（download_models.py 下载，体积大不入库）
-models/
+# 模型文件（download_models.py 下载，体积大不入库；下载脚本本身入库）
+models/*
+!models/download_models.py
 
 # 运行期产物
 *.log

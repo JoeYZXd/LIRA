@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}首启设置 · LIRA 后台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>首次启动：设置管理员凭据</h1>
+  <p class="muted">系统不存在默认密码。请设置用于本局域网管理后台的管理员用户名与密码（密码至少 8 位）。</p>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post" action="/setup">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label for="username">用户名</label>
+    <input type="text" id="username" name="username" required minlength="2" autocomplete="username">
+    <label for="password">密码（至少 8 位）</label>
+    <input type="password" id="password" name="password" required minlength="8" autocomplete="new-password">
+    <p><button type="submit" class="primary">完成设置并进入后台</button></p>
+  </form>
+</div>
+{% endblock %}

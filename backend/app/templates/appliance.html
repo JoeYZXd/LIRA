@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}{{ appliance.name }} · LIRA 后台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>{{ appliance.name }}
+    {% if appliance.is_high_risk %}<span class="danger">[高危]</span>{% endif %}
+    {% if not appliance.enabled %}<span class="danger">[已禁用]</span>{% endif %}
+  </h1>
+  <p class="muted">语音别名：{{ aliases }}</p>
+
+  <h2>动作与红外码值</h2>
+  <table>
+    <tr><th>动作</th><th>触发词</th><th>码值</th></tr>
+    {% for a in actions %}
+    <tr>
+      <td>{{ a.action }}</td>
+      <td class="muted">{{ a.triggers }}</td>
+      <td>{% if a.code %}<span class="online">已学习</span>
+        <form method="post" action="/admin/learn" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="device" value="{{ appliance.name }}">
+          <input type="hidden" name="action" value="{{ a.action }}">
+          <button type="submit">重新学习</button>
+        </form>
+        {% else %}<span class="muted">未学习</span>{% endif %}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="muted">尚无动作。</td></tr>
+    {% endfor %}
+  </table>
+
+  <h2 style="margin-top:16px">发起新学习 / 补充动作</h2>
+  <form method="post" action="/admin/appliances">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="name" value="{{ appliance.name }}">
+    <input type="hidden" name="aliases" value="{{ aliases }}">
+    <div class="row">
+      <div><label>动作名</label><input type="text" name="action" required></div>
+      <div><label>触发词（逗号分隔）</label><input type="text" name="triggers" required></div>
+      <div style="flex:0; align-self:flex-end"><button type="submit" class="primary">保存动作</button></div>
+    </div>
+  </form>
+  {% if actions %}
+  <form method="post" action="/admin/learn">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="device" value="{{ appliance.name }}">
+    <label>对动作发起红外学习（设备需在线）</label>
+    <select name="action">
+      {% for a in actions %}<option value="{{ a.action }}">{{ a.action }}</option>{% endfor %}
+    </select>
+    <button type="submit" class="primary">发起学习</button>
+  </form>
+  {% endif %}
+  {% if learn_id %}
+  <p class="muted">学习请求 <code>{{ learn_id }}</code> 已登记：等待设备录码并回传（本页可刷新查看）。</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>安全开关</h2>
+  <form method="post" action="/admin/appliances/{{ appliance.name }}/high_risk" class="inline">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="value" value="{{ 'off' if appliance.is_high_risk else 'on' }}">
+    <button type="submit" class="{{ 'danger-btn' if not appliance.is_high_risk else '' }}">
+      {{ "取消高危标记" if appliance.is_high_risk else "标记为高危" }}</button>
+  </form>
+  <form method="post" action="/admin/appliances/{{ appliance.name }}/enabled" class="inline">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <input type="hidden" name="value" value="{{ 'off' if appliance.enabled else 'on' }}">
+    <button type="submit" class="{{ 'danger-btn' if appliance.enabled else 'primary' }}">
+      {{ "禁用此设备" if appliance.enabled else "启用此设备" }}</button>
+  </form>
+  <p class="muted">高危确认逻辑是设备端代码常量，任何配置不可绕过；此处仅控制标记与禁用。</p>
+</div>
+
+<div class="card">
+  <h2>删除家电</h2>
+  <form method="post" action="/admin/appliances/{{ appliance.name }}/delete" class="inline">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <button type="submit" class="danger-btn">删除 {{ appliance.name }}（级联删除码值与场景引用）</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,72 @@
+# LIRA 部署与运维手册
+
+> 本文件在 U8（子女管理后台）阶段创建，承载后台服务的部署与安全说明；
+> U10（硬件集成）阶段将补充镜像烧录、overlay 编译、systemd、冒烟清单与实机参数记录表。
+
+---
+
+## 1. 子女管理后台（U8）
+
+### 1.1 已知安全限制（Phase 1 范围内明示，不做公网暴露）
+
+- **LAN 明文 HTTP**：后台仅监听局域网 HTTP（无 TLS）。会话 cookie 已启用
+  `HttpOnly + SameSite=Strict`，但传输层为明文，同网段的被动嗅探可读取
+  cookie / 设备 token / 学习码值。Phase 1 部署边界为**家庭局域网**，不配置
+  端口转发、不做公网暴露；若需远程访问，应在网络层（VPN/WireGuard）解决，
+  而非直接暴露 8000 端口。
+- **设备新 token 明文一次性展示**：注册/吊销重发/重配对生成的新 token 仅在
+  页面展示一次，后台库只存 SHA-256 哈希；请设备侧立即持久化。
+- **重配对期间新 token 暂存**：`start_pairing` 到设备回执之间，新 token 明文
+  暂存于后台 meta 表（协议要求快照内下发明文），回执后立即清除。
+
+### 1.2 启动步骤
+
+```bash
+cd backend
+python3 -m venv .venv
+.venv/bin/pip install -e ".[dev]"
+
+# 首次启动（库文件 data/lira-backend.db 自动创建，权限 0600，WAL 模式）
+.venv/bin/python -m app          # 等价于 uvicorn app.main:create_app，0.0.0.0:8000
+```
+
+后台启动后访问 `http://<后台机IP>:8000/`。
+
+### 1.3 管理员首启引导
+
+- 数据库中不存在管理员时，**一切页面请求强制重定向到 `/setup`**；
+  系统不存在空密码/默认密码状态。
+- `/setup` 要求：用户名 ≥ 2 字符，密码 ≥ 8 位；不满足返回 400 重新填写。
+- 管理员创建后 `/setup` 永久失效（再访问重定向 `/login`）。
+- 登录限速：连续 5 次失败锁定 5 分钟；改密码会使全体会话立即失效。
+
+### 1.4 设备配对 / 重配对流程
+
+1. **首次配对**：后台「注册设备」→ 页面一次性展示 `device_token` →
+   将 token 写入设备配置（设备端持久化）→ 设备用 token 经 WS 首帧
+   `hello` 或 HTTP `X-Device-Token` 完成鉴权。
+2. **重配对（后台库重建 / epoch 变更后）**：
+   - 设备端发起配对会话（屏幕显示 6 位一次性配对码）；
+   - 子女在后台设备列表输入同一配对码（POST `/admin/devices/{name}/pair`）；
+   - 后台生成新 token、epoch 换新（version 归零），在配对会话内经快照
+     下发 `pairing_code + 新 device_token`；
+   - 设备校验配对码一致后落库新 epoch/token 并回执 `applied=true`；
+   - 后台收到回执后激活新 token、旧 token 立即失效、清除配对态。
+
+### 1.5 运维要点
+
+- SQLite：WAL + `synchronous=FULL`，单文件库 `backend/data/lira-backend.db`
+  （创建即 `chmod 0600`）；备份直接冷拷贝该文件即可（含 -wal/-shm 时先停服）。
+- 设备通信面：HTTP `GET /api/device/snapshot`（离线兜底）、
+  `POST /api/device/ack`、WS `/ws/device`（首帧必须 hello，在线变更 0.5s
+  内推送，60s 心跳拉取兜底）。
+- 红外学习：后台 POST `/admin/learn`（落库即返回）→ 设备 WS 收
+  `learn_start` → 设备回传码值 → 入库且 version+1 → 快照推送；
+  状态经 `GET /admin/learn/{learn_id}` 轮询。
+
+---
+
+## 2. 硬件上板（U10，待补充）
+
+镜像烧录、版本锁定检查、`deploy/dt-overlays/gpio-ir-overlay.dts` 编译、
+服务 systemd 化、冒烟清单与实机参数记录表 —— 待 U10 单元补充。

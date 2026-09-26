@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}登录 · LIRA 后台{% endblock %}
+{% block content %}
+<div class="card">
+  <h1>管理员登录</h1>
+  {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+  <form method="post" action="/login">
+    <label for="username">用户名</label>
+    <input type="text" id="username" name="username" required autocomplete="username">
+    <label for="password">密码</label>
+    <input type="password" id="password" name="password" required autocomplete="current-password">
+    <p><button type="submit" class="primary">登录</button></p>
+  </form>
+  <p class="muted">连续失败 5 次将锁定 5 分钟。</p>
+</div>
+{% endblock %}

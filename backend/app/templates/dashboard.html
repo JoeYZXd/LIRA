@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}总览 · LIRA 后台{% endblock %}
+{% block content %}
+{% if token_once %}
+<div class="card">
+  <h2>设备 token（仅此一次显示）</h2>
+  <div class="token-once">{{ token_once }}</div>
+  <p class="muted">token 只存哈希，离开本页后无法再次查看；泄露时可在设备页吊销重发。</p>
+</div>
+{% endif %}
+{% if error %}
+<div class="flash error">
+  {% if error == "device_invalid" %}设备名无效或已存在。
+  {% elif error == "password_wrong" %}旧密码不正确。
+  {% elif error == "password_short" %}新密码至少 8 位。
+  {% else %}{{ error }}{% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>配置状态</h2>
+  <p>当前配置纪元/版本：<code>(epoch={{ epoch }}, version={{ version }})</code>
+     · 隐私模式：
+     {% if privacy_mode %}<strong class="danger">开启</strong>{% else %}关闭{% endif %}</p>
+  <form method="post" action="/admin/settings/privacy" class="inline">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    {% if privacy_mode %}
+    <input type="hidden" name="value" value="off"><button type="submit">关闭隐私模式</button>
+    {% else %}
+    <input type="hidden" name="value" value="on"><button type="submit" class="danger-btn">开启隐私模式</button>
+    {% endif %}
+    <span class="muted">（安全关键变更：设备在线时经 WebSocket 立即推送）</span>
+  </form>
+</div>
+
+<div class="card">
+  <h2>设备</h2>
+  <table>
+    <tr><th>名称</th><th>状态</th><th>最后心跳</th><th>已确认配置</th><th>操作</th></tr>
+    {% for d in devices %}
+    <tr>
+      <td>{{ d.name }}{% if d.pairing_pending %} <span class="danger">待配对</span>{% endif %}</td>
+      <td>{% if d.online %}<span class="online">在线</span>{% else %}<span class="offline">离线</span>{% endif %}</td>
+      <td class="muted">{{ "%.0f" | format(d.last_seen) if d.last_seen else "从未" }}</td>
+      <td class="muted">{% if d.ack_version is not none %}(epoch={{ d.ack_epoch }}, v={{ d.ack_version }}){% else %}未回执{% endif %}</td>
+      <td>
+        <form method="post" action="/admin/devices/{{ d.name }}/revoke" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button type="submit">吊销重发 token</button>
+        </form>
+        <form method="post" action="/admin/devices/{{ d.name }}/pair" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="text" name="pairing_code" placeholder="设备屏显配对码" size="10" pattern="[0-9]{6}">
+          <button type="submit">重配对</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">尚无设备。注册设备后把 token 写入设备端配置。</td></tr>
+    {% endfor %}
+  </table>
+  <form method="post" action="/admin/devices">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label for="device_name">新设备名称</label>
+    <div class="row">
+      <div><input type="text" id="device_name" name="name" required></div>
+      <div style="flex:0"><button type="submit" class="primary">注册设备并生成 token</button></div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h2>家电</h2>
+  <table>
+    <tr><th>名称</th><th>高危</th><th>启用</th><th>操作</th></tr>
+    {% for a in appliances %}
+    <tr>
+      <td><a href="/appliances/{{ a.name }}">{{ a.name }}</a></td>
+      <td>{% if a.is_high_risk %}<span class="danger">高危</span>{% else %}—{% endif %}</td>
+      <td>{% if a.enabled %}启用{% else %}<span class="danger">已禁用</span>{% endif %}</td>
+      <td>
+        <form method="post" action="/admin/appliances/{{ a.name }}/high_risk" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="value" value="{{ 'off' if a.is_high_risk else 'on' }}">
+          <button type="submit">{{ "取消高危" if a.is_high_risk else "标记高危" }}</button>
+        </form>
+        <form method="post" action="/admin/appliances/{{ a.name }}/enabled" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <input type="hidden" name="value" value="{{ 'off' if a.enabled else 'on' }}">
+          <button type="submit" class="{{ 'danger-btn' if a.enabled else '' }}">{{ "禁用" if a.enabled else "启用" }}</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="4" class="muted">尚无家电。</td></tr>
+    {% endfor %}
+  </table>
+  <h2 style="margin-top:16px">添加家电</h2>
+  <form method="post" action="/admin/appliances">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="row">
+      <div><label>名称</label><input type="text" name="name" required></div>
+      <div><label>语音别名（逗号分隔）</label><input type="text" name="aliases"></div>
+      <div><label>动作名</label><input type="text" name="action"></div>
+      <div><label>触发词（逗号分隔）</label><input type="text" name="triggers"></div>
+    </div>
+    <p class="switch"><input type="checkbox" name="is_high_risk" id="hr"><label for="hr" style="margin:0">高危设备（控制时需语音二次确认）</label></p>
+    <p><button type="submit" class="primary">保存家电</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>场景</h2>
+  <table>
+    <tr><th>名称</th><th>步骤</th><th></th></tr>
+    {% for s in scenes %}
+    <tr>
+      <td>{{ s.name }}</td>
+      <td class="muted">{{ s.steps | join(" → ") }}</td>
+      <td>
+        <form method="post" action="/admin/scenes/{{ s.name }}/delete" class="inline">
+          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+          <button type="submit" class="danger-btn">删除</button>
+        </form>
+      </td>
+    </tr>
+    {% else %}
+    <tr><td colspan="3" class="muted">尚无场景。</td></tr>
+    {% endfor %}
+  </table>
+  <h2 style="margin-top:16px">添加场景</h2>
+  <form method="post" action="/admin/scenes">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <label>场景名</label><input type="text" name="name" required>
+    <label>步骤（每行一条：设备:动作）</label>
+    <input type="text" name="steps" placeholder="空调:关闭 灯:关闭">
+    <p><button type="submit" class="primary">保存场景</button></p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>修改管理员密码</h2>
+  <p class="muted">修改后所有已登录会话立即失效。</p>
+  <form method="post" action="/admin/password">
+    <input type="hidden" name="_csrf" value="{{ csrf_token }}">
+    <div class="row">
+      <div><label>旧密码</label><input type="password" name="old_password" required autocomplete="current-password"></div>
+      <div><label>新密码（至少 8 位）</label><input type="password" name="new_password" required minlength="8" autocomplete="new-password"></div>
+    </div>
+    <p><button type="submit">修改密码</button></p>
+  </form>
+</div>
+{% endblock %}

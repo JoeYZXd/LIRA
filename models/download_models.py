@@ -52,12 +52,19 @@ MODELS: dict[str, dict[str, str]] = {
         "desc": "matcha TTS 的 vocos 22kHz vocoder (univ)",
     },
     "ocr-det": {
-        "url": "https://github.com/airockchip/rknn_model_zoo/raw/main/models/PPOCR/ppocrv4_det.onnx",
+        # rknn_model_zoo 已改为网盘分发（GitHub raw 路径 404），URL 取自其
+        # examples/PPOCR/PPOCR-Det/model/download_model.sh
+        "url": "https://ftrg.zbox.filez.com/v2/delivery/data/95f00b0fc900458ba134f8b180b3f7a1/examples/PPOCR/ppocrv4_det.onnx",
         "desc": "PP-OCRv4 检测模型 (onnx, x86 开发后端)",
     },
     "ocr-rec": {
-        "url": "https://github.com/airockchip/rknn_model_zoo/raw/main/models/PPOCR/ppocrv4_rec.onnx",
+        "url": "https://ftrg.zbox.filez.com/v2/delivery/data/95f00b0fc900458ba134f8b180b3f7a1/examples/PPOCR/ppocrv4_rec.onnx",
         "desc": "PP-OCRv4 识别模型 (onnx, x86 开发后端)",
+    },
+    "ocr-dict": {
+        # CTC 字典，镜像 PaddlePaddle/PaddleOCR main 的 ppocr/utils/ppocr_keys_v1.txt
+        "url": "https://cdn.jsdelivr.net/gh/PaddlePaddle/PaddleOCR@main/ppocr/utils/ppocr_keys_v1.txt",
+        "desc": "PP-OCRv4 识别 CTC 字典 (6623 行)",
     },
 }
 

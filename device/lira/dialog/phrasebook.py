@@ -32,6 +32,7 @@ __all__ = [
     "DISCLAIMER_OFFLINE",
     "OCR_GUIDANCE",
     "OCR_GIVEUP",
+    "CAPTURE_GUIDANCE",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -96,3 +97,4 @@ DISCLAIMER_OFFLINE = "当前没有网络，我按原文读给您听。"
 
 OCR_GUIDANCE = "我没有看清，请把材料放平，再靠近一点。"
 OCR_GIVEUP = "我还是没看清。请找家人帮忙，或者稍后再试。"
+CAPTURE_GUIDANCE = "正在为您拍摄，请把材料放平，不要遮挡镜头。"

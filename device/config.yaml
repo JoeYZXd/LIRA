@@ -9,6 +9,13 @@ llm:
   api_key: ""
   model: glm-4-flash
   timeout_seconds: 10.0
+  # U5 熔断降级：连续失败 N 次开断路，冷却后放行试探（R10）
+  breaker_failure_threshold: 3
+  breaker_cooldown_seconds: 60.0
+  # R28：远程处理超过该秒数未出首 token，播报"正在为您仔细阅读，请稍等"
+  wait_feedback_seconds: 2.0
+  # U5：复杂文本转白话长度阈值（字符）；医疗类别词不受阈值限制（R3/R27）
+  colloquial_threshold_chars: 150
 
 hal:
   backend: mock            # mock (x86 开发) | board (板上, U10)

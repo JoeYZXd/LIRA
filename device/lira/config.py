@@ -41,6 +41,13 @@ class LlmConfig:
     api_key: str
     model: str
     timeout_seconds: float
+    # U5 熔断降级参数（计划 Deferred: 失败阈值 3 次 / 冷却 60s 起步，运行期调整）
+    breaker_failure_threshold: int
+    breaker_cooldown_seconds: float
+    # R28：远程处理超过该秒数未出首 token 时播报等待反馈
+    wait_feedback_seconds: float
+    # U5：复杂文本转白话的长度阈值（字符数）；医疗类别词不受阈值限制
+    colloquial_threshold_chars: int
 
 
 @dataclass(frozen=True)
@@ -66,6 +73,10 @@ DEFAULTS: dict[str, Any] = {
         "api_key": "",
         "model": DEFAULT_LLM_MODEL,
         "timeout_seconds": 10.0,
+        "breaker_failure_threshold": 3,
+        "breaker_cooldown_seconds": 60.0,
+        "wait_feedback_seconds": 2.0,
+        "colloquial_threshold_chars": 150,
     },
     "hal": {
         "backend": "mock",
@@ -81,6 +92,10 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_LLM_API_KEY": ("llm", "api_key", str),
     "LIRA_LLM_MODEL": ("llm", "model", str),
     "LIRA_LLM_TIMEOUT_SECONDS": ("llm", "timeout_seconds", float),
+    "LIRA_LLM_BREAKER_FAILURE_THRESHOLD": ("llm", "breaker_failure_threshold", int),
+    "LIRA_LLM_BREAKER_COOLDOWN_SECONDS": ("llm", "breaker_cooldown_seconds", float),
+    "LIRA_LLM_WAIT_FEEDBACK_SECONDS": ("llm", "wait_feedback_seconds", float),
+    "LIRA_LLM_COLLOQUIAL_THRESHOLD_CHARS": ("llm", "colloquial_threshold_chars", int),
     "LIRA_HAL_BACKEND": ("hal", "backend", str),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
@@ -119,6 +134,11 @@ def _apply_env(config: dict[str, Any], env: Mapping[str, str]) -> None:
                 value: Any = float(raw)
             except ValueError as exc:
                 raise ConfigError(f"环境变量 {env_name}={raw!r} 不是合法数字。") from exc
+        elif value_type is int:
+            try:
+                value = int(raw)
+            except ValueError as exc:
+                raise ConfigError(f"环境变量 {env_name}={raw!r} 不是合法整数。") from exc
         else:
             value = raw
         if section is None:
@@ -140,6 +160,14 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
         raise ConfigError("LLM model 为空。请设置 llm.model（如 glm-4-flash）。")
     if llm["timeout_seconds"] <= 0:
         raise ConfigError("llm.timeout_seconds 必须为正数。")
+    if int(llm["breaker_failure_threshold"]) < 1:
+        raise ConfigError("llm.breaker_failure_threshold 必须 >= 1（连续失败次数开断路）。")
+    if llm["breaker_cooldown_seconds"] <= 0:
+        raise ConfigError("llm.breaker_cooldown_seconds 必须为正数。")
+    if llm["wait_feedback_seconds"] <= 0:
+        raise ConfigError("llm.wait_feedback_seconds 必须为正数（R28 等待反馈阈值）。")
+    if int(llm["colloquial_threshold_chars"]) < 1:
+        raise ConfigError("llm.colloquial_threshold_chars 必须 >= 1。")
 
     if config["hal"]["backend"] not in HAL_BACKENDS:
         raise ConfigError(
@@ -193,6 +221,10 @@ def load_config(
             api_key=str(config["llm"]["api_key"]),
             model=str(config["llm"]["model"]),
             timeout_seconds=float(config["llm"]["timeout_seconds"]),
+            breaker_failure_threshold=int(config["llm"]["breaker_failure_threshold"]),
+            breaker_cooldown_seconds=float(config["llm"]["breaker_cooldown_seconds"]),
+            wait_feedback_seconds=float(config["llm"]["wait_feedback_seconds"]),
+            colloquial_threshold_chars=int(config["llm"]["colloquial_threshold_chars"]),
         ),
         hal=HalConfig(
             backend=str(hal["backend"]),

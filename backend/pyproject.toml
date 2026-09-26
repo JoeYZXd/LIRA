@@ -1,0 +1,29 @@
+[project]
+name = "lira-backend"
+version = "0.1.0"
+description = "LIRA 子女管理后台（FastAPI + SQLite，Web + token 鉴权）"
+requires-python = ">=3.11"
+# U8 才开始安装/运行；此处先行声明技术栈依赖（Key Decisions：FastAPI + SQLite(WAL)
+# + Jinja2/HTMX 无 Node 构建链；PyJWT + bcrypt 鉴权）。
+dependencies = [
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "sqlmodel>=0.0.16",
+    "jinja2>=3.1",
+    "pyjwt>=2.8",
+    "bcrypt>=4.1",
+    "websockets>=12.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "httpx>=0.27"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["app*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

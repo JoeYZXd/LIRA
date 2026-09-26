@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 模型文件（download_models.py 下载，体积大不入库）
+models/
+
+# 运行期产物
+*.log
+*.db
+*.sqlite3
+*.wav.tmp
+
+# 密钥与本地配置覆盖
+.env
+*.local.yaml
+
+# 工具链本地状态
+.omc/
+.claude/

@@ -1,0 +1,33 @@
+[project]
+name = "lira-device"
+version = "0.1.0"
+description = "LIRA 低视力智能阅读与家电助手 — 设备端软件（Orange Pi 5 / RK3588S）"
+requires-python = ">=3.11"
+# 本单元（U1）运行仅依赖 PyYAML。重型依赖按单元逐步启用，放在 optional groups 中，
+# 避免一次性安装 sherpa-onnx / rknn / paddle 等板上专用包到 x86 开发环境。
+dependencies = [
+    "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+# U5：OpenAI 兼容远程 LLM 客户端
+llm = ["openai>=1.40"]
+# U4：x86 OCR 开发后端
+ocr-x86 = ["onnxruntime>=1.17", "pillow>=10.0"]
+# U2：音频（sherpa-onnx 支持跨平台 x86 开发）
+audio = ["sherpa-onnx>=1.10", "sounddevice>=0.4"]
+# U7：设备本地触摸屏 Web UI
+ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1"]
+
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["lira*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

@@ -1,0 +1,18 @@
+# LIRA 设备端默认配置。
+# 覆盖优先级：环境变量 (LIRA_LLM_BASE_URL 等) > 本文件 > 代码内置默认值。
+# 注意：隐私模式、高危设备表等运行时可变状态不入配置文件（运行期入库/内存）。
+
+llm:
+  # GLM OpenAI 兼容端点（Key Decisions）；可替换为任意 OpenAI 兼容服务
+  base_url: https://open.bigmodel.cn/api/paas/v4
+  # 必填项：建议用环境变量注入，不要提交真实 key 到仓库
+  api_key: ""
+  model: glm-4-flash
+  timeout_seconds: 10.0
+
+hal:
+  backend: mock            # mock (x86 开发) | board (板上, U10)
+  mock_images_dir: assets/mock_images   # 相对路径按仓库根解析
+  mock_audio_dir: assets/mock_audio
+
+log_level: INFO

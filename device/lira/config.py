@@ -1,0 +1,203 @@
+"""LIRA 设备端配置加载。
+
+分层规则（计划 U1 Approach）：
+  1. 代码内置默认值（`DEFAULTS`）
+  2. `config.yaml` 覆盖默认值（路径：`LIRA_CONFIG` 环境变量 > 仓库根 `device/config.yaml`）
+  3. 环境变量覆盖 yaml（`LIRA_LLM_BASE_URL` 等，空字符串视为未设置）
+
+设计约束：
+  - 隐私模式、高危设备表等**运行时可变状态不入配置文件**——它们属于运行期内存/本地库
+    （后续单元实现），因此本模块不含这些字段。
+  - 缺失必填项（如 LLM api_key）时抛出带修复指引的 `ConfigError`，绝不静默使用占位值。
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any, Mapping
+
+import yaml
+
+# device/lira/config.py -> device/lira -> device -> repo root
+REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG_PATH = REPO_ROOT / "device" / "config.yaml"
+
+# GLM OpenAI 兼容端点（Key Decisions：base_url 覆盖实现 OpenAI 兼容可配置端点）
+DEFAULT_GLM_BASE_URL = "https://open.bigmodel.cn/api/paas/v4"
+DEFAULT_LLM_MODEL = "glm-4-flash"
+
+HAL_BACKENDS = ("mock", "board")
+
+
+class ConfigError(Exception):
+    """配置缺失/非法。message 必须包含修复指引。"""
+
+
+@dataclass(frozen=True)
+class LlmConfig:
+    base_url: str
+    api_key: str
+    model: str
+    timeout_seconds: float
+
+
+@dataclass(frozen=True)
+class HalConfig:
+    """HAL 实现选择。板上实现（board）在 U10 填充。"""
+
+    backend: str
+    mock_images_dir: Path
+    mock_audio_dir: Path
+
+
+@dataclass(frozen=True)
+class AppConfig:
+    llm: LlmConfig
+    hal: HalConfig
+    log_level: str
+
+
+# 内置默认值 = yaml 缺失时的兜底。api_key 故意不设默认值（必填项）。
+DEFAULTS: dict[str, Any] = {
+    "llm": {
+        "base_url": DEFAULT_GLM_BASE_URL,
+        "api_key": "",
+        "model": DEFAULT_LLM_MODEL,
+        "timeout_seconds": 10.0,
+    },
+    "hal": {
+        "backend": "mock",
+        "mock_images_dir": "assets/mock_images",
+        "mock_audio_dir": "assets/mock_audio",
+    },
+    "log_level": "INFO",
+}
+
+# 环境变量覆盖表：env 名 -> (yaml 段, 键, 类型)
+ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
+    "LIRA_LLM_BASE_URL": ("llm", "base_url", str),
+    "LIRA_LLM_API_KEY": ("llm", "api_key", str),
+    "LIRA_LLM_MODEL": ("llm", "model", str),
+    "LIRA_LLM_TIMEOUT_SECONDS": ("llm", "timeout_seconds", float),
+    "LIRA_HAL_BACKEND": ("hal", "backend", str),
+    "LIRA_LOG_LEVEL": (None, "log_level", str),
+}
+
+
+def _resolve_path(value: str) -> Path:
+    """配置中的相对路径一律相对仓库根解析（与 cwd 无关，任何目录下启动行为一致）。"""
+    path = Path(value)
+    return path if path.is_absolute() else (REPO_ROOT / path).resolve()
+
+
+def _deep_merge(base: dict[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
+    merged = dict(base)
+    for key, value in override.items():
+        if key not in base:
+            raise ConfigError(
+                f"配置文件包含未知键: {key!r}（允许的顶层键: {sorted(base)}）。"
+                "请检查 config.yaml 拼写。"
+            )
+        if isinstance(base[key], dict):
+            if not isinstance(value, Mapping):
+                raise ConfigError(f"配置键 {key!r} 应为映射（section），实际为 {type(value).__name__}。")
+            merged[key] = _deep_merge(base[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def _apply_env(config: dict[str, Any], env: Mapping[str, str]) -> None:
+    for env_name, (section, key, value_type) in ENV_OVERRIDES.items():
+        raw = env.get(env_name)
+        if raw is None or raw == "":
+            continue  # 未设置/空串 = 未覆盖
+        if value_type is float:
+            try:
+                value: Any = float(raw)
+            except ValueError as exc:
+                raise ConfigError(f"环境变量 {env_name}={raw!r} 不是合法数字。") from exc
+        else:
+            value = raw
+        if section is None:
+            config[key] = value
+        else:
+            config[section][key] = value
+
+
+def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
+    llm = config["llm"]
+    if not llm["base_url"]:
+        raise ConfigError("LLM base_url 为空。请设置 config.yaml 的 llm.base_url 或环境变量 LIRA_LLM_BASE_URL。")
+    if require_api_key and not llm["api_key"]:
+        raise ConfigError(
+            "LLM api_key 缺失（必填项）。"
+            "请设置环境变量 LIRA_LLM_API_KEY，或写入 device/config.yaml 的 llm.api_key。"
+        )
+    if not llm["model"]:
+        raise ConfigError("LLM model 为空。请设置 llm.model（如 glm-4-flash）。")
+    if llm["timeout_seconds"] <= 0:
+        raise ConfigError("llm.timeout_seconds 必须为正数。")
+
+    if config["hal"]["backend"] not in HAL_BACKENDS:
+        raise ConfigError(
+            f"hal.backend={config['hal']['backend']!r} 非法，可选值: {HAL_BACKENDS}。"
+        )
+
+    log_level = str(config["log_level"]).upper()
+    if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
+        raise ConfigError(f"log_level={config['log_level']!r} 非法。")
+    config["log_level"] = log_level
+
+
+def load_config(
+    path: str | Path | None = None,
+    *,
+    env: Mapping[str, str] | None = None,
+    require_api_key: bool = True,
+) -> AppConfig:
+    """加载配置：内置默认值 <- config.yaml <- 环境变量。
+
+    Args:
+        path: 配置文件路径；None 时依次尝试 `LIRA_CONFIG` 环境变量、
+              `device/config.yaml`。文件不存在时视为"无覆盖，仅默认值+环境变量"。
+        env: 环境变量来源（默认 os.environ），测试可注入。
+        require_api_key: False 时允许 api_key 为空（用于 `--dry-run`，
+              真正发起远程调用前仍必须配置）。
+
+    Raises:
+        ConfigError: yaml 含未知键、类型错误，或必填项缺失。
+    """
+    env = os.environ if env is None else env
+
+    config_path = Path(path) if path is not None else Path(env.get("LIRA_CONFIG", DEFAULT_CONFIG_PATH))
+    file_data: dict[str, Any] = {}
+    if config_path.is_file():
+        with config_path.open("r", encoding="utf-8") as fh:
+            loaded = yaml.safe_load(fh)
+        if loaded is not None:
+            if not isinstance(loaded, Mapping):
+                raise ConfigError(f"{config_path} 顶层必须是 YAML 映射。")
+            file_data = dict(loaded)
+
+    config = _deep_merge(DEFAULTS, file_data)
+    _apply_env(config, env)
+    _validate(config, require_api_key=require_api_key)
+
+    hal = config["hal"]
+    return AppConfig(
+        llm=LlmConfig(
+            base_url=str(config["llm"]["base_url"]),
+            api_key=str(config["llm"]["api_key"]),
+            model=str(config["llm"]["model"]),
+            timeout_seconds=float(config["llm"]["timeout_seconds"]),
+        ),
+        hal=HalConfig(
+            backend=str(hal["backend"]),
+            mock_images_dir=_resolve_path(str(hal["mock_images_dir"])),
+            mock_audio_dir=_resolve_path(str(hal["mock_audio_dir"])),
+        ),
+        log_level=str(config["log_level"]),
+    )

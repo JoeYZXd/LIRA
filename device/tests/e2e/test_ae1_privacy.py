@@ -31,9 +31,9 @@ async def test_privacy_on_blocks_wake_and_keeps_zero_network(harness):
 
 
 async def test_privacy_on_blocks_text_wake_too(harness):
-    """殊途同归（R19）：无论入口形态，隐私 ON 时 wake_allowed 一律拒绝。"""
+    """隐私 ON 时 wake_allowed 一律拒绝。"""
     h = harness
-    await h.privacy.set_enabled(True, source="button")
+    await h.privacy.set_enabled(True, source="ui")
     await h.engine.on_wake()
     assert h.engine.state is State.STANDBY, "隐私期 on_wake 必须被拒"
 

@@ -138,7 +138,7 @@ class DialogEngine:
         """Args:
         wake_allowed: 唤醒门谓词（U7 接入点）。隐私模式开启时装配层注入
             `lambda: not privacy.is_on`，隐私期 on_wake 一律忽略（不可唤醒，
-            R12/R19）。默认恒真，不影响 U3 既有行为。
+            R12）。默认恒真，不影响 U3 既有行为。
         """
         self._router = router
         self._cb = callbacks
@@ -182,7 +182,7 @@ class DialogEngine:
         """主唤醒词命中（R16/R25）。仅 STANDBY 有效，会话中重复唤醒忽略（R20）。
 
         U7：隐私模式开启时一律忽略唤醒（不可唤醒），不留任何播报
-        （麦克风已关，不存在可播报通道；恢复由物理按键 + 隐私关闭播报承担）。
+        （麦克风已关，不存在可播报通道；恢复由隐私关闭播报承担）。
         """
         if not self._wake_allowed():
             logging.info("唤醒事件被唤醒门拦截 event=wake_blocked reason=privacy")

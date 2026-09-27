@@ -18,8 +18,8 @@ import signal
 import sys
 
 from lira.config import AppConfig, ConfigError, load_config
-from lira.hal.mock import IMAGE_SUFFIXES, MockAudioIO, MockButton, MockCamera, MockDisplay, MockIrController
-from lira.privacy import PrivacyState, make_button_toggler
+from lira.hal.mock import IMAGE_SUFFIXES, MockAudioIO, MockCamera, MockDisplay, MockIrController
+from lira.privacy import PrivacyState
 
 
 def _count_mock_images(cfg: AppConfig) -> int:
@@ -40,9 +40,8 @@ def build_mock_hal(cfg: AppConfig) -> dict[str, object]:
     camera = MockCamera(cfg.hal.mock_images_dir)
     audio = MockAudioIO(cfg.hal.mock_audio_dir / "sample_16k.wav")
     ir = MockIrController()
-    button = MockButton()
     display = MockDisplay()
-    return {"camera": camera, "audio": audio, "ir": ir, "button": button, "display": display}
+    return {"camera": camera, "audio": audio, "ir": ir, "display": display}
 
 
 def print_assembly(cfg: AppConfig, hal: dict[str, object], privacy: PrivacyState) -> None:
@@ -57,7 +56,6 @@ def print_assembly(cfg: AppConfig, hal: dict[str, object], privacy: PrivacyState
     print(f"    audio     : {type(hal['audio']).__name__}"
           f" <- {hal['audio'].wav_path}")  # type: ignore[attr-defined]
     print(f"    ir        : {type(hal['ir']).__name__} (内存记录 sent_codes)")
-    print(f"    button    : {type(hal['button']).__name__} (程序化 press)")
     print(f"    display   : {type(hal['display']).__name__} (内存记录 shown)")
     print(f"  LLM         : {cfg.llm.base_url}  model={cfg.llm.model}"
           f"  timeout={cfg.llm.timeout_seconds}s")
@@ -67,7 +65,7 @@ def print_assembly(cfg: AppConfig, hal: dict[str, object], privacy: PrivacyState
     sync_state = cfg.sync.ws_url if cfg.sync.ws_url else "<未配置（离线纯本地）>"
     print(f"  sync        : {sync_state}  heartbeat={cfg.sync.heartbeat_seconds}s")
     print(f"  privacy     : {'开启' if privacy.is_on else '关闭'}"
-          f"  (按键切换通道已接；UI 隐私开关需本地口令，U7)")
+          f"  (UI 隐私开关需本地口令，U7)")
     print(f"  log level   : {cfg.log_level}")
     print("  dialog/vision/audio 管线: 后续单元挂载 (U2-U6)")
     print("=" * 62)
@@ -116,10 +114,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[配置错误] {exc}", file=sys.stderr)
         return 2
 
-    # U7：隐私模式状态对象。按键通道此处即接好（R19）；音频/LLM/状态机的
-    # 订阅装配在 U9 e2e 与真实主循环中完成。
+    # U7：隐私模式状态对象。音频/LLM/状态机的订阅装配在 U9 e2e 与真实
+    # 主循环中完成。
     privacy = PrivacyState()
-    hal["button"].on_press(make_button_toggler(privacy))  # type: ignore[union-attr]
 
     logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     print_assembly(cfg, hal, privacy)

@@ -1,4 +1,4 @@
-"""U7 隐私模式测试（R12/R19，AE1/AE6 设备侧基元）。
+"""U7 隐私模式测试（R12，AE1 设备侧基元）。
 
 覆盖：
   - PrivacyState 状态广播（订阅次序 = 装配次序；幂等；事件审计）
@@ -6,7 +6,6 @@
     由构造保证——mock 音频注入喂入计数断言）
   - 状态机唤醒门：隐私 ON → on_wake 忽略（不可唤醒）；OFF → 恢复
   - LLM 谓词联动：privacy ON → PrivacyBlocked 且网络层零请求（复用 U5 注入点）
-  - 物理按键路径（R19 无鉴权）：按键 → toggle → 播报后果话术记录存在
   - 事件广播次序：关麦订阅者先于播报订阅者执行
   - PassphraseVault：scrypt 哈希存储、无默认值、验证成功/失败
 """
@@ -24,14 +23,12 @@ from lira.appliances.store import ApplianceStore
 from lira.config import LlmConfig
 from lira.dialog import DialogEngine, Router, State, phrasebook as pb
 from lira.dialog.intents import Appliance
-from lira.hal.mock.button import MockButton
 from lira.llm import LlmClient, PrivacyBlocked
 from lira.privacy import (
     PassphraseVault,
     PrivacyGatedSink,
     PrivacyState,
     attach_announcer,
-    make_button_toggler,
 )
 
 # ---------- 测试基建 ----------
@@ -183,16 +180,12 @@ class TestPrivacyState:
         assert [e.enabled for e in privacy.events] == [True]
 
     async def test_events_audit_record_source_and_seq(self, privacy):
-        await privacy.set_enabled(True, source="button")
+        await privacy.set_enabled(True, source="ui")
         await privacy.set_enabled(False, source="ui")
         assert [(e.source, e.enabled, e.seq) for e in privacy.events] == [
-            ("button", True, 0),
+            ("ui", True, 0),
             ("ui", False, 1),
         ]
-
-    async def test_toggle(self, privacy):
-        assert await privacy.toggle(source="button") is True
-        assert await privacy.toggle(source="button") is False
 
 
 # ---------- 音频门（AE1：隐私 ON → KWS 不命中，构造保证） ----------
@@ -217,8 +210,8 @@ class TestPrivacyGatedSink:
         assert inner.chunks == [], "隐私期识别流必须零输入"
         assert gate.dropped_samples == 5 * 1600
 
-        # 恢复后立即透传（AE6：按键 → OFF → 唤醒恢复）
-        await privacy.set_enabled(False, source="button")
+        # 恢复后立即透传（隐私 OFF → 分发恢复）
+        await privacy.set_enabled(False, source="ui")
         gate.feed(np.ones(1600, dtype=np.float32))
         assert len(inner.chunks) == 1
 
@@ -234,34 +227,23 @@ class TestWakeGate:
         assert engine.state is State.STANDBY
         assert rec.spoken == [], "隐私期麦克风已关，不存在可播报通道"
 
-    async def test_button_off_restores_wake_with_announcement(self, privacy):
-        """AE1/AE6：按键 → OFF → 唤醒恢复 + 播报记录存在。"""
+    async def test_privacy_off_restores_wake_with_announcement(self, privacy):
+        """隐私 OFF → 唤醒恢复 + 播报记录存在。"""
         spoken: list[str] = []
         attach_announcer(privacy, spoken.append)
         engine, rec = make_engine(privacy)
 
-        await privacy.set_enabled(True, source="test")
+        await privacy.set_enabled(True, source="ui")
         await engine.on_wake()
         assert engine.state is State.STANDBY
 
-        # 物理按键（R19 无鉴权退出通道）
-        button = MockButton()
-        button.on_press(make_button_toggler(privacy))
-        button.press()
-        await _drain_tasks()
+        await privacy.set_enabled(False, source="ui")
 
         assert privacy.is_on is False
         assert spoken == [pb.PRIVACY_ON, pb.PRIVACY_OFF], "切换全程播报后果（开与关各一次）"
         await engine.on_wake()
         assert engine.state is State.LISTENING
         assert pb.WAKE_ACK in rec.spoken
-
-
-async def _drain_tasks() -> None:
-    """让 MockButton 创建的 toggle 任务跑完。"""
-    import asyncio
-
-    await asyncio.sleep(0)
 
 
 # ---------- 事件广播次序（在途远端请求拦截次序） ----------
@@ -289,7 +271,7 @@ class TestBroadcastOrdering:
     async def test_inflight_blocked_after_toggle_no_request(self, privacy):
         """隐私 ON 后下一次远端调用立即拦截、网络层零请求（在途请求由 U5 入口现查保证）。"""
         client, requests = make_llm(privacy)
-        await privacy.set_enabled(True, source="button")
+        await privacy.set_enabled(True, source="ui")
         with pytest.raises(PrivacyBlocked):
             await client.chat("不应到达网络")
         assert requests == []
@@ -310,42 +292,12 @@ class TestLlmPredicate:
         assert len(requests) == 1, "拦截发生在网络入口，零新请求"
 
 
-# ---------- 物理按键路径（R19：无鉴权） ----------
+# ---------- 播报话术 ----------
 
 
-class TestButtonPath:
-    async def test_press_toggles_via_same_state_object(self, privacy):
-        spoken: list[str] = []
-        attach_announcer(privacy, spoken.append)
-        button = MockButton()
-        button.on_press(make_button_toggler(privacy))
-
-        button.press()
-        await _drain_tasks()
-        assert privacy.is_on is True
-        assert spoken == [pb.PRIVACY_ON], "开启隐私播报含麦克风已关提示"
-
-        button.press()
-        await _drain_tasks()
-        assert privacy.is_on is False
-        assert spoken == [pb.PRIVACY_ON, pb.PRIVACY_OFF]
-
-    async def test_button_and_ui_same_object(self, privacy, store):
-        """殊途同归：UI 开启后按键即关——只有同一个 PrivacyState，无影子状态。"""
-        vault = PassphraseVault(store)
-        vault.set("1234")
-        button = MockButton()
-        button.on_press(make_button_toggler(privacy))
-
-        await privacy.set_enabled(True, source="ui")  # UI 路径（test_ui 详测鉴权）
-        button.press()
-        await _drain_tasks()
-        assert privacy.is_on is False
-        assert [e.source for e in privacy.events] == ["ui", "button"]
-
+class TestAnnouncementPhrases:
     async def test_announcement_phrases_mention_mic_state(self):
         assert "麦克风" in pb.PRIVACY_ON
-        assert "按钮" in pb.PRIVACY_ON
         assert "恢复" in pb.PRIVACY_OFF
 
 

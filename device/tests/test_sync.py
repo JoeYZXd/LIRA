@@ -325,17 +325,17 @@ class TestSnapshotSettingsApply:
         assert ack["applied"] is True
         assert privacy.is_on is True
         assert privacy() is True, "LLM 谓词注入点（fail-closed 门）应关闭上行"
-        assert [e.source for e in privacy.events] == ["sync"], "与按键/UI 通道殊途同归"
+        assert [e.source for e in privacy.events] == ["sync"], "与 UI 通道殊途同归"
 
     async def test_privacy_off_disengages(self, tmp_path):
         store = make_store(tmp_path)
         privacy = PrivacyState()
         client = make_client(store, MockTransport(), privacy=privacy)
-        await privacy.set_enabled(True, source="button")
+        await privacy.set_enabled(True, source="ui")
         ack = await apply(client, settings_frame(1, 6, {"privacy_mode": False}))
         assert ack["applied"] is True
         assert privacy.is_on is False
-        assert [e.source for e in privacy.events] == ["button", "sync"]
+        assert [e.source for e in privacy.events] == ["ui", "sync"]
 
     async def test_settings_apply_idempotent(self, tmp_path):
         """同值重复应用不重复广播；同 (epoch,version) 重投幂等跳过。"""

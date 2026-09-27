@@ -1,4 +1,4 @@
-"""设备本地触摸屏 Web UI（U7，R17/R12/R19）。
+"""设备本地触摸屏 Web UI（U7，R17/R12）。
 
 定位（计划 U7 Approach）：设备本地小 Web 服务，板上绑屏即 kiosk。
 
@@ -7,11 +7,10 @@
   - `/passphrase/setup`  设备本地口令首启设置（无默认值，fail-closed）
   - `/status`  只读状态 JSON（kiosk 轮询用，不鉴权）
 
-鉴权纪律（与物理按键通道的区分，R19）：
+鉴权纪律：
   - 隐私开关的 UI 路径必须出示设备本地口令（`PassphraseVault.verify`，
     scrypt + 常数时间比较）；口令未设置时一律 303 引导到设置页（fail-closed）。
-  - 物理按键路径不经过本模块任何校验——两条路径殊途同归，都只触碰同一个
-    `PrivacyState` 对象；后果播报是隐私状态的订阅者（装配层挂接），与入口无关。
+  - 后果播报是隐私状态的订阅者（装配层挂接），与入口无关。
   - 状态卡/设备列表只读，不鉴权。
 
 日志纪律：本模块只记路由级事件（来源、结果），不记表单内容（含口令）。
@@ -195,7 +194,7 @@ def create_app(services: UiServices) -> FastAPI:
         logger.info("ui event=passphrase_set")
         return RedirectResponse("/", status_code=303)
 
-    # ---------- 隐私开关（UI 通道：需口令；按键通道见 privacy.make_button_toggler） ----------
+    # ---------- 隐私开关（UI 通道：需口令） ----------
 
     @app.post("/privacy")
     async def privacy_toggle(request: Request):
@@ -222,7 +221,7 @@ def create_app(services: UiServices) -> FastAPI:
             )
         target = action == "on"
         await services.privacy.set_enabled(target, source="ui")
-        # 后果播报由隐私状态订阅者统一发出（与按键路径同源，见 privacy.attach_announcer）
+        # 后果播报由隐私状态订阅者统一发出（见 privacy.attach_announcer）
         return RedirectResponse("/", status_code=303)
 
     # ---------- 音量 / 语速（不涉安全，不设口令） ----------

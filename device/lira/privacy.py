@@ -1,19 +1,18 @@
-"""隐私模式一等状态（U7，R12/R19/R17）。
+"""隐私模式一等状态（U7，R12/R17）。
 
 隐私模式是全 app 广播的状态对象（计划 U7 Approach）：
 
     PrivacyState.set_enabled(on, source)
         ├─ 订阅者按注册顺序广播（装配层决定次序）：
         │    1. 音频门（PrivacyGatedSink 停止向 KWS/ASR 分发）
-        │    2. 状态机唤醒门（wake_allowed 谓词，R19 隐私期不可唤醒）
+        │    2. 状态机唤醒门（wake_allowed 谓词，隐私期不可唤醒）
         │    3. TTS 后果播报（含麦克风已关提示，话术在 phrasebook）
         └─ LLM 层无需订阅：LlmClient 每次调用现查 `privacy` 谓词
            （U5 注入点，fail-closed，见 llm/client.py）。
 
-通道纪律（R19 的存在意义）：
-  - 物理按键（HAL Button）与 UI 开关**殊途同归**——都只调用同一个
-    PrivacyState 对象；按键路径不经过任何口令校验。
-  - UI 路径的口令校验在 lira/ui/app.py 完成，通过后才触碰本状态。
+通道纪律：
+  - UI 开关是隐私状态的唯一切换通道，口令校验在 lira/ui/app.py
+    完成，通过后才触碰本状态。
 
 口令（R17/R30 本端应用）：设备本地口令仅用于 UI 隐私开关路径，
 存本地库 meta 表的 scrypt 哈希（stdlib，无新依赖），**无默认值**——
@@ -41,7 +40,6 @@ __all__ = [
     "PrivacyState",
     "PrivacyGatedSink",
     "PassphraseVault",
-    "make_button_toggler",
     "attach_announcer",
 ]
 
@@ -118,11 +116,6 @@ class PrivacyState:
                 await result
         return True
 
-    async def toggle(self, *, source: str) -> bool:
-        """切换隐私状态（物理按键路径）。返回切换后的状态。"""
-        await self.set_enabled(not self._on, source=source)
-        return self._on
-
 
 class PrivacyGatedSink:
     """音频分发门（AudioSink 装饰器）：隐私 ON 时丢弃喂入，KWS/ASR 零输入。
@@ -198,19 +191,6 @@ class PassphraseVault:
         except (ValueError, TypeError):
             return False
         return hmac.compare_digest(digest, bytes.fromhex(digest_hex))
-
-
-def make_button_toggler(privacy: PrivacyState) -> Callable[[], Awaitable[None]]:
-    """物理按键回调（R19：无鉴权退出通道）。
-
-    返回 async 函数，可直接经 HAL Button.on_press 注册（MockButton 与板上
-    GPIO 实现同约定）。每次按键触发一次 toggle，来源记为 "button"。
-    """
-
-    async def on_press() -> None:
-        await privacy.toggle(source="button")
-
-    return on_press
 
 
 def attach_announcer(

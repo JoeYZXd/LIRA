@@ -11,7 +11,6 @@ import pytest
 from lira.hal import HalError
 from lira.hal.mock import (
     MockAudioIO,
-    MockButton,
     MockCamera,
     MockDisplay,
     MockIrController,
@@ -141,36 +140,7 @@ class TestMockAudio:
             await audio.open()
 
 
-class TestMockButtonAndDisplay:
-    async def test_press_triggers_sync_callback(self):
-        pressed = []
-
-        async with MockButton() as btn:
-            btn.on_press(lambda: pressed.append("down"))
-            btn.press()
-            btn.press()
-
-        assert pressed == ["down", "down"]
-        assert btn.press_count == 2
-
-    async def test_press_triggers_async_callback(self):
-        pressed = []
-
-        async def on_press():
-            pressed.append("privacy-off")
-
-        async with MockButton() as btn:
-            btn.on_press(on_press)
-            btn.press()
-            await asyncio.sleep(0)  # 让 create_task 跑一步
-
-        assert pressed == ["privacy-off"]
-
-    async def test_press_without_callback_is_noop(self):
-        async with MockButton() as btn:
-            btn.press()
-        assert btn.press_count == 1
-
+class TestMockDisplay:
     async def test_display_records_shown_and_cleared(self):
         async with MockDisplay() as display:
             await display.show("小丽拉已就绪\n音量 60")
@@ -186,19 +156,17 @@ class TestMockButtonAndDisplay:
 
 
 class TestContextManagers:
-    async def test_all_five_mocks_are_async_context_managers(self, tmp_path):
-        """HAL 约定：五接口均为 async 上下文管理器，退出后释放资源。"""
+    async def test_all_mocks_are_async_context_managers(self, tmp_path):
+        """HAL 约定：接口均为 async 上下文管理器，退出后释放资源。"""
         async with (
             MockCamera(make_image_dir(tmp_path)) as camera,
             MockAudioIO(make_wav(tmp_path)) as audio,
             MockIrController() as ir,
-            MockButton() as button,
             MockDisplay() as display,
         ):
             assert await camera.capture()
             assert isinstance(await audio.read_chunk(4), bytes)
             await ir.send("pulse:1")
-            button.press()
             await display.show("ok")
 
         # 退出后资源已释放

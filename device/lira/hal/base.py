@@ -1,4 +1,4 @@
-"""硬件抽象层（HAL）五接口。
+"""硬件抽象层（HAL）四接口。
 
 约定（计划 Key Technical Decisions / U1 Approach）：
   - 每个接口是 async 上下文管理器：进入时申请/打开资源，退出时释放。
@@ -10,14 +10,12 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from typing import Awaitable, Callable, Union
 
 __all__ = [
     "HalError",
     "Camera",
     "AudioIO",
     "IrController",
-    "Button",
     "Display",
 ]
 
@@ -80,17 +78,6 @@ class IrController(_AsyncResource, ABC):
     @abstractmethod
     async def learn(self, timeout_seconds: float = 10.0) -> str:
         """学习：录制一帧原始码并返回（对应后台发起的学习流程，R32）。"""
-
-
-ButtonCallback = Union[Callable[[], None], Callable[[], Awaitable[None]]]
-
-
-class Button(_AsyncResource, ABC):
-    """物理按键接口（R19：隐私模式无鉴权退出通道）。"""
-
-    @abstractmethod
-    def on_press(self, callback: ButtonCallback) -> None:
-        """注册按键回调（同步或 async 函数均可）。重复注册覆盖旧回调。"""
 
 
 class Display(_AsyncResource, ABC):

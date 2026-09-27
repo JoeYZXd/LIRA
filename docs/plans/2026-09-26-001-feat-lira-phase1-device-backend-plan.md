@@ -23,7 +23,7 @@ origin: docs/brainstorms/2026-09-26-lira-requirements.md
 
 ## Requirements
 
-- R1–R32：全部继承 origin 需求文档（`docs/brainstorms/2026-09-26-lira-requirements.md`），以 origin 为唯一行为权威。关键分组：阅读辅助（R1–R4）、家电控制（R5–R8）、调度与网络（R9–R11）、隐私安全（R12–R13、R19）、后台（R14–R15、R30、R32）、对话状态机（R16、R20–R29、R31）。
+- R1–R32：全部继承 origin 需求文档（`docs/brainstorms/2026-09-26-lira-requirements.md`），以 origin 为唯一行为权威。关键分组：阅读辅助（R1–R4）、家电控制（R5–R8）、调度与网络（R9–R11）、隐私安全（R12–R13）、后台（R14–R15、R30、R32）、对话状态机（R16、R20–R29、R31）。R19（物理隐私按键）经 2026-09-27 决议作废。
 
 **Origin actors:** A1 老人用户、A2 子女/管理者、A3 远程大模型服务
 **Origin flows:** F1 纸质阅读、F2 家电控制（含高危确认）、F3 网络降级
@@ -135,7 +135,7 @@ origin: docs/brainstorms/2026-09-26-lira-requirements.md
     │   │   ├── appliances/
     │   │   │   ├── models.py        # 设备/场景/安全规则模型（SQLite 持久化）
     │   │   │   └── ir.py            # ir-ctl 学习/回放封装
-    │   │   ├── privacy.py           # 隐私模式一等状态（麦克风+上传+按键）
+    │   │   ├── privacy.py           # 隐私模式一等状态（麦克风+上传+UI 开关）
     │   │   ├── ui/                  # 设备端 Web UI（局域网浏览器访问）
     │   │   └── sync.py              # 与后台 WS 同步：全量快照 (epoch,version)、幂等事务应用、安全底线校验
     │   └── tests/
@@ -378,9 +378,9 @@ flowchart LR
 
 ### U7. 隐私模式与设备端 Web UI
 
-**Goal:** 隐私模式一等状态（麦克风关+上传拦截+播报后果），物理按键退出（R19）；设备 Web UI（局域网浏览器远程访问，设备无触摸屏；状态/设置/隐私开关，R17）。
+**Goal:** 隐私模式一等状态（麦克风关+上传拦截+播报后果）；设备 Web UI（局域网浏览器远程访问，设备无触摸屏；状态/设置/隐私开关，R17）。物理隐私按键已取消（2026-09-27 决议，R19 作废）。
 
-**Requirements:** R12、R17、R19、R30（本端应用部分）
+**Requirements:** R12、R17、R30（本端应用部分）
 
 **Dependencies:** U3（状态机）、U5（隐私拦截点）、U6（本地库）
 
@@ -390,16 +390,15 @@ flowchart LR
 
 **Approach:**
 - 隐私模式为全 app 广播的状态对象：`privacy.py` 发布 on/off 事件 → 音频层关麦、LLM 层拦截、状态机置不可唤醒；切换时 TTS 播报后果（含麦克风已关提示）。
-- 物理按键经 HAL Button（mock=键盘事件；板上=GPIO 中断）触发同一事件通道，按键退出隐私**无需鉴权**（老人无凭据，R19 的存在意义即在此）。
-- UI 用设备本地小 Web 服务（局域网浏览器访问；设备无触摸屏，状态反馈以语音为主），页面：状态卡（网络/远程可用/隐私）、隐私开关、音量、TTS 语速、设备列表只读。**开启/关闭隐私的 UI 路径需设备本地口令**（设备首次启动时经局域网 Web 界面设置，无默认值）——与物理按键区分：按键是老人退出隐私的无鉴权通道，UI 是防他人/防误触的通道。只读状态卡不鉴权。
+- UI 用设备本地小 Web 服务（局域网浏览器访问；设备无触摸屏，状态反馈以语音为主），页面：状态卡（网络/远程可用/隐私）、隐私开关、音量、TTS 语速、设备列表只读。**开启/关闭隐私的 UI 路径需设备本地口令**（设备首次启动时经局域网 Web 界面设置，无默认值）。只读状态卡不鉴权。
 - 日志纪律：ASR 识别文本、OCR 识别文本、LLM 往返内容**一律不落日志**（隐私模式之外也不落——设备记录的语音内容本身就是敏感面）；日志只记事件类型与耗时。
 
 **Test scenarios:**
-- Covers AE1/AE6. Happy path: 隐私 ON → KWS 不再命中（mock 音频注入验证）；按键事件 → 隐私 OFF → 唤醒恢复 + 播报记录存在。
+- Covers AE1. Happy path: 隐私 ON → KWS 不再命中（mock 音频注入验证）；隐私 OFF → 唤醒恢复 + 播报记录存在。
 - Edge case: 隐私 ON 瞬间有在途远端请求 → 被拦截（U5 测试，此处验证事件广播次序）。
-- Happy path: UI 隐私开关与物理按键殊途同归（同一状态对象）。
+- Happy path: 后台同步的隐私开关与设备 UI 殊途同归（同一状态对象）。
 
-**Verification:** 浏览器访问设备 UI 完成隐私开关，按键（键盘模拟）同步生效。
+**Verification:** 浏览器访问设备 UI 完成隐私开关。
 
 ---
 
@@ -463,14 +462,14 @@ flowchart LR
 
 ### U10. 硬件 bring-up 与板上部署
 
-**Goal:** 在 Orange Pi 5 实机完成：系统镜像与 RKNN 版本锁定、MIPI 摄像头、USB 麦阵、喇叭、GPIO 红外收发、物理按键；用真实 HAL 实现替换 mock，实机复跑核心链路。
+**Goal:** 在 Orange Pi 5 实机完成：系统镜像与 RKNN 版本锁定、MIPI 摄像头、USB 麦阵、喇叭、GPIO 红外收发；用真实 HAL 实现替换 mock，实机复跑核心链路。（物理按键已取消，2026-09-27 决议，无 button_gpio。）
 
-**Requirements:** R9 实机验证、R18（TF 寿命）、R19（真实按键）、R5（真实红外）
+**Requirements:** R9 实机验证、R18（TF 寿命）、R5（真实红外）
 
-**Dependencies:** U1–U9、**硬件物料采购到位**（含红外接收头、物理按键）
+**Dependencies:** U1–U9、**硬件物料采购到位**（含红外接收头）
 
 **Files:**
-- Create: `lira/hal/board/camera_rkisp.py`、`lira/hal/board/ir_gpio.py`、`lira/hal/board/button_gpio.py`、`lira/vision/ocr_rknn.py`
+- Create: `lira/hal/board/camera_rkisp.py`、`lira/hal/board/ir_gpio.py`、`lira/vision/ocr_rknn.py`
 - Create: `deploy/SETUP.md`（镜像烧录、版本锁定检查、overlay 编译、服务 systemd 化）、`deploy/system/*`（log2ram/journal/thermal 配置）
 - Modify: `lira/hal/base.py`（如真实实现暴露接口缺口）
 
@@ -480,7 +479,7 @@ flowchart LR
 - CPU 亲和：KWS 常驻绑 A55（taskset），ASR/TTS 用 A76；thermal governor 配置入 `deploy/system/`。
 - 设备 provisioning 入 `deploy/SETUP.md`：device token 写入设备配置（`sync.device_token`）；后台库重建后执行 `python -m lira.sync reset-sync` 迁移 epoch。Display 板上实现为 no-op（无触摸屏，状态反馈走语音与远程 Web）。
 - 存量配置：log2ram + journald volatile + noatime + 无 swap；数据库与配置放 TF 卡但写入低频（R30 心跳只存版本号）。
-- 实机冒烟清单：唤醒→读报纸→开空调（学习码）→拔网线→再读药品说明书（原文+免责）→按键隐私切换。
+- 实机冒烟清单：唤醒→读报纸→开空调（学习码）→拔网线→再读药品说明书（原文+免责）→Web UI 隐私切换。
 
 **Test scenarios:**
 - Test expectation: none — 本单元为硬件集成与实机验证，测试即冒烟清单（写入 `deploy/SETUP.md`）。

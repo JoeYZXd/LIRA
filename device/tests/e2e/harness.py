@@ -44,7 +44,7 @@ from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
 from lira.dialog.router import Router
 from lira.dialog.state_machine import DialogCallbacks
-from lira.hal.mock import MockButton, MockIrController
+from lira.hal.mock import MockIrController
 from lira.llm.client import LlmClient, LlmError, PrivacyBlocked, make_remote_handler
 from lira.llm.prompts import is_medical_text
 from lira.privacy import PrivacyGatedSink, PrivacyState
@@ -333,7 +333,6 @@ class DeviceHarness:
         self.privacy = PrivacyState()
         self.ir = MockIrController()
         self.ir_service = IRService(self.store, self.ir)
-        self.button = MockButton()
         self.speak_log: list[str] = []
         self.ir_sent: list[tuple[str, str]] = []
         self.ir_errors: list[tuple[str, str, str]] = []
@@ -377,10 +376,9 @@ class DeviceHarness:
         self._task: asyncio.Task | None = None
         self._pending: set[asyncio.Task] = set()
 
-        # 隐私通道：按键切换（R19 殊途同归）+ 后果播报
-        from lira.privacy import attach_announcer, make_button_toggler
+        # 隐私通道：后果播报
+        from lira.privacy import attach_announcer
 
-        self.button.on_press(make_button_toggler(self.privacy))
         attach_announcer(self.privacy, self.callbacks.speak)
 
     # ---------- 装配辅助 ----------
@@ -456,9 +454,6 @@ class DeviceHarness:
     def advance(self, seconds: float) -> None:
         """快进虚拟时钟（以静音填充，保持音频推进与时钟一致）。"""
         self.source.push_silence(seconds)
-
-    def press_button(self) -> None:
-        self.button.press()
 
     async def drain(self, timeout: float = 30.0) -> None:
         """等待注入音频全部被编排器消费 + 状态机在途任务收敛。"""

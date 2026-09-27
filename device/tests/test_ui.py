@@ -6,7 +6,6 @@
   - UI 隐私开关需口令：未设置口令 → 303 引导设置页（fail-closed）；
     错口令 → 401 且状态不变；对口令 → 殊途同归触碰同一 PrivacyState
   - 音量/语速设置（越界/非法 → 400）
-  - UI 与物理按键同一状态对象（按键可解 UI 开的隐私，R19）
 """
 
 from __future__ import annotations
@@ -238,27 +237,6 @@ class TestPrivacyToggle:
         setup_passphrase(client)
         resp = client.post("/privacy", data={"action": "maybe", "passphrase": "1234"})
         assert resp.status_code == 400
-
-    async def test_ui_and_button_same_state_object(self, client, services, privacy):
-        """殊途同归：UI 开 → 物理按键关（同一 PrivacyState，按键无鉴权，R19）。"""
-        from lira.dialog import phrasebook as pb
-        from lira.hal.mock.button import MockButton
-        from lira.privacy import attach_announcer, make_button_toggler
-
-        spoken: list[str] = []
-        attach_announcer(privacy, spoken.append)
-        setup_passphrase(client)
-        client.post("/privacy", data={"action": "on", "passphrase": "1234"})
-        assert privacy.is_on is True
-
-        button = MockButton()
-        button.on_press(make_button_toggler(privacy))
-        button.press()
-        await asyncio.sleep(0)  # MockButton 的 toggle 任务跑完
-
-        assert privacy.is_on is False
-        assert [e.source for e in privacy.events] == ["ui", "button"]
-        assert spoken == [pb.PRIVACY_ON, pb.PRIVACY_OFF]
 
 
 # ---------- 音量 / 语速 ----------

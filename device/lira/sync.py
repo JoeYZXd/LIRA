@@ -10,7 +10,7 @@ Key Decisions 落地（配置同步 = 全量快照 + (epoch, version) 键）：
     配置 `sync.device_token` 预置，后台库重建换新 epoch 后由开发者在设备端
     执行 `python -m lira.sync reset-sync <db>` 清同步元数据再重拉快照；
   - 快照 `settings`（privacy_mode/tts_volume/tts_speed）随快照一并应用：
-    privacy_mode 殊途同归触碰同一 `PrivacyState` 广播对象（与按键/UI 通道
+    privacy_mode 殊途同归触碰同一 `PrivacyState` 广播对象（与 UI 通道
     同源），音量/语速落注入的 `TtsSettings` 同形对象（SEC-3/F2）；
   - 心跳 60s 拉取兜底（`heartbeat_once`），安全关键变更靠后台在线立即推送；
   - WS 传输层可注入（`SyncTransport` 协议）：单元测试用 mock 传输，
@@ -255,8 +255,8 @@ class SyncClient:
     async def _apply_settings(self, settings: dict) -> None:
         """快照 `settings` 应用（SEC-3/F2 修复）：远程隐私开关此前被整段丢弃。
 
-        - privacy_mode：殊途同归触碰同一 `PrivacyState` 广播对象（与物理按键/
-          UI 通道同源；订阅者照常广播——关麦、封唤醒、后果播报；LLM 谓词每
+        - privacy_mode：殊途同归触碰同一 `PrivacyState` 广播对象（与设备 UI
+          通道同源；订阅者照常广播——关麦、封唤醒、后果播报；LLM 谓词每
           调用现查）。幂等由 `set_enabled` 保证：同值不广播、不留事件。
         - tts_volume/tts_speed：落注入的 `TtsSettings` 同形对象。
 

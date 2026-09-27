@@ -1,7 +1,7 @@
 ---
 title: "feat: LIRA Phase 1 — 设备端软件 + 子女管理后台"
 type: feat
-status: active
+status: completed
 date: 2026-09-26
 deepened: 2026-09-26
 origin: docs/brainstorms/2026-09-26-lira-requirements.md

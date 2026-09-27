@@ -16,6 +16,7 @@ from lira.appliances.ir import ApplianceError, IRService
 from lira.appliances.models import ApplianceModel
 from lira.appliances.store import ApplianceStore
 from lira.hal.mock.ir import MockIrController
+from lira.privacy import PrivacyState
 from lira.protocol import ProtocolError, SnapshotMsg
 from lira.sync import SyncClient, SyncError
 
@@ -301,6 +302,99 @@ class TestHeartbeatAndLearn:
         reply = await apply(client, {"type": "learn_start", "learn_id": "L3",
                                      "device": "电视", "action": "打开"})
         assert reply == {"type": "learn_result", "learn_id": "L3", "error": "learning_not_supported"}
+
+
+# ---------- 快照 settings 应用（SEC-3/F2：远程隐私开关殊途同归） ----------
+
+
+class FakeTtsSettings:
+    """TtsSettings 同形替身：记录调用，可配置为越界拒绝（DeviceSettings 语义）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float]] = []
+        self.reject: set[str] = set()
+
+    def set_volume(self, value: float) -> None:
+        if "volume" in self.reject:
+            raise ValueError("音量须在 0.1~2.0 之间。")
+        self.calls.append(("volume", value))
+
+    def set_tts_speed(self, value: float) -> None:
+        if "speed" in self.reject:
+            raise ValueError("语速须在 0.5~2.0 之间。")
+        self.calls.append(("speed", value))
+
+
+def settings_frame(epoch: int, version: int, settings: dict) -> dict:
+    frame = snapshot_frame(epoch=epoch, version=version)
+    frame["settings"] = settings
+    return frame
+
+
+class TestSnapshotSettingsApply:
+    async def test_privacy_on_engages_privacy_and_llm_gate(self, tmp_path):
+        """SEC-3/F2 核心用例：远程推 privacy_mode=true → PrivacyState 开启。"""
+        store = make_store(tmp_path)
+        privacy = PrivacyState()
+        client = make_client(store, MockTransport(), privacy=privacy)
+        ack = await apply(client, settings_frame(1, 6, {"privacy_mode": True}))
+        assert ack["applied"] is True
+        assert privacy.is_on is True
+        assert privacy() is True, "LLM 谓词注入点（fail-closed 门）应关闭上行"
+        assert [e.source for e in privacy.events] == ["sync"], "与按键/UI 通道殊途同归"
+
+    async def test_privacy_off_disengages(self, tmp_path):
+        store = make_store(tmp_path)
+        privacy = PrivacyState()
+        client = make_client(store, MockTransport(), privacy=privacy)
+        await privacy.set_enabled(True, source="button")
+        ack = await apply(client, settings_frame(1, 6, {"privacy_mode": False}))
+        assert ack["applied"] is True
+        assert privacy.is_on is False
+        assert [e.source for e in privacy.events] == ["button", "sync"]
+
+    async def test_settings_apply_idempotent(self, tmp_path):
+        """同值重复应用不重复广播；同 (epoch,version) 重投幂等跳过。"""
+        store = make_store(tmp_path)
+        privacy = PrivacyState()
+        client = make_client(store, MockTransport(), privacy=privacy)
+        await apply(client, settings_frame(1, 6, {"privacy_mode": True}))
+        assert len(privacy.events) == 1
+        # 同版本重投 → 快照整体幂等跳过
+        ack = await apply(client, settings_frame(1, 6, {"privacy_mode": True}))
+        assert ack["applied"] is False and ack["reason"] == "already_applied"
+        # 更新版本携带同值 → 应用但不重复广播（PrivacyState 同值纪律）
+        ack = await apply(client, settings_frame(1, 7, {"privacy_mode": True}))
+        assert ack["applied"] is True
+        assert len(privacy.events) == 1
+
+    async def test_volume_and_speed_applied_to_settings_object(self, tmp_path):
+        store = make_store(tmp_path)
+        tts = FakeTtsSettings()
+        client = make_client(store, MockTransport(), tts_settings=tts)
+        ack = await apply(
+            client, settings_frame(1, 6, {"privacy_mode": False, "tts_volume": 1.5, "tts_speed": 0.8})
+        )
+        assert ack["applied"] is True
+        assert tts.calls == [("volume", 1.5), ("speed", 0.8)]
+
+    async def test_out_of_range_volume_does_not_break_snapshot(self, tmp_path):
+        """单项设置越界只告警，不回滚已原子入库的快照。"""
+        store = make_store(tmp_path)
+        tts = FakeTtsSettings()
+        tts.reject.add("volume")
+        client = make_client(store, MockTransport(), tts_settings=tts)
+        ack = await apply(client, settings_frame(1, 6, {"tts_volume": 9.9, "tts_speed": 0.8}))
+        assert ack["applied"] is True
+        assert store.current_version() == 6  # 快照照常入库
+        assert tts.calls == [("speed", 0.8)]  # 越界项被忽略，其余项生效
+
+    async def test_no_privacy_injection_settings_ignored(self, tmp_path):
+        """未注入 privacy/tts_settings（旧装配形态）→ settings 安全 no-op。"""
+        store = make_store(tmp_path)
+        client = make_client(store, MockTransport())
+        ack = await apply(client, settings_frame(1, 6, {"privacy_mode": True}))
+        assert ack["applied"] is True
 
 
 # ---------- 协议层直测（U8 对齐用例） ----------

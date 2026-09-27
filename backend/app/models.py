@@ -216,11 +216,20 @@ class Database:
         return new_rev
 
     def record_login_failure(self) -> int:
-        """登录失败计数；满 5 次锁 5 分钟（U8 Approach）。返回当前失败数。"""
+        """登录失败计数；满 5 次锁 5 分钟（U8 Approach）。返回当前失败数。
+
+        锁定过期即上一轮计数作废（F7）：过期后的首次失败从 1 重新起算——
+        否则锁满 5 分钟后一次失败便立即再锁（计数永不复位）。
+        """
         with self._tx() as conn:
             admin = self.get_admin()
-            attempts = admin["failed_attempts"] + 1
-            locked_until = time.time() + 300 if attempts >= 5 else admin["locked_until"]
+            now = time.time()
+            if admin["locked_until"] and now > admin["locked_until"]:
+                attempts = 1
+                locked_until = 0
+            else:
+                attempts = admin["failed_attempts"] + 1
+                locked_until = now + 300 if attempts >= 5 else admin["locked_until"]
             conn.execute(
                 "UPDATE admin SET failed_attempts=?, locked_until=? WHERE id=1",
                 (attempts, locked_until),

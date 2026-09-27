@@ -136,6 +136,10 @@ class ReadingSession:
             raise
         except Exception:  # noqa: BLE001 - 播放故障不得拖垮主循环
             logging.exception("朗读会话异常终止")
+            # F3：终局播放故障也必须触发 on_finished——否则状态机收不到
+            # 回执，永久卡在 READING。游标不动（故障块不前进）。
+            if self._on_finished is not None:
+                self._on_finished()
 
     # ---------- 播放控制（R21/R22 白名单命令的落点） ----------
 
@@ -153,7 +157,15 @@ class ReadingSession:
         self._resume_gate.set()  # 唤醒可能停在 gate 上的 run
 
     def read_again(self) -> None:
-        """R22：重复当前块（若恰在块间，则把即将播放的块播两遍）。"""
+        """R22：重复当前块（若恰在块间，则把即将播放的块播两遍）。
+
+        F8：暂停态（gate 未放行）时游标已停在"刚听完那块"的下一块上——
+        此时"再读一遍"语义是重听刚播完的那块，把游标退回一块即可（恢复后
+        自然重播），不再置 replay 标记（否则会错误重复下一块）。
+        """
+        if self.is_paused and self._cursor > 0:
+            self._cursor -= 1
+            return
         self._replay_requested = True
 
     def seek(self, block_index: int) -> None:
@@ -223,30 +235,41 @@ class ReadingPipeline:
     # ---------- 拍摄流程（R4/R26） ----------
 
     async def run_capture(self) -> None:
-        """R4 引导 → 拍摄 → OCR；空结果/失败 → on_capture_done(False)（R26 信号）。"""
-        await self._speaker.play(CAPTURE_GUIDANCE)
-        image = await self._grab()
-        if image is None:
-            self._on_capture_done(False)
-            return
+        """R4 引导 → 拍摄 → OCR；空结果/失败 → on_capture_done(False)（R26 信号）。
+
+        可取消（F1）：状态机取消离开 CAPTURING 时经任务句柄 cancel 本协程——
+        CancelledError 在任一 await 点即中止流程，不回执 on_capture_done、
+        不创建朗读会话（防御性兜底：万一取消晚到，也先停掉已开的会话再上抛）。
+        """
         try:
-            lines = await asyncio.to_thread(self._engine.read, image)
-        except Exception:  # noqa: BLE001 - 推理故障按"未检出"走 R26 引导
-            logging.exception("OCR 推理失败")
-            lines = []
-        if not lines:
-            logging.info("OCR 未检出文本行（R26 引导信号）")
-            self._on_capture_done(False)
-            return
-        raw_text = [line.text for line in lines]
-        blocks = chunk_lines(await self._polish(raw_text), self._block_chars)
-        self._session = ReadingSession(
-            blocks,
-            self._speaker,
-            on_finished=self._handle_finished,
-        )
-        self._session.start()
-        self._on_capture_done(True)
+            await self._speaker.play(CAPTURE_GUIDANCE)
+            image = await self._grab()
+            if image is None:
+                self._on_capture_done(False)
+                return
+            try:
+                lines = await asyncio.to_thread(self._engine.read, image)
+            except Exception:  # noqa: BLE001 - 推理故障按"未检出"走 R26 引导
+                logging.exception("OCR 推理失败")
+                lines = []
+            if not lines:
+                logging.info("OCR 未检出文本行（R26 引导信号）")
+                self._on_capture_done(False)
+                return
+            raw_text = [line.text for line in lines]
+            blocks = chunk_lines(await self._polish(raw_text), self._block_chars)
+            self._session = ReadingSession(
+                blocks,
+                self._speaker,
+                on_finished=self._handle_finished,
+            )
+            self._session.start()
+            self._on_capture_done(True)
+        except asyncio.CancelledError:
+            if self._session is not None:
+                self._session.stop()
+                self._session = None
+            raise
 
     async def _polish(self, raw_lines: list[str]) -> list[str]:
         """可选口语化加工（AE2）：失败/空结果回退原文，不静默、不拒读。"""

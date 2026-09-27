@@ -78,8 +78,13 @@ class DialogCallbacks(Protocol):
 
     def set_audio_route(self, route: AudioRoute) -> None: ...
 
-    def start_capture(self) -> None:
-        """拍摄并进入 OCR 阅读流程（U4 接入点，R4 语音引导在 U4 内播报）。"""
+    def start_capture(self) -> object:
+        """拍摄并进入 OCR 阅读流程（U4 接入点，R4 语音引导在 U4 内播报）。
+
+        返回值：在途拍摄任务句柄（Task 形，含 cancel()）或 None——装配层若以
+        ensure_future 启动 `run_capture`，应把任务句柄返回给状态机；取消离开
+        CAPTURING 时由状态机中止它（F1：否则在途拍摄继续读图并自行开播朗读）。
+        """
 
     def send_ir(self, device: str, action: str) -> None: ...
 
@@ -147,6 +152,8 @@ class DialogEngine:
         self._restate_done = False
         self._capture_fails = 0
         self._pending: _PendingConfirm | None = None
+        #: 在途拍摄任务句柄（start_capture 回调返回值；F1 取消中止用）
+        self._capture_task: object | None = None
         self._transition(State.STANDBY, initial=True)
 
     # ---------- 事件入口 ----------
@@ -213,12 +220,13 @@ class DialogEngine:
             return
         if success:
             self._capture_fails = 0
+            self._capture_task = None  # 已完成，句柄作废
             self._transition(State.READING)
             return
         self._capture_fails += 1
         if self._capture_fails <= self.MAX_CAPTURE_RETRIES:
             self._cb.speak(pb.OCR_GUIDANCE)
-            self._cb.start_capture()
+            self._capture_task = self._cb.start_capture()
         else:
             self._cb.speak(pb.OCR_GIVEUP)
             self._enter_standby()
@@ -331,7 +339,7 @@ class DialogEngine:
             self._enter_standby()
         elif intent.kind is IntentKind.READ:
             self._capture_fails = 0
-            self._cb.start_capture()
+            self._capture_task = self._cb.start_capture()
             self._transition(State.CAPTURING)
             self._disarm()
         elif intent.kind is IntentKind.PLAYBACK:
@@ -387,8 +395,20 @@ class DialogEngine:
         self._cb.set_audio_route(_ROUTE_BY_STATE[new])
 
     def _enter_standby(self) -> None:
+        self._abort_capture()
         self._pending = None
         self._disarm()
         self._listen_timeouts = 0
         self._restate_done = False
         self._transition(State.STANDBY)
+
+    def _abort_capture(self) -> None:
+        """F1：离开 CAPTURING 时中止在途拍摄任务。
+
+        不取消则 `run_capture` 继续拍图/OCR 并自行开播朗读会话——状态机虽已
+        回待机（迟到的 on_capture_done 被 `on_capture_done` 的态守卫丢弃），
+        朗读却照常出声。取消已完成/无句柄的任务是安全的 no-op。
+        """
+        task, self._capture_task = self._capture_task, None
+        if task is not None and hasattr(task, "cancel"):
+            task.cancel()

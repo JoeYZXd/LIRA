@@ -8,6 +8,9 @@ Key Decisions 落地（配置同步 = 全量快照 + (epoch, version) 键）：
   - **epoch 只在重配对会话内换新**：设备端 `begin_pairing()` 生成一次性
     配对码（屏幕显示，子女在后台输入同一码）；配对会话外的任何陌生 epoch
     快照一律拒绝（旧 epoch 回放与陌生 epoch 注入同为此路径拒绝）；
+  - 快照 `settings`（privacy_mode/tts_volume/tts_speed）随快照一并应用：
+    privacy_mode 殊途同归触碰同一 `PrivacyState` 广播对象（与按键/UI 通道
+    同源），音量/语速落注入的 `TtsSettings` 同形对象（SEC-3/F2）；
   - 心跳 60s 拉取兜底（`heartbeat_once`），安全关键变更靠后台在线立即推送；
   - WS 传输层可注入（`SyncTransport` 协议）：单元测试用 mock 传输，
     真实后台联通在 U9 验证，板上由 U10 挂真实传输。
@@ -25,6 +28,7 @@ from typing import Awaitable, Callable, Protocol
 from lira.appliances.ir import ApplianceError
 from lira.appliances.models import ApplianceModel, SceneModel
 from lira.appliances.store import ApplianceStore
+from lira.privacy import PrivacyState
 from lira.protocol import (
     AuthErrorMsg,
     AuthOkMsg,
@@ -38,7 +42,7 @@ from lira.protocol import (
     parse_frame,
 )
 
-__all__ = ["SyncError", "SyncTransport", "SyncClient", "SnapshotAppliedHook"]
+__all__ = ["SyncError", "SyncTransport", "SyncClient", "SnapshotAppliedHook", "TtsSettings"]
 
 
 class SyncError(Exception):
@@ -63,6 +67,18 @@ LearnHandler = Callable[[str, str], Awaitable[str]]
 SnapshotAppliedHook = Callable[[SnapshotMsg, dict[str, bool]], None]
 
 
+class TtsSettings(Protocol):
+    """音量/语速运行时设置对象（与 lira.ui.app.DeviceSettings 同形，鸭子类型解耦）。
+
+    界定：越界值抛 ValueError（DeviceSettings 边界拒绝语义）；同步层按
+    "单项设置失败不阻断快照"消化（见 `_apply_settings`）。
+    """
+
+    def set_volume(self, value: float) -> None: ...
+
+    def set_tts_speed(self, value: float) -> None: ...
+
+
 class SyncClient:
     """设备端同步会话。
 
@@ -72,6 +88,11 @@ class SyncClient:
         token: device token（首帧鉴权）。
         learn_handler: 学习处理（device, action) -> code，通常为
             `LearningManager` 包装；注入 None 时忽略 learn_start 消息。
+        privacy: 设备端隐私广播状态对象（SEC-3/F2 接入点）。注入后快照
+            `settings.privacy_mode` 殊途同归触碰它（订阅者照常广播：关麦/
+            封唤醒/后果播报）；注入 None 时忽略该设置。
+        tts_settings: 音量/语速设置对象（DeviceSettings 同形）；注入 None
+            时忽略 tts_volume/tts_speed。
     """
 
     #: R30：心跳拉取兜底周期
@@ -85,12 +106,16 @@ class SyncClient:
         token: str,
         learn_handler: LearnHandler | None = None,
         on_snapshot_applied: SnapshotAppliedHook | None = None,
+        privacy: PrivacyState | None = None,
+        tts_settings: TtsSettings | None = None,
     ) -> None:
         self._store = store
         self._transport = transport
         self._token = token
         self._learn_handler = learn_handler
         self._on_snapshot_applied = on_snapshot_applied
+        self._privacy = privacy
+        self._tts_settings = tts_settings
         self._authed = False
         self._pairing_code: str | None = None
         #: 拒绝记录（告警审计面，U7 状态卡/U9 断言用）
@@ -160,7 +185,7 @@ class SyncClient:
             self._reject(f"protocol_error: {exc}")
             return None
         if isinstance(frame, SnapshotMsg):
-            return self._apply_snapshot(frame).to_json()
+            return (await self._apply_snapshot(frame)).to_json()
         if isinstance(frame, LearnStartMsg):
             return await self._handle_learn(frame)
         logging.debug("忽略消息类型: %s", type(frame).__name__)
@@ -196,12 +221,12 @@ class SyncClient:
             models.append(model)
         return models
 
-    def _apply_snapshot(self, snap: SnapshotMsg) -> SnapshotAckMsg:
+    async def _apply_snapshot(self, snap: SnapshotMsg) -> SnapshotAckMsg:
         current_epoch = self._store.current_epoch()
         current_version = self._store.current_version()
 
         if current_epoch is not None and snap.epoch != current_epoch:
-            return self._handle_foreign_epoch(snap, current_epoch)
+            return await self._handle_foreign_epoch(snap, current_epoch)
 
         if current_epoch is not None and snap.epoch == current_epoch and current_version is not None:
             if snap.version <= current_version:
@@ -227,6 +252,7 @@ class SyncClient:
             version=snap.version,
             device_token=token_to_store,
         )
+        await self._apply_settings(snap.settings)
         if token_to_store is not None:
             logging.info("配对完成：device token 已更新")
             self._pairing_code = None  # 一次性会话，用后即失效
@@ -235,7 +261,7 @@ class SyncClient:
         self._notify_applied(snap, prev_enabled)
         return SnapshotAckMsg(epoch=snap.epoch, version=snap.version, applied=True)
 
-    def _handle_foreign_epoch(self, snap: SnapshotMsg, current_epoch: int) -> SnapshotAckMsg:
+    async def _handle_foreign_epoch(self, snap: SnapshotMsg, current_epoch: int) -> SnapshotAckMsg:
         """陌生/旧 epoch：仅配对会话内出示同码才接受（对抗旧快照回放）。"""
         if not self.pairing_active or snap.pairing_code is None:
             self._reject(
@@ -256,6 +282,7 @@ class SyncClient:
             version=snap.version,
             device_token=snap.device_token,
         )
+        await self._apply_settings(snap.settings)
         logging.info("重配对完成：epoch %s -> %s", current_epoch, snap.epoch)
         self._pairing_code = None
         self._notify_applied(snap, prev_enabled)
@@ -273,6 +300,31 @@ class SyncClient:
             self._on_snapshot_applied(snap, prev_enabled)
         except Exception:  # noqa: BLE001 - 通知失败不回滚已应用的安全配置
             logging.exception("on_snapshot_applied 钩子异常（已忽略）")
+
+    async def _apply_settings(self, settings: dict) -> None:
+        """快照 `settings` 应用（SEC-3/F2 修复）：远程隐私开关此前被整段丢弃。
+
+        - privacy_mode：殊途同归触碰同一 `PrivacyState` 广播对象（与物理按键/
+          UI 通道同源；订阅者照常广播——关麦、封唤醒、后果播报；LLM 谓词每
+          调用现查）。幂等由 `set_enabled` 保证：同值不广播、不留事件。
+        - tts_volume/tts_speed：落注入的 `TtsSettings` 同形对象。
+
+        纪律：单项设置应用失败（如越界）只告警，不回滚已原子入库的快照；
+        设置值的运行时持久化与 DeviceSettings 现状一致，留给后续单元。
+        """
+        if self._privacy is not None and "privacy_mode" in settings:
+            await self._privacy.set_enabled(bool(settings["privacy_mode"]), source="sync")
+        if self._tts_settings is not None:
+            for key, apply in (
+                ("tts_volume", self._tts_settings.set_volume),
+                ("tts_speed", self._tts_settings.set_tts_speed),
+            ):
+                if key not in settings:
+                    continue
+                try:
+                    apply(float(settings[key]))
+                except ValueError:
+                    logging.warning("settings.%s 越界，已忽略（不阻断快照）", key)
 
     def _reject(self, reason: str) -> None:
         """拒绝即告警（R30/安全评审结论）：记入审计面 + WARNING 日志。"""

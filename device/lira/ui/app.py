@@ -162,13 +162,25 @@ def create_app(services: UiServices) -> FastAPI:
     @app.post("/passphrase/setup")
     async def setup_submit(request: Request):
         form = await request.form()
+        already_set = services.vault.is_set()
         passphrase = str(form.get("passphrase", ""))
         confirm = str(form.get("confirm", ""))
+        if already_set:
+            # SEC-2：覆盖口令必须先验旧口令（同一 vault.verify 通道，常数时间比较），
+            # 否则拿到屏幕/表单的任何人可无凭据重置安全凭据
+            if not services.vault.verify(str(form.get("old_passphrase", ""))):
+                logger.info("ui event=passphrase_set_blocked reason=old_passphrase_mismatch")
+                return templates.TemplateResponse(
+                    request,
+                    "setup.html",
+                    {"already_set": True, "error": "当前口令不正确。"},
+                    status_code=403,
+                )
         if passphrase != confirm:
             return templates.TemplateResponse(
                 request,
                 "setup.html",
-                {"already_set": services.vault.is_set(), "error": "两次输入不一致。"},
+                {"already_set": already_set, "error": "两次输入不一致。"},
                 status_code=400,
             )
         try:
@@ -177,7 +189,7 @@ def create_app(services: UiServices) -> FastAPI:
             return templates.TemplateResponse(
                 request,
                 "setup.html",
-                {"already_set": services.vault.is_set(), "error": str(exc)},
+                {"already_set": already_set, "error": str(exc)},
                 status_code=400,
             )
         logger.info("ui event=passphrase_set")

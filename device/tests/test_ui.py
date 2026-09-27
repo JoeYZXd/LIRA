@@ -152,6 +152,61 @@ class TestPassphraseSetup:
         assert services.privacy.is_on is False, "口令未设置绝不改安全状态"
 
 
+# ---------- 口令覆盖需验旧口令（SEC-2） ----------
+
+
+class TestPassphraseOverwrite:
+    def test_setup_page_asks_old_passphrase_when_already_set(self, client, tmp_path):
+        setup_passphrase(client, "old-pass")
+        body = client.get("/passphrase/setup").text
+        assert 'name="old_passphrase"' in body
+        # 首启页面（口令未设置）不得出现旧口令输入（无凭据可验）
+        fresh_store = ApplianceStore(tmp_path / "fresh.db")
+        fresh = TestClient(
+            create_app(UiServices(
+                privacy=PrivacyState(),
+                vault=PassphraseVault(fresh_store),
+                store=fresh_store,
+            ))
+        )
+        assert "old_passphrase" not in fresh.get("/passphrase/setup").text
+
+    def test_overwrite_without_old_passphrase_rejected(self, client, services):
+        """SEC-2 核心用例：已设口令后不带旧口令直接覆盖 → 403，旧口令保持有效。"""
+        setup_passphrase(client, "old-pass")
+        resp = client.post(
+            "/passphrase/setup",
+            data={"passphrase": "new-pass", "confirm": "new-pass"},
+        )
+        assert resp.status_code == 403
+        assert "当前口令不正确" in resp.text
+        assert services.vault.verify("old-pass"), "旧口令必须保持有效"
+        assert not services.vault.verify("new-pass"), "无凭据覆盖绝不生效"
+
+    def test_overwrite_with_wrong_old_passphrase_rejected(self, client, services):
+        setup_passphrase(client, "old-pass")
+        resp = client.post(
+            "/passphrase/setup",
+            data={"old_passphrase": "wrong-pass", "passphrase": "new-pass",
+                  "confirm": "new-pass"},
+        )
+        assert resp.status_code == 403
+        assert services.vault.verify("old-pass")
+        assert not services.vault.verify("new-pass")
+
+    def test_overwrite_with_correct_old_passphrase_succeeds(self, client, services):
+        setup_passphrase(client, "old-pass")
+        resp = client.post(
+            "/passphrase/setup",
+            data={"old_passphrase": "old-pass", "passphrase": "new-pass",
+                  "confirm": "new-pass"},
+            follow_redirects=False,
+        )
+        assert resp.status_code == 303
+        assert services.vault.verify("new-pass"), "出示正确旧口令后覆盖成功"
+        assert not services.vault.verify("old-pass"), "旧口令随覆盖失效"
+
+
 # ---------- UI 隐私开关（需口令；殊途同归） ----------
 
 

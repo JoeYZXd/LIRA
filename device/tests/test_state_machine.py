@@ -10,6 +10,8 @@ CaptureGoal→READING 拍摄流程占位（R22/R26 接口）、会话内 LLM 降
 
 from __future__ import annotations
 
+import asyncio
+
 import pytest
 
 from lira.dialog import (
@@ -395,6 +397,51 @@ class TestCaptureFlow:
         await sm.on_capture_done(False)
         assert sm.state is State.STANDBY
         assert any("家人" in s for s in rec.spoken), "仍失败应告知请家人帮忙"
+
+
+# ---------- F1：取消中止在途拍摄管线 ----------
+
+
+class TestCancelAbortsCapture:
+    async def test_cancel_during_capture_cancels_inflight_capture_task(self):
+        """F1: CAPTURING 中"取消" → 状态机回待机且取消 ensure_future 的拍摄任务。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        holder: dict[str, asyncio.Task] = {}
+        released = asyncio.Event()
+
+        async def slow_capture() -> None:
+            await released.wait()  # 模拟拍摄/OCR 在途
+
+        def start_capture() -> object:
+            task = asyncio.ensure_future(slow_capture())
+            holder["task"] = task
+            return task
+
+        rec.start_capture = start_capture  # type: ignore[method-assign]
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("帮我读一下这个")
+        assert sm.state is State.CAPTURING
+        assert not holder["task"].done()
+
+        await sm.on_asr_text("取消")
+        assert sm.state is State.STANDBY
+        released.set()  # 保险：即便取消失效也不悬挂
+        for _ in range(100):
+            await asyncio.sleep(0.01)
+            if holder["task"].done():
+                break
+        assert holder["task"].cancelled(), "在途拍摄任务必须被中止（否则继续读图自行开播）"
+
+    async def test_capture_success_clears_task_handle_before_reading_cancel(self):
+        """成功进 READING 后句柄作废：READING 取消不再去 cancel 已完成拍摄任务。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        rec.start_capture = lambda: None  # type: ignore[method-assign]
+        await enter_state(sm, rec, State.READING)
+        assert sm._capture_task is None
+        await sm.on_asr_text("取消")
+        assert sm.state is State.STANDBY  # 不因作废句柄抛异常
 
 
 # ---------- 补充缺口：会话内三级路由降级 ----------

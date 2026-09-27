@@ -231,6 +231,52 @@ class TestReadingSession:
             session.volume_down()
         assert speaker.volume == pytest.approx(0.2)
 
+    async def test_play_failure_fires_on_finished_once_and_cursor_stays(self):
+        """F3: 播放故障（TTS 异常）→ on_finished 恰好触发一次（状态机回待机恢复，
+        不永久卡 READING）；游标不动。"""
+        class FailingSpeaker:
+            volume = 1.0
+
+            async def play(self, text: str) -> None:
+                raise RuntimeError("tts 引擎故障（测试注入）")
+
+        finished_calls: list[int] = []
+        session = ReadingSession(
+            ["甲", "乙"], FailingSpeaker(), on_finished=lambda: finished_calls.append(1)
+        )
+        session.start()
+        await asyncio.wait_for(session._task, 5)
+        assert finished_calls == [1], "终局故障必须触发 on_finished 且仅一次"
+        assert session.cursor == 0, "故障块游标不前进"
+
+    async def test_read_again_while_paused_replays_just_heard_block(self):
+        """F8: 暂停时"再读一遍"→ 恢复后重听刚播完的那块（N 两遍，N+1 一遍）。"""
+        speaker = RecordingSpeaker()
+        session = ReadingSession(["甲", "乙", "丙"], speaker)
+        finished = asyncio.Event()
+        session._on_finished = finished.set
+
+        async def hook(text: str) -> None:
+            if text == "乙":
+                speaker.on_play = None
+                session.pause()  # 乙播完停在 gate 上，游标已到丙
+
+        speaker.on_play = hook
+        session.start()
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if session.is_paused:
+                break
+        assert session.is_paused
+        await settle(20)
+        assert speaker.played == ["甲", "乙"]
+
+        session.read_again()
+        session.resume()
+        await asyncio.wait_for(finished.wait(), 5)
+        assert speaker.played == ["甲", "乙", "乙", "丙"], "暂停态重读应重复刚听完的乙"
+        assert session.cursor == 3
+
 
 # ---------- ReadingPipeline：R4 引导 / OCR 空结果 R26 信号 / R22 不重拍 ----------
 
@@ -304,6 +350,39 @@ class TestReadingPipeline:
             pipeline.playback_volume_down,
         ):
             control()  # 不应抛异常
+
+    async def test_cancelled_capture_no_session_no_reading_no_done(self):
+        """F1: 在途 run_capture 被取消 → 不回执、不开朗读会话、不再播报。"""
+        engine = FakeEngine([line(0, 0, "甲"), line(0, 50, "乙")])
+        release = asyncio.Event()
+
+        class SlowCamera(FakeCamera):
+            async def capture(self) -> bytes:
+                await release.wait()  # 模拟拍摄/OCR 在途
+                return await super().capture()
+
+        camera = SlowCamera(tiny_png())
+        speaker = RecordingSpeaker()
+        captured: dict[str, object] = {}
+        pipeline = ReadingPipeline(
+            camera,
+            engine,
+            speaker,
+            on_capture_done=lambda ok: captured.setdefault("done", []).append(ok),
+            on_reading_finished=lambda: captured.setdefault("finished", True),
+        )
+        task = asyncio.ensure_future(pipeline.run_capture())
+        await settle(10)
+        assert speaker.played == [CAPTURE_GUIDANCE]
+
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        release.set()  # 保险：替身不悬挂
+        await settle(20)
+        assert captured == {}, "取消后不得有 on_capture_done / on_reading_finished 回执"
+        assert pipeline.session is None, "取消后不得开始朗读会话"
+        assert speaker.played == [CAPTURE_GUIDANCE], "取消后不得有朗读播报"
 
 
 # ---------- 真实 OCR 集成（模型+字体就绪时；Verification 的样张等价物） ----------

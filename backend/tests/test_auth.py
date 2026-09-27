@@ -11,6 +11,7 @@ from __future__ import annotations
 import os
 import sqlite3
 import stat
+import time
 from urllib.parse import unquote
 
 import pytest
@@ -65,6 +66,48 @@ def test_login_rate_limit_locks_after_five_failures(admin):
                    follow_redirects=False)
     assert r.headers["location"].startswith("/login?error=")
     assert "锁定" in unquote(r.headers["location"])
+
+
+def test_login_lock_expiry_resets_failure_counter(admin):
+    """F7：锁定过期即计数作废——过期后 1 次失败不得立即再锁，须重新凑满 5 次。"""
+    db = admin.app.state.db
+    for _ in range(5):
+        assert not auth.verify_login(db, "parent", "wrong")
+    assert auth.login_locked(db) > 0
+    # 时钟拨过锁定期（locked_until 置为过去）
+    conn = sqlite3.connect(db._path)
+    conn.execute("UPDATE admin SET locked_until=? WHERE id=1", (time.time() - 1,))
+    conn.commit()
+    conn.close()
+    assert auth.login_locked(db) == 0.0
+    # 过期后首次失败：新一轮计数第 1 次，不再立即锁定
+    assert not auth.verify_login(db, "parent", "wrong")
+    assert db.get_admin()["failed_attempts"] == 1
+    assert auth.login_locked(db) == 0.0
+    # 仍须凑满 5 次才重新锁定
+    for _ in range(3):
+        assert not auth.verify_login(db, "parent", "wrong")
+    assert auth.login_locked(db) == 0.0  # 第 4 次，尚未锁定
+    assert not auth.verify_login(db, "parent", "wrong")  # 第 5 次 → 重新锁定
+    assert auth.login_locked(db) > 0
+
+
+# ---------- SEC-1：家电详情页鉴权（与会话纪律一致） ----------
+
+def test_appliance_page_requires_login(app, admin):
+    """SEC-1：未登录访问 /appliances/{name} 必须 303 到 /login，已登录 200。"""
+    from fastapi.testclient import TestClient
+
+    r = apost(admin, "/admin/appliances", name="取暖器", aliases="取暖器",
+              action="打开", triggers="打开取暖器")
+    assert r.status_code == 303
+    # 未登录（无会话 cookie 的全新客户端）→ 重定向登录
+    with TestClient(app) as fresh:
+        r = fresh.get("/appliances/取暖器", follow_redirects=False)
+        assert r.status_code == 303 and r.headers["location"] == "/login"
+    # 已登录 → 200
+    r = admin.get("/appliances/取暖器", follow_redirects=False)
+    assert r.status_code == 200
 
 
 # ---------- 会话与撤销计数 ----------

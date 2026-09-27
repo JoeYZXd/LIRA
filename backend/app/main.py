@@ -165,6 +165,9 @@ def create_app(db_path: str = DEFAULT_DB_PATH) -> FastAPI:
     @app.get("/appliances/{name}", response_class=HTMLResponse)
     async def appliance_page(name: str, request: Request):
         db: Database = request.app.state.db
+        claims = auth.read_session(db, request.cookies.get(auth.SESSION_COOKIE))
+        if claims is None:
+            return RedirectResponse("/login", status_code=303)
         row = db.get_appliance(name)
         if row is None:
             raise StarletteHTTPException(status_code=404)

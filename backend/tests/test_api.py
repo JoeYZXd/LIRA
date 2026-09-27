@@ -178,6 +178,42 @@ def test_learn_error_result_recorded_without_version_bump(admin, client, device_
     assert status["error"] == "timeout"
 
 
+# ---------- 场景 4b（F4 竞态）：学习挂起期间家电被删除 → WS 连接不得崩溃 ----------
+
+def test_learn_result_after_appliance_deleted_keeps_ws_alive(admin, client, device_token):
+    """家电学习中途被删除：码值回传必须良性留痕（终态失败），
+    IntegrityError 不得外泄杀死设备 WS 连接。"""
+    db = admin.app.state.db
+    apost(admin, "/admin/appliances", name="空调", aliases="空调",
+          action="打开", triggers="打开空调")
+    code = "PULSE 9000 4500 560 1690"
+
+    with ws_device_session(client, device_token) as ws:
+        # 声明已知当前版本（抑制连接初期的状态推送，使帧序确定）
+        ws.send_json(PullMsg(epoch=db.epoch(), version=db.version()).to_json())
+        r = apost(admin, "/admin/learn", device="空调", action="打开")
+        assert r.status_code == 303
+        learn_id = parse_qs(urlparse(r.headers["location"]).query)["learn_id"][0]
+        frame = parse_frame(ws.receive_json())
+        assert isinstance(frame, protocol.LearnStartMsg)
+
+        # 学习挂起期间家电被后台删除（version+1）
+        db.delete_appliance("空调")
+        version_after_delete = db.version()
+
+        # 设备回传码值：必须被良性处理，连接保持存活
+        ws.send_json(protocol.LearnResultMsg(learn_id=learn_id, code=code).to_json())
+        # 连接仍存活：删除触发的版本推送照常抵达（快照中已无该家电）
+        snap = SnapshotMsg.from_json(ws.receive_json())
+        assert all(a.name != "空调" for a in snap.appliances)
+
+    # 学习记录为终态失败（码值无处入库），且未再抬升版本
+    status = admin.get(f"/admin/learn/{learn_id}").json()
+    assert status["status"] == "done" and not status["has_code"]
+    assert status["error"] == "appliance_deleted"
+    assert db.version() == version_after_delete
+
+
 # ---------- 场景 5：旧 epoch 快照（后台库重建后）设备拒绝 —— 后台视角集成版 ----------
 
 async def test_old_epoch_snapshot_rejected_by_device_without_pairing(

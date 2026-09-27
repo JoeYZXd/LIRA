@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -124,10 +125,26 @@ async def device_ack(request: Request, device: str = Depends(auth.require_device
 # ---------- 设备 WS 通道（首帧 token 鉴权） ----------
 
 def _handle_learn_result(db: Database, device: str, msg: LearnResultMsg) -> None:
-    """学习回传入库（AE5）：码值入库 + version+1；失败也留痕。"""
+    """学习回传入库（AE5）：码值入库 + version+1；失败也留痕。
+
+    竞态良性处理（F4）：学习挂起期间家电被后台删除 → 码值无处入库（FK 约束），
+    留痕为失败即可——异常外泄会杀死整条设备 WS 连接。
+    """
     row = db.finish_learn(msg.learn_id, msg.code, msg.error)
     if row is not None and msg.code:
-        db.store_learned_code(row["device"], row["action"], msg.code)
+        if db.get_appliance(row["device"]) is None:
+            logger.warning("学习完成但家电已删除，码值丢弃: device=%s learn_id=%s",
+                           row["device"], msg.learn_id)
+            db.finish_learn(msg.learn_id, None, "appliance_deleted")
+            return
+        try:
+            db.store_learned_code(row["device"], row["action"], msg.code)
+        except sqlite3.IntegrityError:
+            # 判存与写入间隙的并发删除：同样良性，留痕失败，保连接
+            logger.warning("学习码值入库遭遇并发删除: device=%s learn_id=%s",
+                           row["device"], msg.learn_id)
+            db.finish_learn(msg.learn_id, None, "appliance_deleted")
+            return
         logger.info("学习完成: device=%s action=%s", row["device"], row["action"])
 
 

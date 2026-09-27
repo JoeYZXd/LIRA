@@ -9,6 +9,9 @@
   {% endif %}
   {% if error %}<p class="error">{{ error }}</p>{% endif %}
   <form method="post" action="/passphrase/setup">
+    {% if already_set %}
+    <input type="password" name="old_passphrase" placeholder="输入当前口令" required>
+    {% endif %}
     <input type="password" name="passphrase" placeholder="输入口令（至少 4 个字符）" required>
     <input type="password" name="confirm" placeholder="再输入一次" required>
     <div style="margin-top:10px">

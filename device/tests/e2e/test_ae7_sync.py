@@ -101,8 +101,7 @@ async def test_ae7_idempotent_push_no_duplicate_announce(harness, admin, device_
 
         # 同一连接内重复推送同版本快照（后台推:每 (epoch,version) 每连接一次，
         # 这里直接把缓存帧重放给设备端验证幂等）
-        frame = admin.app.state.db.build_snapshot(
-            admin.app.state.db.find_device_by_token(device_token) or "客厅设备")
+        frame = admin.app.state.db.build_snapshot()
         # 重新走一遍同一快照（同 epoch/version）
         reply = await sync.handle_frame(frame.to_json())
         assert reply["applied"] is False and reply["reason"] == "already_applied"

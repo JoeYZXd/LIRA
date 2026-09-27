@@ -216,10 +216,12 @@ def test_learn_result_after_appliance_deleted_keeps_ws_alive(admin, client, devi
 
 # ---------- 场景 5：旧 epoch 快照（后台库重建后）设备拒绝 —— 后台视角集成版 ----------
 
-async def test_old_epoch_snapshot_rejected_by_device_without_pairing(
+async def test_old_epoch_snapshot_rejected_by_device(
         admin, client, device_token, tmp_path):
-    """后台 epoch 换新后，未进入配对会话的设备端（真实 SyncClient）拒绝新
-    epoch 快照并保持本地安全规则（U6 设备侧已测；此处验证后台-设备集成视角）。"""
+    """后台 epoch 换新后，设备端（真实 SyncClient）拒绝新 epoch 快照并保持
+    本地安全规则（U6 设备侧已测；此处验证后台-设备集成视角）。"""
+    import secrets as _secrets
+
     from lira.appliances.models import ApplianceModel
     from lira.appliances.store import ApplianceStore
     from lira.sync import SyncClient
@@ -241,8 +243,10 @@ async def test_old_epoch_snapshot_rejected_by_device_without_pairing(
         device_client = SyncClient(store=store, transport=adapter, token=device_token)
         # SyncClient 自行完成 hello 首帧握手
         await device_client.connect()
-        # 后台换 epoch（模拟库重建/重配对，但设备端**未**开启配对会话）
-        new_epoch = db.renew_epoch()[0]
+        # 后台库重建（epoch 换新 + version 归零，与整库重建同语义）
+        new_epoch = _secrets.randbits(31) + 1
+        db.set_meta("epoch", str(new_epoch))
+        db.set_meta("version", "0")
         # 设备心跳拉取 → 收到新 epoch 快照 → epoch 门禁拒绝
         await device_client.heartbeat_once()
         reply = None
@@ -260,7 +264,7 @@ async def test_old_epoch_snapshot_rejected_by_device_without_pairing(
     assert (store.current_epoch(), store.current_version()) == old_state
     assert store.get_appliance("取暖器").enabled is False
     assert any("epoch_mismatch" in r for r in device_client.rejections)
-    # 回执已留痕且后台未完成配对收尾（旧 token 仍有效）
+    # 回执已留痕（token 未轮换）
     acks = admin.app.state.db.list_acks("客厅设备")
     assert acks and acks[0]["applied"] == 0
     assert db.find_device_by_token(device_token) == "客厅设备"
@@ -300,73 +304,70 @@ def test_wal_concurrent_read_write_no_blocking(admin):
     reader.close()
 
 
-# ---------- 场景 8（补充）：重配对全流程（epoch 迁移 + token 轮换） ----------
+# ---------- 场景 8（补充）：库重建后的开发期 epoch 迁移（reset-sync） ----------
 
-async def test_repair_pairing_flow_rotates_epoch_and_token(admin, client, device_token,
-                                                           tmp_path):
-    """库重建后的重配对：设备屏显配对码 → 后台输入 → 新 epoch + 新 token 在
-    配对会话内下发并落库 → 回执后旧 token 失效。真实设备端 SyncClient 参与。"""
+async def test_backend_rebuild_epoch_migration_via_reset_sync(
+        admin, client, device_token, tmp_path):
+    """2026-09-27 决议：无配对流程。库重建 = epoch 换新 + version 归零 +
+    旧 token 失效；开发期迁移路径：后台重新注册设备取新 token → 设备端
+    reset-sync 清同步元数据 → bootstrap 接受新 epoch，已学码值保留。
+    真实设备端 SyncClient 参与。"""
+    import secrets as _secrets
+
     from lira.appliances.models import ApplianceModel
     from lira.appliances.store import ApplianceStore
     from lira.sync import SyncClient
 
     from conftest import WSAdapter
 
+    db = admin.app.state.db
+    # 后台先配置"灯"（否则新 epoch 快照不含该家电，设备端全量替换后学习成果无处保留）
+    assert apost(admin, "/admin/appliances", name="灯", aliases="灯",
+                 action="打开", triggers="开灯").status_code == 303
     store = ApplianceStore(tmp_path / "device.db")
     store.apply_snapshot(
         appliances=[ApplianceModel(name="灯", aliases=("灯",),
                                    actions={"打开": ("开灯",)}, enabled=True)],
-        scenes=[], epoch=1, version=3)
+        scenes=[], epoch=db.epoch(), version=3)
+    store.upsert_code("灯", "打开", "learned-code-1")
 
-    db = admin.app.state.db
+    # ① 后台库重建（epoch 换新 + version 归零；设备表同样重建，等价于重新注册）
+    new_epoch = _secrets.randbits(31) + 1
+    db.set_meta("epoch", str(new_epoch))
+    db.set_meta("version", "0")
+    new_device_token = db.revoke_device_token("客厅设备")  # 重建后重新注册设备
+    assert new_device_token != device_token
 
+    # ② 设备端执行 `python -m lira.sync reset-sync`：仅清 (epoch, version)
+    store.clear_sync_meta()
+
+    # ③ 新 token 重连 → bootstrap 接受新 epoch 快照，已学码值保留
     with client.websocket_connect("/ws/device") as ws:
         adapter = WSAdapter(ws)
-        device = SyncClient(store=store, transport=adapter, token=device_token)
-        await device.connect()  # hello 首帧握手由 SyncClient 完成
-
-        # ① 设备端开始配对会话（屏幕显示一次性配对码）
-        pairing_code = device.begin_pairing()
-        assert len(pairing_code) == 6
-
-        # ② 子女在后台输入同一配对码 → 后台生成新 token + epoch 换新
-        r = apost(admin, "/admin/devices/客厅设备/pair", pairing_code=pairing_code)
-        assert r.status_code == 303
-        new_epoch = db.epoch()
-
-        # ③ 设备收到含 pairing_code/device_token 的新 epoch 快照 → 配对会话内接受
+        device = SyncClient(store=store, transport=adapter, token=new_device_token)
+        await device.connect()
+        await device.heartbeat_once()
         reply = None
         while reply is None:
             frame = parse_frame(await adapter.receive())
             assert isinstance(frame, SnapshotMsg)
             if frame.epoch == new_epoch:
-                assert frame.pairing_code == pairing_code
-                assert frame.device_token and frame.device_token != device_token
                 reply = await device.handle_frame(frame.to_json())
             else:
                 await device.handle_frame(frame.to_json())
         assert reply["applied"] is True
         await adapter.send(reply)
 
-        # ④ 设备端落库：新 epoch + 新 device token
-        assert store.current_epoch() == new_epoch
-        new_device_token = store.device_token()
-        assert new_device_token and new_device_token != device_token
+    assert store.current_epoch() == new_epoch
+    assert store.current_version() == db.version()
+    assert store.get_appliance("灯").codes["打开"] == "learned-code-1"
 
-        # ⑤ 后台收到 applied 回执 → 激活新 token、清除配对态
-        # （回执经 WS 异步送达，轮询等待后台状态收敛）
-        deadline = time.time() + 2
-        while db.find_device_by_token(device_token) is not None and time.time() < deadline:
-            await asyncio.sleep(0.02)
-        assert db.find_device_by_token(device_token) is None, "旧 token 应已失效"
-        assert db.find_device_by_token(new_device_token) == "客厅设备"
-        assert db.pairing_code_for("客厅设备") is None
-
-    # 新 token 全链路可用：HTTP 拉快照返回新 epoch（后台库为空 → 空配置、版本 0）
+    # ④ 旧 token 已随重建失效；新 token 全链路可用
+    assert db.find_device_by_token(device_token) is None
     r = client.get("/api/device/snapshot", headers={"X-Device-Token": new_device_token})
     snap = SnapshotMsg.from_json(r.json())
-    assert snap.epoch == new_epoch and snap.version == 0
-    assert snap.appliances == ()
+    assert snap.epoch == new_epoch
+    assert [a.name for a in snap.appliances] == ["灯"]
 
 
 # ---------- 补充：隐私远程开关进入快照 settings ----------

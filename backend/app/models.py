@@ -9,7 +9,8 @@
     is_high_risk/enabled），快照装配经 `app.protocol`（= device/lira/protocol.py
     副本）的 DTO 完成，后台**不可能**产出协议外的字段；
   - 每次配置变更在同一事务内 `version+1`（(epoch, version) 同步键，
-    Key Decisions）；epoch 只在重配对流程中换新。
+    Key Decisions）；epoch 随库而生，库重建/恢复即天然换新（2026-09-27
+    决议：无配对流程，设备侧 epoch 迁移走开发期 reset-sync）。
 
 并发模型：单连接 + 进程内 `threading.RLock` 串行化写（写入低频，毫秒级）；
 WAL 允许外部连接（如测试/备份）并发读不阻塞写。
@@ -76,7 +77,6 @@ class Database:
                 CREATE TABLE IF NOT EXISTS devices (
                     name              TEXT PRIMARY KEY,
                     token_hash        TEXT NOT NULL,
-                    pending_token_hash TEXT,
                     created_at        REAL NOT NULL,
                     last_seen         REAL NOT NULL DEFAULT 0,
                     ack_epoch         INTEGER,
@@ -176,14 +176,6 @@ class Database:
         new_version = self.version() + 1
         self._set_meta_tx(conn, "version", str(new_version))
         return new_version
-
-    def renew_epoch(self) -> tuple[int, int]:
-        """库重建/重配对：epoch 换新、version 归零（对抗性评审结论）。"""
-        new_epoch = secrets.randbits(31) + 1
-        with self._tx() as conn:
-            self._set_meta_tx(conn, "epoch", str(new_epoch))
-            self._set_meta_tx(conn, "version", "0")
-        return new_epoch, 0
 
     # ---------- 管理员（首启引导 / 登录限速 / 撤销计数） ----------
 
@@ -297,49 +289,10 @@ class Database:
         with self._tx() as conn:
             conn.execute("UPDATE devices SET last_seen=? WHERE name=?", (time.time(), name))
 
-    # ---------- 重配对（epoch 迁移，Key Decisions） ----------
-
-    def start_pairing(self, name: str, pairing_code: str) -> str:
-        """子女输入设备屏显配对码：生成新 token（待激活）+ epoch 换新。
-
-        新 token 在设备回执 applied 后激活，旧 token 即刻失效——期间设备
-        仍用旧 token 通信（拉到含 pairing_code 的新快照完成迁移）。
-        新 token 明文须临时暂存于 meta（`pairing_token:<name>`），因为协议的
-        `snapshot.device_token` 字段要求把新 token 下发给设备（设备端仅在
-        配对会话内落库）；配对收尾即删除明文，平时库里只有哈希。
-        """
-        new_token = self.new_device_token()
-        with self._tx() as conn:
-            device = conn.execute("SELECT * FROM devices WHERE name=?", (name,)).fetchone()
-            if device is None:
-                raise KeyError(f"设备不存在: {name}")
-            conn.execute("UPDATE devices SET pending_token_hash=? WHERE name=?",
-                         (self.hash_token(new_token), name))
-            self._set_meta_tx(conn, f"pairing:{name}", pairing_code)
-            self._set_meta_tx(conn, f"pairing_token:{name}", new_token)
-        self.renew_epoch()
-        return new_token
-
-    def pairing_code_for(self, name: str) -> str | None:
-        code = self.get_meta(f"pairing:{name}")
-        return code or None
-
-    def _finalize_pairing(self, name: str, epoch: int, applied: bool) -> None:
-        """回执 applied 且 epoch 与当前一致 → 激活新 token、旧 token 失效，
-        并清除 pairing 明文暂存。"""
-        if not applied or epoch != self.epoch():
-            return
-        with self._tx() as conn:
-            conn.execute(
-                "UPDATE devices SET token_hash=pending_token_hash, pending_token_hash=NULL "
-                "WHERE name=? AND pending_token_hash IS NOT NULL",
-                (name,),
-            )
-            self._set_meta_tx(conn, f"pairing:{name}", "")
-            self._set_meta_tx(conn, f"pairing_token:{name}", "")
+    # ---------- 设备回执 ----------
 
     def record_ack(self, name: str, msg: protocol.SnapshotAckMsg) -> None:
-        """设备回执入库留痕（U8 Approach）+ 重配对收尾。"""
+        """设备回执入库留痕（U8 Approach）。"""
         with self._tx() as conn:
             conn.execute(
                 "INSERT INTO snapshot_acks (device, epoch, version, applied, reason, at) "
@@ -350,7 +303,6 @@ class Database:
                 "UPDATE devices SET ack_epoch=?, ack_version=? WHERE name=?",
                 (msg.epoch, msg.version, name),
             )
-        self._finalize_pairing(name, msg.epoch, msg.applied)
 
     def list_acks(self, name: str, limit: int = 20) -> list[sqlite3.Row]:
         with self._lock:
@@ -531,12 +483,8 @@ class Database:
 
     # ---------- 快照装配（经协议 DTO，字段即协议） ----------
 
-    def build_snapshot(self, device_name: str | None = None) -> SnapshotMsg:
-        """装配全量配置快照；装配后过 `validate_snapshot`（后台不自产非法快照）。
-
-        重配对会话中的设备会额外收到 pairing_code + device_token（新 token），
-        仅该设备可见——协议纪律：这两字段只在重配对会话内出现并被设备接受。
-        """
+    def build_snapshot(self) -> SnapshotMsg:
+        """装配全量配置快照；装配后过 `validate_snapshot`（后台不自产非法快照）。"""
         with self._lock:
             appliances: list[ApplianceDTO] = []
             for row in self.list_appliances():
@@ -562,16 +510,5 @@ class Database:
             scenes=scenes,
             settings=self.settings_all(),
         )
-        if device_name is not None:
-            pairing_code = self.pairing_code_for(device_name)
-            if pairing_code:
-                device = self.get_device(device_name)
-                if device is not None and device["pending_token_hash"] is not None:
-                    # pending token 只有哈希在库——此处需要明文才能下发。
-                    # 因此 start_pairing 把明文暂存于 pairing meta（见下）。
-                    pending_plain = self.get_meta(f"pairing_token:{device_name}")
-                    if pending_plain:
-                        object.__setattr__(snapshot, "pairing_code", pairing_code)
-                        object.__setattr__(snapshot, "device_token", pending_plain)
         protocol.validate_snapshot(snapshot)
         return snapshot

@@ -202,8 +202,8 @@ class SceneDTO:
 class SnapshotMsg:
     """后台 → 设备：全量配置快照（Key Decisions：(epoch, version) 键）。
 
-    pairing_code / device_token 仅在**重配对会话**内出现并被接受
-    （epoch 迁移，见计划对抗性评审结论）；其余任何帧携带即拒绝。
+    2026-09-27 决议：无配对流程——快照不携带 pairing_code / device_token，
+    携带即未知字段拒绝；device token 由设备端配置预置（开发期写入）。
     """
 
     epoch: int
@@ -211,8 +211,6 @@ class SnapshotMsg:
     appliances: tuple[ApplianceDTO, ...]
     scenes: tuple[SceneDTO, ...]
     settings: dict[str, Any]
-    pairing_code: str | None = None
-    device_token: str | None = None
 
     TYPE = "snapshot"
     ALLOWED_KEYS = {
@@ -222,12 +220,10 @@ class SnapshotMsg:
         "appliances",
         "scenes",
         "settings",
-        "pairing_code",
-        "device_token",
     }
 
     def to_json(self) -> dict[str, Any]:
-        obj: dict[str, Any] = {
+        return {
             "type": self.TYPE,
             "epoch": self.epoch,
             "version": self.version,
@@ -235,11 +231,6 @@ class SnapshotMsg:
             "scenes": [s.to_json() for s in self.scenes],
             "settings": dict(self.settings),
         }
-        if self.pairing_code is not None:
-            obj["pairing_code"] = self.pairing_code
-        if self.device_token is not None:
-            obj["device_token"] = self.device_token
-        return obj
 
     @classmethod
     def from_json(cls, obj: Any) -> "SnapshotMsg":
@@ -258,16 +249,6 @@ class SnapshotMsg:
             scenes=tuple(SceneDTO.from_json(s) for s in scenes_raw),
             settings=_require_mapping(o["settings"], f"{where}.settings"),
         )
-        if "pairing_code" in o:
-            pairing_code = o["pairing_code"]
-            if pairing_code is not None and (not isinstance(pairing_code, str) or not pairing_code):
-                raise ProtocolError(f"{where}.pairing_code 应为非空字符串或 null")
-            object.__setattr__(snapshot, "pairing_code", pairing_code)
-        if "device_token" in o:
-            device_token = o["device_token"]
-            if device_token is not None and (not isinstance(device_token, str) or not device_token):
-                raise ProtocolError(f"{where}.device_token 应为非空字符串或 null")
-            object.__setattr__(snapshot, "device_token", device_token)
         validate_snapshot(snapshot)
         return snapshot
 

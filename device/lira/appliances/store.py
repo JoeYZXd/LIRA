@@ -23,7 +23,6 @@ __all__ = ["ApplianceStore"]
 
 _META_EPOCH = "snapshot_epoch"
 _META_VERSION = "snapshot_version"
-_META_DEVICE_TOKEN = "device_token"
 
 
 class ApplianceStore:
@@ -236,7 +235,6 @@ class ApplianceStore:
         scenes: list[SceneModel],
         epoch: int,
         version: int,
-        device_token: str | None = None,
     ) -> None:
         """全量快照单事务原子应用：全部替换 + 元数据提交，要么全成要么全回滚。"""
         with self._conn:
@@ -250,10 +248,8 @@ class ApplianceStore:
                 self._upsert_scene_tx(scene)
             self._set_meta(_META_EPOCH, str(epoch))
             self._set_meta(_META_VERSION, str(version))
-            if device_token is not None:
-                self._set_meta(_META_DEVICE_TOKEN, device_token)
 
-    # ---------- 同步元数据 (epoch, version) / token ----------
+    # ---------- 同步元数据 (epoch, version) ----------
 
     def _set_meta(self, key: str, value: str) -> None:
         self._conn.execute(
@@ -278,5 +274,13 @@ class ApplianceStore:
         v = self.get_meta(_META_VERSION)
         return int(v) if v is not None else None
 
-    def device_token(self) -> str | None:
-        return self.get_meta(_META_DEVICE_TOKEN)
+    def clear_sync_meta(self) -> None:
+        """清除 (epoch, version) 同步元数据（开发期 epoch 迁移 CLI 用）。
+
+        仅动 meta 两键：本地配置与已学红外码原样保留；重启后设备按
+        bootstrap 语义接受收到的首个快照。
+        """
+        with self._conn:
+            self._conn.execute(
+                "DELETE FROM meta WHERE key IN (?, ?)", (_META_EPOCH, _META_VERSION)
+            )

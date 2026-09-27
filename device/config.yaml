@@ -29,5 +29,6 @@ db_path: data/device.db
 sync:
   ws_url: ""               # 如 ws://192.168.1.10:8000/ws/device（U8 后台接入后填写）
   heartbeat_seconds: 60.0  # 心跳拉取兜底周期（安全关键变更走在线即时推送）
+  device_token: ""         # 开发期预置：后台「注册设备」一次性展示的 token（或环境变量 LIRA_SYNC_DEVICE_TOKEN）
 
 log_level: INFO

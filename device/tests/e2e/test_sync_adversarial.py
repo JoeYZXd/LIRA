@@ -1,13 +1,17 @@
 """同步对抗用例（R30 安全评审结论的 e2e 固化）：真实后台 + 真实设备端 SyncClient。
 
-- 旧 epoch 快照回放：重配对完成后再回放旧 epoch 快照 → 拒绝 + 本地配置不被翻转；
+- 旧 epoch 快照回放：开发期 epoch 迁移（reset-sync）完成后再回放旧 epoch
+  快照 → 拒绝 + 本地配置不被翻转；
 - 同 (epoch, version) 重复投递：幂等跳过（不重复应用/播报）；
 - 应用中崩溃：单事务原子性 → 本地库不变，重新拉取可干净应用；
-- 后台库重建 → epoch 换新：配对会话外一律拒绝，重配对会话内同码即接受；
+- 后台库重建 → epoch 换新：运行期一律拒绝，reset-sync 清同步元数据后
+  bootstrap 接受新 epoch 且已学码值保留（2026-09-27 决议：无配对流程）；
 - 多次离线变更：设备只收/只应用最终快照一份。
 """
 
 from __future__ import annotations
+
+import secrets
 
 import sys
 from pathlib import Path
@@ -18,7 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from conftest import SyncPump, WSAdapter, apost, ws_device_session  # noqa: E402
 
 from lira.appliances.store import ApplianceStore  # noqa: E402
-from lira.protocol import HelloMsg, PullMsg  # noqa: E402
+from lira.protocol import PullMsg  # noqa: E402
 from lira.sync import SyncClient  # noqa: E402
 
 
@@ -28,12 +32,8 @@ def _client(h, token, ws, **kw) -> SyncClient:
 
 
 def _reconnect(h, sync: SyncClient, ws) -> SyncPump:
-    """同一 SyncClient 换新连接（模拟设备重连：拒绝痕迹/配对状态延续，
-    token 以本地库为准——配对收尾后旧 token 失效）。"""
+    """同一 SyncClient 换新连接（模拟设备重连：拒绝痕迹延续，token 不变）。"""
     sync._transport = WSAdapter(ws)
-    token = h.store.device_token()
-    if token:
-        sync._token = token
     sync._authed = False
     return SyncPump(sync, ws)
 
@@ -68,19 +68,32 @@ async def test_old_epoch_replay_rejected(harness, admin, device_token):
     assert old_snapshot["type"] == "snapshot"
     old_epoch = old_snapshot["epoch"]
 
-    # 后台库重建 → epoch 换新 + 重配对（设备迁移到新纪元）
+    # 后台库重建 → epoch 换新（epoch 换新 + version 归零，与整库重建同语义）
     db = admin.app.state.db
-    code = sync.begin_pairing()
-    assert apost(admin, f"/admin/devices/{db.find_device_by_token(device_token)}/pair",
-                 pairing_code=code).status_code == 303
+    db.set_meta("epoch", str(secrets.randbits(31) + 1))
+    db.set_meta("version", "0")
+
+    # 运行期新 epoch 快照一律拒绝，本地配置保持
+    with admin.websocket_connect("/ws/device") as ws:
+        pump = _reconnect(h, sync, ws)
+        await sync.connect()
+        rejections_before = len(sync.rejections)
+        reply = await sync.handle_frame(db.build_snapshot().to_json())
+        assert reply["applied"] is False and reply["reason"] == "epoch_mismatch"
+        assert len(sync.rejections) == rejections_before + 1, "拒绝必须留痕（审计面）"
+        assert h.store.current_epoch() == old_epoch, "本地 epoch 不得被翻改"
+
+    # 开发期迁移：设备端 reset-sync 清同步元数据（保留配置与已学码值）
+    h.store.clear_sync_meta()
+
+    # 迁移后 bootstrap：接受新 epoch 快照
     with admin.websocket_connect("/ws/device") as ws:
         pump = _reconnect(h, sync, ws)
         await pump.run_until(
             lambda: h.store.current_epoch() == db.epoch() != old_epoch)
     assert h.store.get_appliance("取暖器").enabled is True, "新纪元初版仍启用"
-    assert h.store.current_epoch() != old_epoch
 
-    # 重配对完成后再回放旧 epoch 快照 → 必须拒绝，本地配置不被翻转
+    # 迁移完成后再回放旧 epoch 快照 → 必须拒绝，本地配置不被翻转
     with admin.websocket_connect("/ws/device") as ws:
         pump = _reconnect(h, sync, ws)
         await sync.connect()
@@ -108,8 +121,7 @@ async def test_same_version_duplicate_delivery_idempotent(harness, admin, device
         assert sum(1 for t in h.speak_log if "已被家人禁用" in t) == 1
 
         # 直接重投同一快照帧（同 epoch/version）
-        snap = admin.app.state.db.build_snapshot(
-            admin.app.state.db.find_device_by_token(device_token))
+        snap = admin.app.state.db.build_snapshot()
         reply = await sync.handle_frame(snap.to_json())
         assert reply["applied"] is False and reply["reason"] == "already_applied"
         assert sum(1 for t in h.speak_log if "已被家人禁用" in t) == 1, "不得重复播报"
@@ -163,59 +175,42 @@ async def test_mid_apply_crash_leaves_store_intact(harness, admin, device_token,
             {"取暖器", "台灯", "风扇"}
 
 
-# ---------- 4. 库重建 epoch 换新：会话外拒绝 / 会话内接受 ----------
+# ---------- 4. 库重建 epoch 换新：运行期拒绝 / reset-sync 后接受 ----------
 
 
-async def test_rebuilt_backend_epoch_rejected_without_pairing(harness, admin, device_token):
+async def test_rebuilt_backend_epoch_rejected_until_reset_sync(harness, admin, device_token):
     h = harness
     _setup_heater(admin)
     sync = await _initial_sync(h, admin, device_token)
     old_epoch = h.store.current_epoch()
+    h.store.upsert_code("取暖器", "power", "learned-code-1")  # 已学码值在场
 
-    # 模拟后台库重建（epoch 换新原语，与整库重建同路径）
+    # 模拟后台库重建（epoch 换新 + version 归零，与整库重建同语义）
     db = admin.app.state.db
-    new_epoch, _ = db.renew_epoch()
-    assert new_epoch != old_epoch
+    db.set_meta("epoch", str(secrets.randbits(31) + 1))
+    db.set_meta("version", "0")
+    assert db.epoch() != old_epoch
 
-    # 未重配对：新 epoch 快照一律拒绝，本地配置保持
+    # 未迁移：新 epoch 快照一律拒绝，本地配置保持
     with admin.websocket_connect("/ws/device") as ws:
         pump = _reconnect(h, sync, ws)
         await sync.connect()
-        reply = await sync.handle_frame(db.build_snapshot(
-            db.find_device_by_token(device_token)).to_json())
+        reply = await sync.handle_frame(db.build_snapshot().to_json())
         assert reply["applied"] is False and reply["reason"] == "epoch_mismatch"
         assert sync.rejections, "陌生 epoch 必须留拒绝痕迹"
         assert h.store.current_epoch() == old_epoch, "本地 epoch 不得变"
         assert h.store.get_appliance("取暖器").enabled is True
 
+    # 开发期迁移：reset-sync 仅清同步元数据
+    h.store.clear_sync_meta()
 
-async def test_rebuilt_backend_epoch_accepted_within_pairing(harness, admin, device_token):
-    h = harness
-    _setup_heater(admin)
-    sync = await _initial_sync(h, admin, device_token)
-    old_epoch = h.store.current_epoch()
-
-    db = admin.app.state.db
-    # 设备端开始重配对会话：生成一次性配对码；子女在后台输入同码
-    code = sync.begin_pairing()
-    assert sync.pairing_active
-    assert apost(admin, f"/admin/devices/{db.find_device_by_token(device_token)}/pair",
-                 pairing_code=code).status_code == 303
-    assert db.epoch() != old_epoch, "配对即换新 epoch"
-
-    # 配对会话内的下一次推送：携带 pairing_code + 新 token → 接受并迁移
+    # 迁移后 bootstrap：接受新 epoch 快照，已学码值保留
     with admin.websocket_connect("/ws/device") as ws:
         pump = _reconnect(h, sync, ws)
         await pump.run_until(
             lambda: h.store.current_epoch() == db.epoch() and
             h.store.get_appliance("取暖器") is not None)
-        assert not sync.pairing_active, "配对码一次性，用后失效"
-    assert h.store.device_token() != device_token, "配对收尾：设备 token 已换新"
-
-    # 旧 token 已失效——旧 token 鉴权被拒
-    with admin.websocket_connect("/ws/device") as ws:
-        ws.send_json(HelloMsg(token=device_token).to_json())
-        assert ws.receive_json() == {"type": "auth_error", "reason": "invalid_token"}
+    assert h.store.get_appliance("取暖器").codes.get("power") == "learned-code-1"
 
 
 # ---------- 5. 多次离线变更 → 只收最终快照 ----------

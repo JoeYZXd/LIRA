@@ -188,11 +188,18 @@ class TestSnapshotApplyAndMeta:
         assert store.current_version() == 1
         assert store.get_appliance("台灯").enabled is True
 
-    def test_meta_device_token(self, tmp_path):
+    def test_clear_sync_meta_preserves_config_and_codes(self, tmp_path):
+        """开发期 epoch 迁移原语：仅清 (epoch, version)，配置与码值原样保留。"""
         store = make_store(tmp_path)
-        assert store.device_token() is None
-        store.set_meta("device_token", "tok-1")
-        assert store.device_token() == "tok-1"
+        store.apply_snapshot(
+            appliances=[make_light()], scenes=[], epoch=7, version=3
+        )
+        store.upsert_code("台灯", "power", "learned-code-1")
+        store.clear_sync_meta()
+        assert store.current_epoch() is None and store.current_version() is None
+        light = store.get_appliance("台灯")
+        assert light is not None
+        assert light.codes.get("power") == "learned-code-1"
 
     def test_reopen_keeps_data(self, tmp_path):
         path = tmp_path / "device.db"

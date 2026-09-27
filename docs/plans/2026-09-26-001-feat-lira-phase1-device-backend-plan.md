@@ -73,7 +73,7 @@ origin: docs/brainstorms/2026-09-26-lira-requirements.md
 - **后台**：FastAPI + SQLite(WAL, `synchronous=FULL`) + Jinja2/HTMX（无 Node 构建链）；单管理员 bcrypt + JWT；设备用独立 device token（HTTP header）+ WebSocket 心跳（60s）同步配置。
 - **后台鉴权细化（安全评审结论）**：管理员会话用 cookie（HttpOnly + SameSite=Strict）而非 localStorage JWT——HTMX 页面无 JS 管 token，cookie 天然防 XSS 窃取，配 CSRF token 中间件；JWT 带撤销计数（改密码/吊销使旧会话失效）。管理员凭据走首启引导（环境变量或首次访问强制设置，禁止空默认密码硬编码）；登录接口限速（失败 5 次锁 5 分钟）。设备 device token 用 `secrets.token_urlsafe` 生成、库中只存哈希；WS 连接首帧必须先出示 token 才允许后续消息。
 - **配置同步 = 全量快照 + (epoch, version) 键（数据完整性评审结论）**：设备拉取的是**全量配置快照**而非 delta；版本键为 `(epoch, version)` 二元组——epoch 在后台数据库重建/恢复时重新生成，防旧 delta/旧版本号在新库上被误判为"已应用"（禁用取暖器的配置被回放覆盖是安全事故，不是 bug）。设备应用快照须原子（事务整体提交）且幂等（重复收到同 (epoch, version) 直接跳过）；应用后回执版本号。安全关键变更（高危禁用、隐私切换）后台在设备在线时经 WS **立即推送**，60s 心跳拉取仅作离线兜底（R30 的"60 秒内"按推送路径达成）。
-  **epoch 迁移（对抗性评审结论）**：后台库重建时设备注册关系与 epoch 同时失效，因此重建后必须走**重新配对流程**才能恢复同步——后台生成新 device token + 新 epoch，在设备端物理确认下完成绑定（设备屏幕显示一次性配对码，子女在后台输入同一配对码），设备**仅在配对会话内**接受新 epoch 并落库；配对通道之外的任何陌生 epoch 快照一律拒绝。这样既不出现"设备永久冻结在旧安全配置"（同步坏死的静默失效），也不出现"设备接受任何未见过的 epoch"（回放保护失效）。
+  **epoch 迁移（2026-09-27 决议：取消配对流程，改为开发期预置）**：后台库重建时设备注册关系与 epoch 同时失效，恢复同步走**开发期预置**——设备端配置文件写入 device token；epoch 换新后由开发者在设备端执行 `python -m lira.sync reset-sync <db>`（仅清 (epoch, version) 元数据，保留本地配置与已学红外码），设备重启后按 bootstrap 语义接受新 epoch 快照。运行期任何陌生 epoch 快照一律拒绝（回放保护不变）。这样既不出现"设备永久冻结在旧安全配置"（同步坏死有明确的手工恢复路径），也不出现"设备接受任何未见过的 epoch"（回放保护失效）。
 - **本地安全底线（safety floor，不可被配置触碰）**：高危设备的二次确认逻辑本身（R6/R23）是代码常量，后台配置只能"禁用设备"或"标记/取消高危标记"——不存在任何让高危设备跳过确认的配置路径；设备端应用快照时校验此不变量，违规快照拒绝并告警。
 - **OCR 双后端**：`OcrEngine` 接口，x86 用 PaddleOCR/onnxruntime（开发期），板上用 RKNNLite 加载 .rknn；业务代码无感知。
 - **红外原始码方案**：学习 = `ir-ctl -r` 录原始 pulse/space 存库；回放 = `ir-ctl -s`；空调按"整状态帧"学习（每种目标状态学一帧），不做状态组合。
@@ -136,7 +136,7 @@ origin: docs/brainstorms/2026-09-26-lira-requirements.md
     │   │   │   ├── models.py        # 设备/场景/安全规则模型（SQLite 持久化）
     │   │   │   └── ir.py            # ir-ctl 学习/回放封装
     │   │   ├── privacy.py           # 隐私模式一等状态（麦克风+上传+按键）
-    │   │   ├── ui/                  # 设备端触摸屏 Web UI
+    │   │   ├── ui/                  # 设备端 Web UI（局域网浏览器访问）
     │   │   └── sync.py              # 与后台 WS 同步：全量快照 (epoch,version)、幂等事务应用、安全底线校验
     │   └── tests/
     ├── backend/
@@ -350,7 +350,7 @@ flowchart LR
 **Dependencies:** U1（HAL）、U3（状态机确认流程）
 
 **Files:**
-- Create: `lira/appliances/models.py`、`lira/appliances/ir.py`、`lira/appliances/store.py`（SQLite 本地库）、`lira/sync.py`（设备端同步：WS 客户端、全量快照 (epoch,version) 原子幂等应用、安全底线不变量校验、重配对 epoch 迁移）
+- Create: `lira/appliances/models.py`、`lira/appliances/ir.py`、`lira/appliances/store.py`（SQLite 本地库）、`lira/sync.py`（设备端同步：WS 客户端、全量快照 (epoch,version) 原子幂等应用、安全底线不变量校验、同步状态重置 CLI 供开发期 epoch 迁移）
 - Create: `deploy/dt-overlays/gpio-ir-overlay.dts`（含 RX/TX 节点，文档化编译步骤）
 - Test: `device/tests/test_appliance_models.py`、`device/tests/test_ir.py`、`device/tests/test_sync.py`
 
@@ -359,7 +359,7 @@ flowchart LR
 - 语音匹配：别名唯一命中才执行；零命中走"未配置"话术；多命中不猜（应答澄清）——对应流程分析 G12。
 - 发送前本地校验安全底线：`is_high_risk and not confirmed` → 拒发（状态机层校验之外的最后一道闸，`send_ir` 内部再查 enabled/high-risk，双层 fail-closed）。
 - 学习流程由后台发起（R32）：后台发"进入学习模式+设备+动作名"→ 设备录一帧原始码 → 回传码值入库。
-- 设备端同步（`lira/sync.py`）：WS 客户端（首帧出示 token 鉴权，协议见 Key Technical Decisions 与 U8）；收到快照先校验安全底线不变量，再在单事务内原子应用（同 (epoch, version) 重复投递幂等跳过），应用后回执 `(epoch, version)`；心跳 60s 拉取兜底。**epoch 只在重配对会话内换新**（屏幕配对码确认，见 Key Technical Decisions），其余陌生 epoch 一律拒绝。WS 传输层可注入（单元测试用 mock 传输，不依赖真实后台；与真实后台的联通在 U9 验证）。
+- 设备端同步（`lira/sync.py`）：WS 客户端（首帧出示 token 鉴权，协议见 Key Technical Decisions 与 U8）；收到快照先校验安全底线不变量，再在单事务内原子应用（同 (epoch, version) 重复投递幂等跳过），应用后回执 `(epoch, version)`；心跳 60s 拉取兜底。**epoch 迁移走开发期预置**（设备端 `reset-sync` 清同步元数据后重拉快照，见 Key Technical Decisions），运行期陌生 epoch 一律拒绝。WS 传输层可注入（单元测试用 mock 传输，不依赖真实后台；与真实后台的联通在 U9 验证）。
 - HAL mock 实现学习=从文件注入码值；板上实现调 `ir-ctl` 子进程（RX 录原始码，TX 回放）。
 
 **Test scenarios:**
@@ -369,16 +369,16 @@ flowchart LR
 - Error path: 指令指向未配置设备 → "请家人在后台添加"话术。
 - Error path: 对已禁用设备直接调 `send_ir`（绕过状态机的防御性测试）→ 抛本地异常、IR 未发射。
 - Covers R30/AE7. Happy path（`test_sync.py`）: mock 传输注入全量快照 → 原子入库 → 回执 `(epoch, version)`；同版本重复投递 → 幂等跳过。
-- Error path（`test_sync.py`）: 旧 epoch / 陌生 epoch 快照 → 拒绝应用、本地安全规则保持；配对会话内出示新 epoch + 屏幕配对码 → 接受并落库。
+- Error path（`test_sync.py`）: 旧 epoch / 陌生 epoch 快照 → 拒绝应用、本地安全规则保持；出厂 bootstrap（本地无 epoch）接受首个快照；reset-sync 后新 epoch 接受且已学码值保留。
 - Error path（`test_sync.py`）: 违反安全底线不变量的快照（试图给高危设备加"免确认"路径）→ 拒绝并告警。
 
 **Verification:** x86 mock 全流程通；DT overlay 文档就绪待板上验证（真实收发在 U10）。
 
 ---
 
-### U7. 隐私模式与设备端触摸屏 UI
+### U7. 隐私模式与设备端 Web UI
 
-**Goal:** 隐私模式一等状态（麦克风关+上传拦截+播报后果），物理按键退出（R19）；触摸屏 Web UI（状态/设置/隐私开关，R17）。
+**Goal:** 隐私模式一等状态（麦克风关+上传拦截+播报后果），物理按键退出（R19）；设备 Web UI（局域网浏览器远程访问，设备无触摸屏；状态/设置/隐私开关，R17）。
 
 **Requirements:** R12、R17、R19、R30（本端应用部分）
 
@@ -391,7 +391,7 @@ flowchart LR
 **Approach:**
 - 隐私模式为全 app 广播的状态对象：`privacy.py` 发布 on/off 事件 → 音频层关麦、LLM 层拦截、状态机置不可唤醒；切换时 TTS 播报后果（含麦克风已关提示）。
 - 物理按键经 HAL Button（mock=键盘事件；板上=GPIO 中断）触发同一事件通道，按键退出隐私**无需鉴权**（老人无凭据，R19 的存在意义即在此）。
-- UI 用设备本地小 Web 服务（板上绑屏即 kiosk），页面：状态卡（网络/远程可用/隐私）、隐私开关、音量、TTS 语速、设备列表只读。**开启/关闭隐私的 UI 路径需设备本地口令**（设备首次启动时屏上设置，无默认值）——与物理按键区分：按键是老人退出隐私的无鉴权通道，UI 是防他人/防误触的通道。只读状态卡不鉴权。
+- UI 用设备本地小 Web 服务（局域网浏览器访问；设备无触摸屏，状态反馈以语音为主），页面：状态卡（网络/远程可用/隐私）、隐私开关、音量、TTS 语速、设备列表只读。**开启/关闭隐私的 UI 路径需设备本地口令**（设备首次启动时经局域网 Web 界面设置，无默认值）——与物理按键区分：按键是老人退出隐私的无鉴权通道，UI 是防他人/防误触的通道。只读状态卡不鉴权。
 - 日志纪律：ASR 识别文本、OCR 识别文本、LLM 往返内容**一律不落日志**（隐私模式之外也不落——设备记录的语音内容本身就是敏感面）；日志只记事件类型与耗时。
 
 **Test scenarios:**
@@ -419,7 +419,7 @@ flowchart LR
 - 鉴权双通道：管理员浏览器走 cookie 会话（HttpOnly + SameSite=Strict + CSRF token，见 Key Technical Decisions）；设备走 `X-Device-Token` header——配置写入必须双向认证（防伪造"禁用"指令）。
 - 管理员凭据首启引导：无凭据时首次访问强制进入设置页（或经环境变量注入），系统不存在空/默认密码状态；登录失败限速（5 次锁 5 分钟）；JWT 带撤销计数，改密码即全体会话失效。
 - 设备 token：`secrets.token_urlsafe` 生成、库中只存哈希（泄露库文件不泄露 token）、可吊销重发；WS 连接握手后**首帧**必须出示 token，未认证前不处理任何消息。
-- 配置同步协议（见 Key Technical Decisions）：全量快照 + `(epoch, version)` 键。后台每次配置变更 version+1、重建/恢复库时 epoch 换新；安全关键变更（禁用设备、高危标记、隐私切换）在设备在线时经 WS **立即推送**快照，心跳（60s）拉取仅兜底离线场景（R30）。设备回执 `(epoch, version)` 入库留痕。库重建后的 epoch 迁移走**重配对流程**（后台生成新 token + 新 epoch，输入设备屏显配对码完成绑定，见 Key Technical Decisions）。
+- 配置同步协议（见 Key Technical Decisions）：全量快照 + `(epoch, version)` 键。后台每次配置变更 version+1、重建/恢复库时 epoch 换新；安全关键变更（禁用设备、高危标记、隐私切换）在设备在线时经 WS **立即推送**快照，心跳（60s）拉取仅兜底离线场景（R30）。设备回执 `(epoch, version)` 入库留痕。库重建后的 epoch 迁移走**开发期预置**（设备端 reset-sync，见 Key Technical Decisions）。
 - 学习模式 = 后台下发指令 + WS 接收设备回传码值（回传同样走已认证 WS）。
 - 简单页面：设备列表（在线/最后心跳/配置版本）、家电配置表单、高危标记开关、学习按钮、隐私开关。
 - 运维面：后台 SQLite 文件权限 0600；LAN 明文 HTTP 的暴露面写入 `deploy/SETUP.md`（Phase 1 已知限制，见 Scope Boundaries）。
@@ -452,7 +452,7 @@ flowchart LR
 **Approach:**
 - 音频注入走 mock AudioIO 播放预录 wav；LLM 用本地 stub；后台用 testclient 起真实 app。
 - 每条 AE 一个测试文件，断言跨模块副作用（IR mock 调用、TTS 播报记录、网络拦截计数）。
-- **对抗性同步用例**（`test_sync_adversarial.py`，覆盖安全评审/数据完整性评审发现）：旧 epoch 快照回放、同版本重复投递、快照应用到一半崩溃（下次启动完整性校验）、后台库删除重建后 epoch 换新且设备不会误判"已最新"（未重配对时拒绝；重配对会话内接受新 epoch 并恢复同步）、设备离线期间多次配置变更只取最终快照。
+- **对抗性同步用例**（`test_sync_adversarial.py`，覆盖安全评审/数据完整性评审发现）：旧 epoch 快照回放、同版本重复投递、快照应用到一半崩溃（下次启动完整性校验）、后台库删除重建后 epoch 换新且设备不会误判"已最新"（运行期拒绝；设备端 reset-sync 后接受新 epoch 并恢复同步）、设备离线期间多次配置变更只取最终快照。
 
 **Test scenarios:**
 - 即 AE1–AE7 逐条落地（origin 为权威），每条至少含正常路径；AE3/AE4 加边界与失败路径。
@@ -463,7 +463,7 @@ flowchart LR
 
 ### U10. 硬件 bring-up 与板上部署
 
-**Goal:** 在 Orange Pi 5 实机完成：系统镜像与 RKNN 版本锁定、MIPI 摄像头、7 寸屏、USB 麦阵、喇叭、GPIO 红外收发、物理按键；用真实 HAL 实现替换 mock，实机复跑核心链路。
+**Goal:** 在 Orange Pi 5 实机完成：系统镜像与 RKNN 版本锁定、MIPI 摄像头、USB 麦阵、喇叭、GPIO 红外收发、物理按键；用真实 HAL 实现替换 mock，实机复跑核心链路。
 
 **Requirements:** R9 实机验证、R18（TF 寿命）、R19（真实按键）、R5（真实红外）
 
@@ -478,6 +478,7 @@ flowchart LR
 - 版本三件套先核对后跑模型：`cat /sys/kernel/debug/rknpu/version`、`strings librknnrt.so | grep version`，与转换器 2.3.x 对齐。
 - OCR `.rknn` 转换在 x86 机完成（paddle2onnx → rknn-toolkit2），板端仅 RKNNLite 推理；det 绑 NPU core0、rec 绑 core1 并行。
 - CPU 亲和：KWS 常驻绑 A55（taskset），ASR/TTS 用 A76；thermal governor 配置入 `deploy/system/`。
+- 设备 provisioning 入 `deploy/SETUP.md`：device token 写入设备配置（`sync.device_token`）；后台库重建后执行 `python -m lira.sync reset-sync` 迁移 epoch。Display 板上实现为 no-op（无触摸屏，状态反馈走语音与远程 Web）。
 - 存量配置：log2ram + journald volatile + noatime + 无 swap；数据库与配置放 TF 卡但写入低频（R30 心跳只存版本号）。
 - 实机冒烟清单：唤醒→读报纸→开空调（学习码）→拔网线→再读药品说明书（原文+免责）→按键隐私切换。
 
@@ -496,8 +497,8 @@ flowchart LR
 ### Phase B — 阅读 + 远程智能（U4–U5）
 OCR 管线与 LLM 降级。完成后"拍报纸→朗读 / 药品说明→白话+免责 / 断网降级"闭环。
 
-### Phase C — 家电 + 隐私 + 屏（U6–U7）
-红外学习回放、高危安全、隐私模式、触摸屏 UI。
+### Phase C — 家电 + 隐私 + Web UI（U6–U7）
+红外学习回放、高危安全、隐私模式、局域网 Web UI。
 
 ### Phase D — 后台（U8）
 子女管理后台 + 设备同步。

@@ -147,7 +147,6 @@ def create_app(db_path: str = DEFAULT_DB_PATH) -> FastAPI:
                 "last_seen": row["last_seen"],
                 "ack_epoch": row["ack_epoch"],
                 "ack_version": row["ack_version"],
-                "pairing_pending": db.pairing_code_for(row["name"]) is not None,
             }
             for row in db.list_devices()
         ]

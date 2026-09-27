@@ -5,9 +5,10 @@ Key Decisions 落地（配置同步 = 全量快照 + (epoch, version) 键）：
   - 快照先过协议严格解析 + 安全底线不变量校验（`lira.protocol`），
     再在单事务内原子应用；同 (epoch, version) 重复投递幂等跳过；
     应用后回执 SnapshotAck；
-  - **epoch 只在重配对会话内换新**：设备端 `begin_pairing()` 生成一次性
-    配对码（屏幕显示，子女在后台输入同一码）；配对会话外的任何陌生 epoch
-    快照一律拒绝（旧 epoch 回放与陌生 epoch 注入同为此路径拒绝）；
+  - **陌生/旧 epoch 快照一律拒绝**（旧快照回放与陌生 epoch 注入同路径拒绝）；
+    epoch 迁移走开发期预置（2026-09-27 决议：无配对流程）——device token 经
+    配置 `sync.device_token` 预置，后台库重建换新 epoch 后由开发者在设备端
+    执行 `python -m lira.sync reset-sync <db>` 清同步元数据再重拉快照；
   - 快照 `settings`（privacy_mode/tts_volume/tts_speed）随快照一并应用：
     privacy_mode 殊途同归触碰同一 `PrivacyState` 广播对象（与按键/UI 通道
     同源），音量/语速落注入的 `TtsSettings` 同形对象（SEC-3/F2）；
@@ -22,7 +23,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import secrets
 from typing import Awaitable, Callable, Protocol
 
 from lira.appliances.ir import ApplianceError
@@ -117,24 +117,8 @@ class SyncClient:
         self._privacy = privacy
         self._tts_settings = tts_settings
         self._authed = False
-        self._pairing_code: str | None = None
         #: 拒绝记录（告警审计面，U7 状态卡/U9 断言用）
         self.rejections: list[str] = []
-
-    # ---------- 配对（epoch 迁移唯一入口） ----------
-
-    def begin_pairing(self) -> str:
-        """开始重配对会话：生成一次性屏幕配对码（返回给调用方显示到屏幕）。
-
-        会话内接受携带同码的新 epoch 快照；任何后续动作（成功/新会话）后失效。
-        """
-        self._pairing_code = f"{secrets.randbelow(1_000_000):06d}"
-        logging.info("配对会话已开启（配对码已生成，待屏幕显示）")
-        return self._pairing_code
-
-    @property
-    def pairing_active(self) -> bool:
-        return self._pairing_code is not None
 
     # ---------- 连接与鉴权 ----------
 
@@ -226,7 +210,13 @@ class SyncClient:
         current_version = self._store.current_version()
 
         if current_epoch is not None and snap.epoch != current_epoch:
-            return await self._handle_foreign_epoch(snap, current_epoch)
+            # 陌生/旧 epoch：无条件拒绝（对抗回放/注入）；epoch 迁移走开发期
+            # `reset-sync` 清同步元数据，运行期无任何旁路（2026-09-27 决议）。
+            self._reject(
+                f"epoch_mismatch: got epoch={snap.epoch} current={current_epoch}（拒绝应用，本地安全规则保持）"
+            )
+            return SnapshotAckMsg(epoch=snap.epoch, version=snap.version,
+                                  applied=False, reason="epoch_mismatch")
 
         if current_epoch is not None and snap.epoch == current_epoch and current_version is not None:
             if snap.version <= current_version:
@@ -235,56 +225,17 @@ class SyncClient:
                 return SnapshotAckMsg(epoch=snap.epoch, version=snap.version,
                                       applied=False, reason="already_applied")
 
-        # 首次配对（本地无 epoch）或同 epoch 的更新版本 → 原子应用。
-        # device_token 只在配对会话内、且配对码核对一致时才落库（防同 epoch 帧偷换 token）。
-        token_to_store: str | None = None
-        if (
-            self.pairing_active
-            and snap.pairing_code is not None
-            and secrets.compare_digest(snap.pairing_code, self._pairing_code)
-        ):
-            token_to_store = snap.device_token
+        # 首次接入（本地无 epoch，bootstrap）或同 epoch 的更新版本 → 原子应用。
         prev_enabled = self._prev_enabled()
         self._store.apply_snapshot(
             appliances=self._snapshot_models(snap),
             scenes=[SceneModel.from_dto(s) for s in snap.scenes],
             epoch=snap.epoch,
             version=snap.version,
-            device_token=token_to_store,
         )
         await self._apply_settings(snap.settings)
-        if token_to_store is not None:
-            logging.info("配对完成：device token 已更新")
-            self._pairing_code = None  # 一次性会话，用后即失效
         logging.info("快照已应用: epoch=%s version=%s appliances=%d scenes=%d",
                      snap.epoch, snap.version, len(snap.appliances), len(snap.scenes))
-        self._notify_applied(snap, prev_enabled)
-        return SnapshotAckMsg(epoch=snap.epoch, version=snap.version, applied=True)
-
-    async def _handle_foreign_epoch(self, snap: SnapshotMsg, current_epoch: int) -> SnapshotAckMsg:
-        """陌生/旧 epoch：仅配对会话内出示同码才接受（对抗旧快照回放）。"""
-        if not self.pairing_active or snap.pairing_code is None:
-            self._reject(
-                f"epoch_mismatch: got epoch={snap.epoch} current={current_epoch}（拒绝应用，本地安全规则保持）"
-            )
-            return SnapshotAckMsg(epoch=snap.epoch, version=snap.version,
-                                  applied=False, reason="epoch_mismatch")
-        if not secrets.compare_digest(snap.pairing_code, self._pairing_code):
-            self._reject("pairing_code_mismatch: 配对码不符（拒绝应用）")
-            return SnapshotAckMsg(epoch=snap.epoch, version=snap.version,
-                                  applied=False, reason="pairing_code_mismatch")
-        # 通过门禁 → 走正常应用路径（此时 epoch 不等会被视为新纪元接受）
-        prev_enabled = self._prev_enabled()
-        self._store.apply_snapshot(
-            appliances=self._snapshot_models(snap),
-            scenes=[SceneModel.from_dto(s) for s in snap.scenes],
-            epoch=snap.epoch,
-            version=snap.version,
-            device_token=snap.device_token,
-        )
-        await self._apply_settings(snap.settings)
-        logging.info("重配对完成：epoch %s -> %s", current_epoch, snap.epoch)
-        self._pairing_code = None
         self._notify_applied(snap, prev_enabled)
         return SnapshotAckMsg(epoch=snap.epoch, version=snap.version, applied=True)
 
@@ -336,3 +287,38 @@ class SyncClient:
     def dialog_appliances(self) -> tuple:
         """当前本地库全部家电 → U3 意图层模型元组（Router 输入）。"""
         return tuple(a.to_dialog() for a in self._store.get_all_appliances())
+
+
+# ---------- 开发期 epoch 迁移 CLI（2026-09-27 决议：无运行时配对流程） ----------
+
+
+def _cli(argv: list[str] | None = None) -> int:
+    """`python -m lira.sync reset-sync <db>`：仅清除 (epoch, version) 同步元数据。
+
+    用途：后台库重建/恢复后自动换新 epoch，旧设备本地 epoch 随即失配被拒；
+    由开发者在设备端执行本命令清除同步元数据，重启后按 bootstrap 语义
+    接受新 epoch 快照。本地配置与已学红外码**原样保留**。
+    """
+    import argparse
+
+    from lira.appliances.store import ApplianceStore
+
+    parser = argparse.ArgumentParser(prog="python -m lira.sync", description="LIRA 同步元数据工具")
+    sub = parser.add_subparsers(dest="command", required=True)
+    p_reset = sub.add_parser("reset-sync", help="清除 (epoch, version) 同步元数据（保留配置与已学码值）")
+    p_reset.add_argument("db", help="设备本地库路径（如 data/device.db）")
+    args = parser.parse_args(argv)
+
+    assert args.command == "reset-sync"
+    store = ApplianceStore(args.db)
+    try:
+        old_epoch = store.current_epoch()
+        store.clear_sync_meta()
+    finally:
+        store.close()
+    print(f"同步元数据已清除（原 epoch={old_epoch}）；重启设备后将按 bootstrap 接受新 epoch 快照。")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

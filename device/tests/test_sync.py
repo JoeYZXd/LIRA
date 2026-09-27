@@ -1,9 +1,10 @@
 """U6 设备端配置同步测试（计划 Test scenarios 后 3 条 + 补充缺口）。
 
 覆盖：R30/AE7 快照原子应用+回执、同 (epoch,version) 幂等跳过、旧/陌生 epoch
-拒绝且本地安全规则保持、重配对会话内新 epoch 接受并迁移（含 device token 轮换）、
-配对码不符拒绝、违反安全底线快照（未知字段/settings 白名单外）拒绝并告警、
-WS 首帧 token 鉴权、心跳拉取兜底、学习消息回传（R32）。
+一律拒绝且本地安全规则保持、开发期 epoch 迁移（clear_sync_meta 后 bootstrap
+接受新 epoch 且已学码值保留，2026-09-27 决议：无配对流程）、违反安全底线快照
+（未知字段/settings 白名单外/配对字段注入）拒绝并告警、WS 首帧 token 鉴权、
+心跳拉取兜底、学习消息回传（R32）。
 
 WS 传输层全部 mock 注入（计划：真实后台联通在 U9 验证）。
 """
@@ -59,10 +60,9 @@ def make_client(store: ApplianceStore, transport: MockTransport, **kwargs) -> Sy
     return SyncClient(store=store, transport=transport, token="dev-token-1", **kwargs)
 
 
-def snapshot_frame(*, epoch: int, version: int, enabled: bool = False,
-                   pairing_code: str | None = None, device_token: str | None = None) -> dict:
+def snapshot_frame(*, epoch: int, version: int, enabled: bool = False) -> dict:
     """构造全量快照帧（关键点：禁用取暖器的安全规则在场）。"""
-    obj = {
+    return {
         "type": "snapshot",
         "epoch": epoch,
         "version": version,
@@ -76,11 +76,6 @@ def snapshot_frame(*, epoch: int, version: int, enabled: bool = False,
         "scenes": [],
         "settings": {"privacy_mode": False},
     }
-    if pairing_code is not None:
-        obj["pairing_code"] = pairing_code
-    if device_token is not None:
-        obj["device_token"] = device_token
-    return obj
 
 
 async def apply(client: SyncClient, frame: dict) -> dict:
@@ -149,7 +144,7 @@ class TestSnapshotApply:
 
 class TestEpochGates:
     async def test_old_or_foreign_epoch_rejected_local_rules_kept(self, tmp_path):
-        """旧/陌生 epoch 快照（配对会话外）→ 拒绝应用、本地安全规则保持。"""
+        """旧/陌生 epoch 快照 → 一律拒绝应用、本地安全规则保持。"""
         store = make_store(tmp_path)  # 本地: epoch=1 version=5, 取暖器 disabled
         client = make_client(store, MockTransport())
         # 陌生 epoch（后台重建后的"新"纪元，未走重配对）
@@ -165,30 +160,27 @@ class TestEpochGates:
         # 拒绝即告警（审计面）
         assert any("epoch_mismatch" in r for r in client.rejections)
 
-    async def test_pairing_session_accepts_new_epoch_and_migrates(self, tmp_path):
-        """配对会话内出示新 epoch + 屏幕配对码 → 接受并落库（epoch 迁移）。"""
+    async def test_epoch_migration_via_reset_sync_cli(self, tmp_path):
+        """2026-09-27 决议：无配对流程。epoch 迁移 = 开发期 reset-sync 清同步
+        元数据（保留配置与已学码值）→ 重启后按 bootstrap 接受新 epoch。"""
         store = make_store(tmp_path)
+        store.upsert_code("取暖器", "打开", "learned-code-9")  # 已学码值在场
         client = make_client(store, MockTransport())
-        code = client.begin_pairing()
-        assert client.pairing_active is True
-        assert len(code) == 6 and code.isdigit()  # 屏显一次性配对码
-        ack = await apply(client, snapshot_frame(
-            epoch=9, version=1, enabled=True, pairing_code=code, device_token="new-token"))
+
+        # reset-sync 前新 epoch 快照一律拒绝
+        ack = await apply(client, snapshot_frame(epoch=9, version=1, enabled=True))
+        assert ack["applied"] is False and ack["reason"] == "epoch_mismatch"
+
+        # `python -m lira.sync reset-sync <db>` 语义：仅清 (epoch, version) 元数据
+        store.clear_sync_meta()
+        assert store.current_epoch() is None and store.current_version() is None
+
+        # 重启后 bootstrap：接受新 epoch 快照，已学码值原样保留
+        ack = await apply(client, snapshot_frame(epoch=9, version=1, enabled=True))
         assert ack["applied"] is True
         assert store.current_epoch() == 9
-        assert store.device_token() == "new-token"  # 新 token 落库
         assert store.get_appliance("取暖器").enabled is True
-        assert client.pairing_active is False  # 一次性会话用后即失效
-
-    async def test_wrong_pairing_code_rejected(self, tmp_path):
-        store = make_store(tmp_path)
-        client = make_client(store, MockTransport())
-        client.begin_pairing()
-        ack = await apply(client, snapshot_frame(
-            epoch=9, version=1, enabled=True, pairing_code="000000"))
-        assert ack["applied"] is False and ack["reason"] == "pairing_code_mismatch"
-        assert store.current_epoch() == 1  # 本地保持
-        assert client.pairing_active is True  # 会话仍在，可重试
+        assert store.get_appliance("取暖器").codes["打开"] == "learned-code-9"
 
     async def test_bootstrap_accepts_first_epoch(self, tmp_path):
         """出厂首次配置（本地无 epoch）：接受任意 epoch（bootstrap）。"""
@@ -197,14 +189,6 @@ class TestEpochGates:
         ack = await apply(client, snapshot_frame(epoch=42, version=1))
         assert ack["applied"] is True
         assert store.current_epoch() == 42
-
-    async def test_pairing_token_not_accepted_without_matching_code(self, tmp_path):
-        """同 epoch 快照借配对会话偷换 token → token 不落库。"""
-        store = make_store(tmp_path)
-        client = make_client(store, MockTransport())
-        client.begin_pairing()
-        await apply(client, snapshot_frame(epoch=1, version=6, device_token="evil"))
-        assert store.device_token() is None
 
 
 # ---------- 安全底线不变量 ----------
@@ -413,7 +397,13 @@ class TestProtocolDirect:
         with pytest.raises(ProtocolError):
             SnapshotMsg.from_json(frame)
 
-    def test_pairing_code_type_checked(self):
-        frame = snapshot_frame(epoch=1, version=1, pairing_code=123)
+    def test_pairing_fields_are_unknown_fields(self):
+        """2026-09-27 决议：快照不携带 pairing_code/device_token——携带即未知字段拒绝。"""
+        frame = snapshot_frame(epoch=1, version=1)
+        frame["pairing_code"] = "123456"
+        with pytest.raises(ProtocolError):
+            SnapshotMsg.from_json(frame)
+        frame = snapshot_frame(epoch=1, version=1)
+        frame["device_token"] = "tok"
         with pytest.raises(ProtocolError):
             SnapshotMsg.from_json(frame)

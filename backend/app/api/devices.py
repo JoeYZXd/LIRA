@@ -1,4 +1,4 @@
-"""设备 API（U8）：管理端 CRUD/配对页 + 设备 HTTP 通道 + 设备 WS 通道。
+"""设备 API（U8）：管理端 CRUD + 设备 HTTP 通道 + 设备 WS 通道。
 
 鉴权双通道（Key Decisions）：
   - 管理端路由：cookie 会话 + CSRF（POST 一律校验）；
@@ -9,7 +9,8 @@
 配置推送模型（R30）：安全关键变更后台落库 version+1 后，由 WS 连接自身
 的轮询循环（0.5s）发现版本差并立即推送快照——同 loop 内发送，天然兼容
 TestClient 与真实 uvicorn；60s 心跳拉取仅作离线兜底。设备回执经
-`Database.record_ack` 入库留痕并驱动重配对收尾。
+`Database.record_ack` 入库留痕。2026-09-27 决议：无配对流程，device token
+由开发期写入设备配置（见 deploy/SETUP.md 1.4）。
 """
 
 from __future__ import annotations
@@ -61,7 +62,7 @@ def _auth_error_response(exc: AuthError) -> JSONResponse:
     return JSONResponse({"error": str(exc)}, status_code=401)
 
 
-# ---------- 管理端：设备注册 / 吊销重发 / 配对 ----------
+# ---------- 管理端：设备注册 / 吊销重发 ----------
 
 @router.post("/admin/devices")
 async def create_device(request: Request, claims: dict = Depends(admin_and_csrf),
@@ -85,20 +86,6 @@ async def revoke_device(name: str, request: Request, claims: dict = Depends(admi
     return RedirectResponse(f"/?token_once={token}", status_code=303)
 
 
-@router.post("/admin/devices/{name}/pair")
-async def pair_device(name: str, request: Request, claims: dict = Depends(admin_and_csrf),
-                      pairing_code: str = Form(...)):
-    """重配对（epoch 迁移唯一入口）：子女输入设备屏显一次性配对码。"""
-    db: Database = request.app.state.db
-    if db.get_device(name) is None:
-        return RedirectResponse("/", status_code=303)
-    code = pairing_code.strip()
-    if not code.isdigit() or len(code) != 6:
-        return RedirectResponse(f"/?error=bad_pairing_code", status_code=303)
-    db.start_pairing(name, code)
-    return RedirectResponse(f"/?paired=1", status_code=303)
-
-
 # ---------- 设备 HTTP 通道（X-Device-Token） ----------
 
 @router.get("/api/device/snapshot")
@@ -106,7 +93,7 @@ async def device_snapshot(request: Request, device: str = Depends(auth.require_d
     """全量配置快照（R30 离线兜底路径）：全量 + (epoch, version)，设备端幂等。"""
     db: Database = request.app.state.db
     db.touch_last_seen(device)
-    snapshot = db.build_snapshot(device)
+    snapshot = db.build_snapshot()
     return JSONResponse(snapshot.to_json())
 
 
@@ -181,20 +168,14 @@ async def device_ws(ws: WebSocket) -> None:
     logger.info("设备已连接: %s", device)
 
     pushed: tuple[int, int] | None = None  # 本连接已推送过的 (epoch, version)
-    pairing_sent: str | None = None  # 已推送过配对快照的配对码（每码只推一次）
 
     async def maybe_push() -> tuple[int, int] | None:
         """推送纪律：每个 (epoch, version) 每连接只推一次（重连重推，
-        设备端幂等跳过）；重配对快照（含 pairing_code/new token）每码只推一次。"""
-        nonlocal pushed, pairing_sent
+        设备端幂等跳过）。"""
+        nonlocal pushed
         current = (db.epoch(), db.version())
-        pairing = db.pairing_code_for(device)
-        if pairing is not None and pairing != pairing_sent:
-            await ws.send_json(db.build_snapshot(device).to_json())
-            pairing_sent = pairing
-            pushed = current
-        elif pushed != current:
-            await ws.send_json(db.build_snapshot(device).to_json())
+        if pushed != current:
+            await ws.send_json(db.build_snapshot().to_json())
             pushed = current
         return pushed
 
@@ -222,7 +203,7 @@ async def device_ws(ws: WebSocket) -> None:
                 # 无论是否下发，均视为设备已知晓当前版本（抑制连接初期的重复推送）
                 current = (db.epoch(), db.version())
                 if (frame.epoch, frame.version) != current:
-                    await ws.send_json(db.build_snapshot(device).to_json())
+                    await ws.send_json(db.build_snapshot().to_json())
                 pushed = current
             elif isinstance(frame, SnapshotAckMsg):
                 db.record_ack(device, frame)

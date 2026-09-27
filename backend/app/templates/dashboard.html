@@ -39,7 +39,7 @@
     <tr><th>名称</th><th>状态</th><th>最后心跳</th><th>已确认配置</th><th>操作</th></tr>
     {% for d in devices %}
     <tr>
-      <td>{{ d.name }}{% if d.pairing_pending %} <span class="danger">待配对</span>{% endif %}</td>
+      <td>{{ d.name }}</td>
       <td>{% if d.online %}<span class="online">在线</span>{% else %}<span class="offline">离线</span>{% endif %}</td>
       <td class="muted">{{ "%.0f" | format(d.last_seen) if d.last_seen else "从未" }}</td>
       <td class="muted">{% if d.ack_version is not none %}(epoch={{ d.ack_epoch }}, v={{ d.ack_version }}){% else %}未回执{% endif %}</td>
@@ -47,11 +47,6 @@
         <form method="post" action="/admin/devices/{{ d.name }}/revoke" class="inline">
           <input type="hidden" name="_csrf" value="{{ csrf_token }}">
           <button type="submit">吊销重发 token</button>
-        </form>
-        <form method="post" action="/admin/devices/{{ d.name }}/pair" class="inline">
-          <input type="hidden" name="_csrf" value="{{ csrf_token }}">
-          <input type="text" name="pairing_code" placeholder="设备屏显配对码" size="10" pattern="[0-9]{6}">
-          <button type="submit">重配对</button>
         </form>
       </td>
     </tr>

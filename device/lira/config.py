@@ -61,10 +61,15 @@ class HalConfig:
 
 @dataclass(frozen=True)
 class SyncConfig:
-    """设备↔后台同步（U6/R30 设备侧）。ws_url 为空 = 同步未配置（离线纯本地）。"""
+    """设备↔后台同步（U6/R30 设备侧）。
+
+    ws_url 为空 = 同步未配置（离线纯本地）。device_token 为开发期预置的
+    设备鉴权 token（2026-09-27 决议：无配对流程）；ws_url 非空时必填。
+    """
 
     ws_url: str
     heartbeat_seconds: float
+    device_token: str
 
 
 @dataclass(frozen=True)
@@ -99,6 +104,8 @@ DEFAULTS: dict[str, Any] = {
     "sync": {
         "ws_url": "",
         "heartbeat_seconds": 60.0,
+        # 2026-09-27 决议：无配对流程，device token 开发期预置（写入 yaml 或环境变量）
+        "device_token": "",
     },
     "log_level": "INFO",
 }
@@ -117,6 +124,7 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_DB_PATH": (None, "db_path", str),
     "LIRA_SYNC_WS_URL": ("sync", "ws_url", str),
     "LIRA_SYNC_HEARTBEAT_SECONDS": ("sync", "heartbeat_seconds", float),
+    "LIRA_SYNC_DEVICE_TOKEN": ("sync", "device_token", str),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
 
@@ -197,6 +205,12 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
         raise ConfigError("db_path 为空。请设置本地家电配置库路径（如 data/device.db）。")
     if config["sync"]["heartbeat_seconds"] <= 0:
         raise ConfigError("sync.heartbeat_seconds 必须为正数（R30 心跳兜底周期）。")
+    if config["sync"]["ws_url"] and not config["sync"]["device_token"]:
+        raise ConfigError(
+            "sync.device_token 缺失（配置了 sync.ws_url 即必填）。"
+            "请设置环境变量 LIRA_SYNC_DEVICE_TOKEN，或写入 config.yaml 的 sync.device_token"
+            "（后台「注册设备」页面一次性展示的 token）。"
+        )
 
     log_level = str(config["log_level"]).upper()
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -258,6 +272,7 @@ def load_config(
         sync=SyncConfig(
             ws_url=str(config["sync"]["ws_url"]),
             heartbeat_seconds=float(config["sync"]["heartbeat_seconds"]),
+            device_token=str(config["sync"]["device_token"]),
         ),
         db_path=_resolve_path(str(config["db_path"])),
         log_level=str(config["log_level"]),

@@ -14,10 +14,8 @@
   cookie / 设备 token / 学习码值。Phase 1 部署边界为**家庭局域网**，不配置
   端口转发、不做公网暴露；若需远程访问，应在网络层（VPN/WireGuard）解决，
   而非直接暴露 8000 端口。
-- **设备新 token 明文一次性展示**：注册/吊销重发/重配对生成的新 token 仅在
+- **设备新 token 明文一次性展示**：注册/吊销重发生成的新 token 仅在
   页面展示一次，后台库只存 SHA-256 哈希；请设备侧立即持久化。
-- **重配对期间新 token 暂存**：`start_pairing` 到设备回执之间，新 token 明文
-  暂存于后台 meta 表（协议要求快照内下发明文），回执后立即清除。
 
 ### 1.1.1 已知残留问题（评审接受，低危低概率，Phase 2 候选）
 
@@ -28,8 +26,9 @@
   影响仅限登出骚扰，记录以保持一致性。
 - **新 token 经 URL query 一次性下发**（`/?token_once=...`）：注册/重发页用查询串
   传一次性 token，可能残留于浏览器历史与访问日志；库内仅存哈希。
-- **设备端 SQLite 未 chmod 0600**：设备库（含明文 device token、口令 scrypt 哈希）
-  权限继承进程 umask；板上单用户环境下影响有限。
+- **设备端 SQLite 未 chmod 0600**：设备库（含口令 scrypt 哈希；device token
+  按开发期预置约定存放于 `device/config.yaml`）权限继承进程 umask；
+  板上单用户环境下影响有限。
 - **sync 循环无重连边界**：`SyncClient.run_forever` 内处理器抛非协议异常会终止
   同步会话直至进程重启（仅受信任后台连接可触发）。
 - **学习请求可滞留 sent 态**：WS 在"领取学习请求→下发"之间断开时，该请求无超时重发
@@ -61,18 +60,24 @@ python3 -m venv .venv
 - 管理员创建后 `/setup` 永久失效（再访问重定向 `/login`）。
 - 登录限速：连续 5 次失败锁定 5 分钟；改密码会使全体会话立即失效。
 
-### 1.4 设备配对 / 重配对流程
+### 1.4 设备接入 / epoch 迁移（开发期预置，无运行时配对流程）
 
-1. **首次配对**：后台「注册设备」→ 页面一次性展示 `device_token` →
-   将 token 写入设备配置（设备端持久化）→ 设备用 token 经 WS 首帧
-   `hello` 或 HTTP `X-Device-Token` 完成鉴权。
-2. **重配对（后台库重建 / epoch 变更后）**：
-   - 设备端发起配对会话（屏幕显示 6 位一次性配对码）；
-   - 子女在后台设备列表输入同一配对码（POST `/admin/devices/{name}/pair`）；
-   - 后台生成新 token、epoch 换新（version 归零），在配对会话内经快照
-     下发 `pairing_code + 新 device_token`；
-   - 设备校验配对码一致后落库新 epoch/token 并回执 `applied=true`；
-   - 后台收到回执后激活新 token、旧 token 立即失效、清除配对态。
+> 2026-09-27 决议：取消设备配对流程。token 与 epoch 由开发期直接配置；
+> 设备仍拒绝一切陌生 epoch 快照（回放保护不变）。
+
+1. **首次接入**：后台「注册设备」→ 页面一次性展示 `device_token` →
+   将 token 写入设备配置 `device/config.yaml` 的 `sync.device_token`
+   （或环境变量 `LIRA_SYNC_DEVICE_TOKEN`）→ 设备用 token 经 WS 首帧
+   `hello` 或 HTTP `X-Device-Token` 完成鉴权。设备本地库无 epoch 时
+   （bootstrap）接受收到的首个快照并落库 (epoch, version)。
+2. **epoch 迁移（后台库重建 / 恢复后）**：后台库重建即自动换新 epoch
+   （version 归零），旧 token 同样失效，需在后台重新注册设备并把新 token
+   写入设备配置；然后在设备端执行同步状态重置并重启：
+   ```bash
+   python -m lira.sync reset-sync data/device.db
+   ```
+   该命令仅清除 (epoch, version) 同步元数据，保留本地配置与已学红外码；
+   重启后设备按 bootstrap 语义接受新 epoch 快照。
 
 ### 1.5 运维要点
 

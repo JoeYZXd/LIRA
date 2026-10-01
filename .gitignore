@@ -26,3 +26,6 @@ models/*
 # 工具链本地状态
 .omc/
 .claude/
+
+.idea/
+node_modules/

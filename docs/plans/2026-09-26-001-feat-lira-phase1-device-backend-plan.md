@@ -470,6 +470,7 @@ flowchart LR
 
 **Files:**
 - Create: `lira/hal/board/camera_rkisp.py`、`lira/hal/board/ir_gpio.py`、`lira/vision/ocr_rknn.py`
+  - 2026-10-03 改道（U10 实测）：官方内核未启用 RC_CORE，红外 HAL 改为 `ir_broadlink.py`（BroadLink RM4 Mini + python-broadlink 局域网本地协议）；gpio-ir/overlay/内核重编路线放弃
 - Create: `deploy/SETUP.md`（镜像烧录、版本锁定检查、overlay 编译、服务 systemd 化）、`deploy/system/*`（log2ram/journal/thermal 配置）
 - Modify: `lira/hal/base.py`（如真实实现暴露接口缺口）
 

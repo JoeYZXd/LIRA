@@ -13,8 +13,8 @@
 | 4 | 散热壳 | 金属外壳 + 风扇（RK3588S 适配） | 1 | 40~70 | 持续 OCR/推理散热；thermal governor 见 deploy/system/ |
 | 5 | 摄像头 | **OV13850 MIPI** 1300 万像素（Orange Pi 官方同款） | 1 | 60~90 | 阅读管线（PP-OCRv4 拍摄）；RKISP 驱动开箱即用，勿买杂牌 USB 免驱替代 |
 | 6 | 麦克风 | USB 双麦阵列（如 ReSpeaker 2-Mic USB / 同级） | 1 | 60~120 | KWS 唤醒 + 流式 ASR 拾音 |
-| 7 | 喇叭 | 3W~5W（USB 声卡一体或 3.5mm + 小功放板） | 1 | 20~50 | TTS 播报输出 |
-| 8 | 红外收发件 | VS1838B 接收头 + 940nm 发射 LED + S8050(NPN) + 限流电阻包 | 1 套 | 10~20 | gpio-ir 学习/回放（RX 解调 + TX 38kHz 载波），接 26-pin GPIO |
+| 7 | 喇叭 | USB 供电有源音箱（3.5mm AUX 输入） | 1 | 0（自有） | TTS 播报输出 ← 板载 3.5mm 口（2026-10-03 定案；PAM8403/USB 声卡方案均不需要） |
+| 8 | 红外遥控器 | **BroadLink RM4 Mini**（WiFi 红外学习/回放，局域网本地协议） | 1 | 40~90 | 红外学习/回放（2026-10-03 改道：官方内核未启用 RC_CORE，gpio-ir 不可用）；原购 LC 红外模块转备用 |
 | 9 | 接线辅料 | 杜邦线母对母一排（40P，20cm 内），无需洞洞板 | 1 排 | 5~10 | 红外模块直连 GPIO 排针 |
 
 **主体合计：约 850 ~ 1050 元**（选 5B 8GB + 板载 eMMC 时约 850 ~ 1000 元，TF 卡按 0 计）
@@ -31,6 +31,6 @@
 
 1. **主板内存档位**：买 8GB 及以上；4GB 无法同时驻留 KWS/ASR/TTS 与 OCR det/rec 双核模型。
 2. **摄像头型号强约束**：必须是 OV13850（或官方列表内 MIPI 模组），RKISP 驱动直接可用；普通 USB 摄像头走不了硬件 ISP，低光 OCR 质量明显下降。
-3. **红外件**：采用成品 LC 红外发射接收模块（VCC→3.3V，REC/SND→overlay 指定的两个 GPIO，GND 必须共地），杜邦线母对母直连，无需焊接。软件仍走 gpio-ir（接收）+ gpio-ir-tx（发射，内核产生 38kHz 载波），对应 `deploy/dt-overlays/` 的 overlay，U10 接线时固定引脚。
+3. **红外件（2026-10-03 改道）**：改用成品 BroadLink RM4 Mini（USB 供电、WiFi 入网，python-broadlink 局域网本地学习/回放，不经云）。官方 Debian 镜像内核未启用 RC_CORE，gpio-ir/ir-ctl 方案实测不可行（证据链见 `deploy/SETUP.md` 2.6）。原 LC 红外模块与杜邦线留作备件（备选 ESP32 有线桥可复用）。
 4. **不要购买**：7 寸触摸屏（已取消）、物理按键（隐私按键已取消，隐私切换走 Web UI）、任何"红外学习器"成品模块（用 GPIO 方案）、HDMI 转 VGA 等显示配件（设备无头运行）。
 6. 到货后进入 U10：镜像烧录与版本核对（RKNN 三件套对齐）、overlay 编译、provisioning（token 写入 `device/config.yaml` 的 `sync.device_token`）按 `deploy/SETUP.md` 执行。

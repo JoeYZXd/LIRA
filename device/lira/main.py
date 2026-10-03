@@ -437,6 +437,9 @@ class DeviceRuntime:
         self.sync_pull_event = asyncio.Event()
         #: 最近播报环形记录（dev 回放/状态区展示；内存，不落盘）
         self.recent_speaks: deque[str] = deque(maxlen=20)
+        #: 麦克风独占暂停（dev 录音窗口；编排循环挂起等待恢复）
+        self._mic_paused = False
+        self._mic_resume_event = asyncio.Event()
 
         # 环形日志缓冲幂等挂载（dev 控制台数据源；进程级单例）
         ensure_ring_handler()
@@ -544,6 +547,36 @@ class DeviceRuntime:
         self.sync_pull_event.set()
         return "reconnect"
 
+    # ---------- 麦克风独占窗口（dev 录音；编排循环挂起） ----------
+
+    async def mic_pause(self) -> None:
+        """暂停主循环麦克风采集：关闭主采集流，编排循环挂起等待恢复。
+
+        用于 dev 录音独占设备（板上实测双流并行会被饿死——只有开头短促
+        声音），即计划预判的 muted 窗口退路的正式启用。
+        """
+        if self._mic_paused:
+            return
+        self._mic_paused = True
+        self._mic_resume_event = asyncio.Event()
+        try:
+            await self._hal["audio"].close()
+        except Exception:  # noqa: BLE001 - 关闭失败不阻断录音窗口
+            logging.warning("dev mic_pause 关闭采集流失败", exc_info=True)
+        logging.info("dev event=mic_paused")
+
+    async def mic_resume(self) -> None:
+        """恢复主循环麦克风采集（录音窗口结束；编排循环自动续跑）。"""
+        if not self._mic_paused:
+            return
+        self._mic_paused = False
+        try:
+            await self._hal["audio"].open()
+        except Exception:  # noqa: BLE001 - 重开失败必须可见（语音功能丧失）
+            logging.exception("dev mic_resume 重开采集流失败（语音功能丧失！）")
+        self._mic_resume_event.set()
+        logging.info("dev event=mic_resumed")
+
     def _spawn(self, coro, tasks: set, *, log_errors: bool = False) -> asyncio.Task:
         """任务跟踪骨架：tasks 集合归属区分长驻伴随与引擎在途工作。"""
         task = asyncio.ensure_future(coro)
@@ -597,14 +630,38 @@ class DeviceRuntime:
         finally:
             await self._shutdown(stack)
 
+    async def _read_mic_chunk(self, source) -> bytes | None:
+        """读一块音频；麦克风暂停期间返回 None（调用方 continue 重查状态）。
+
+        读取与"暂停事件"竞速：暂停请求能在 0.1s 内打断在途 read_chunk
+        （取消 queue.get 是安全的——传输层泵模式保证取消不撕裂数据）。
+        """
+        if self._mic_paused:
+            await self._mic_resume_event.wait()
+            return None
+        from lira.audio.mic import CHUNK_FRAMES  # 惰性：mic 顶部导入 numpy
+
+        read_task = asyncio.ensure_future(source.read_chunk(CHUNK_FRAMES * 2))
+        pause_task = asyncio.ensure_future(self._mic_resume_event.wait())
+        done, pending = await asyncio.wait(
+            {read_task, pause_task}, return_when=asyncio.FIRST_COMPLETED
+        )
+        for task in pending:
+            task.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        if read_task in done:
+            return read_task.result()
+        return None
+
     async def _orchestrate(self) -> None:
         """编排主循环：音频读取 -> 隐私门 -> 路由分发 -> 状态机 tick。"""
         import numpy as np  # 惰性导入：仅真实主循环需要（dry-run 不触发）
-        from lira.audio.mic import CHUNK_FRAMES  # 同上：mic 顶部导入 numpy
 
         source = self._hal["audio"]
         while not self._stop.is_set():
-            chunk = await source.read_chunk(CHUNK_FRAMES * 2)
+            chunk = await self._read_mic_chunk(source)
+            if chunk is None:
+                continue  # 麦克风暂停窗口（dev 录音独占），恢复后自动续跑
             if not chunk:
                 logging.info("音频源结束（EOF），主循环退出")
                 break

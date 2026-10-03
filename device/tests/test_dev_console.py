@@ -410,55 +410,91 @@ class TestVoiceEndpoints:
             "/dev/login", json={"passphrase": PASSPHRASE}
         )  # 保持会话
         rt.privacy._on = True
-        r = client.post("/dev/api/record", json={})
+        r = client.post("/dev/api/record/start", json={})
         assert r.status_code == 403
         assert "隐私" in r.json()["error"]
 
-    def test_record_then_clip_roundtrip_in_memory(self):
-        """录音 → 内存缓冲 → 回放端点返回 wav（零落盘，无临时文件语义）。"""
+    def test_record_start_stop_roundtrip_in_memory(self):
+        """start/stop 录音 → 内存缓冲 → 回放端点返回 wav（零落盘）。"""
         _app, client, rt = make_voice_client()
         login(client)
         wav = make_wav_bytes(b"\x00\x01" * 1600)
 
-        async def _fake_record(seconds):
-            return wav
+        async def _fake_start(max_seconds):
+            rt.dev_handle.recording_active = True
+            rt.dev_handle._rec_result = (wav, 3.2)
 
-        rt.dev_handle.record_clip = _fake_record
-        r = client.post("/dev/api/record", json={})
+        async def _fake_stop():
+            rt.dev_handle.recording_active = False
+            return rt.dev_handle._rec_result or (b"", 0.0)
+
+        rt.dev_handle.start_recording = _fake_start
+        rt.dev_handle.stop_recording = _fake_stop
+        r = client.post("/dev/api/record/start", json={})
         assert r.status_code == 200, r.text
-        assert r.json()["seconds"] == 10
+        assert r.json()["recording"] is True
+        r = client.post("/dev/api/record/stop", json={})
+        assert r.status_code == 200, r.text
+        assert r.json()["seconds"] == 3.2
         clip = client.get("/dev/api/clip")
         assert clip.status_code == 200
         assert clip.headers["content-type"] == "audio/wav"
         assert clip.content == wav
 
-    def test_record_single_flight_409(self):
-        """互斥：锁被占用（进行中的测试）→ 409 单飞拒绝。"""
+    def test_record_stop_without_start_400(self):
+        _app, client, _rt = make_voice_client()
+        login(client)
+        r = client.post("/dev/api/record/stop", json={})
+        assert r.status_code == 400
+
+    def test_record_stop_privacy_discards(self):
+        """录音中途开隐私 → 严格联锁丢弃已采内容。"""
         _app, client, rt = make_voice_client()
         login(client)
-        # 预占互斥锁（模拟进行中的测试）；端点只读 locked() 即 409，无跨 loop await
-        loop = asyncio.new_event_loop()
-        try:
-            loop.run_until_complete(rt.dev_handle.dev_mutex.acquire())
-        finally:
-            loop.close()
-        r = client.post("/dev/api/record", json={})
+        wav = make_wav_bytes(b"\x00\x01" * 1600)
+
+        async def _fake_start(max_seconds):
+            rt.dev_handle.recording_active = True
+            rt.dev_handle._rec_result = (wav, 2.0)
+
+        async def _fake_stop():
+            rt.dev_handle.recording_active = False
+            return rt.dev_handle._rec_result or (b"", 0.0)
+
+        rt.dev_handle.start_recording = _fake_start
+        rt.dev_handle.stop_recording = _fake_stop
+        assert client.post("/dev/api/record/start", json={}).status_code == 200
+        rt.privacy._on = True  # 录音中途开隐私
+        r = client.post("/dev/api/record/stop", json={})
+        assert r.status_code == 200
+        assert r.json()["discarded"] is True
+        from lira.ui.dev import clip_state
+
+        assert clip_state["wav"] is None
+        assert client.get("/dev/api/clip").status_code == 404, "丢弃后回放端点应为空"
+
+    def test_record_start_while_active_409(self):
+        """单飞：录音已激活 → start 再次请求 409。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+        rt.dev_handle.recording_active = True  # 模拟已激活
+        r = client.post("/dev/api/record/start", json={})
         assert r.status_code == 409
-        assert "测试进行中" in r.json()["error"]
-        rt.dev_handle.dev_mutex.release()
+        assert "录音已在进行中" in r.json()["error"]
+        rt.dev_handle.recording_active = False
 
-    def test_record_failure_folds_to_503(self):
-        """录音设备错误 → 503 友好响应，不炸进程。"""
+    def test_record_start_failure_503(self):
+        """录音启动失败（设备错误）→ 503 友好响应。"""
         _app, client, rt = make_voice_client()
         login(client)
 
-        async def _boom(seconds):
+        async def _boom(max_seconds):
             raise OSError("no such device")
 
-        rt.dev_handle.record_clip = _boom
-        r = client.post("/dev/api/record", json={})
+        rt.dev_handle.start_recording = _boom
+        r = client.post("/dev/api/record/start", json={})
         assert r.status_code == 503
-        assert "录音失败" in r.json()["error"]
+        assert "录音启动失败" in r.json()["error"]
 
     def test_asr_from_recorded_buffer_with_intent(self):
         """ASR：内存录音 → 识别文本 + 本地规则意图（不执行）。"""
@@ -470,11 +506,19 @@ class TestVoiceEndpoints:
             ApplianceModel(name="台灯", aliases=("台灯",),
                            actions={"打开": ("打开",)}, codes={"打开": "C1"})
         )
-        async def _fake_record(seconds):
-            return make_wav_bytes(b"\x00\x01" * 1600)
 
-        rt.dev_handle.record_clip = _fake_record
-        assert client.post("/dev/api/record", json={}).status_code == 200
+        async def _fake_start(max_seconds):
+            rt.dev_handle.recording_active = True
+            rt.dev_handle._rec_result = (make_wav_bytes(b"\x00\x01" * 1600), 2.0)
+
+        async def _fake_stop():
+            rt.dev_handle.recording_active = False
+            return rt.dev_handle._rec_result or (b"", 0.0)
+
+        rt.dev_handle.start_recording = _fake_start
+        rt.dev_handle.stop_recording = _fake_stop
+        assert client.post("/dev/api/record/start", json={}).status_code == 200
+        assert client.post("/dev/api/record/stop", json={}).status_code == 200
         r = client.post("/dev/api/asr", json={})
         assert r.status_code == 200, r.text
         body = r.json()

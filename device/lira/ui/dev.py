@@ -50,8 +50,13 @@ class DevHandle:
 
     def __init__(self, runtime) -> None:  # DeviceRuntime（鸭子类型避免循环导入）
         self.runtime = runtime
-        #: 变更类测试端点的互斥锁（录音/ASR/视觉/回放；进行中 → 409）
+        #: 变更类测试端点的互斥锁（ASR/视觉/回放；进行中 → 409）
         self.dev_mutex: asyncio.Lock = asyncio.Lock()
+        #: 录音会话状态（start/stop 流；独占麦克风窗口由 runtime.mic_pause 承担）
+        self.recording_active = False
+        self._rec_task: asyncio.Task | None = None
+        self._rec_stop: asyncio.Event | None = None
+        self._rec_result: tuple[bytes, float] | None = None
 
     @property
     def store(self) -> ApplianceStore:
@@ -61,12 +66,40 @@ class DevHandle:
     def vault(self) -> PassphraseVault:
         return self.runtime.vault
 
-    async def record_clip(self, seconds: float = 10.0) -> bytes:
-        """服务端录音 -> 内存 wav（采集零落盘）。
+    async def start_recording(self, max_seconds: float = 60.0) -> None:
+        """开始录音：暂停主循环采集独占设备 -> 后台采集循环（手动/上限停止）。"""
+        if self.recording_active:
+            raise RuntimeError("录音已在进行中")
+        self.recording_active = True
+        self._rec_stop = asyncio.Event()
+        self._rec_result = None
+        try:
+            await self.runtime.mic_pause()  # 独占设备（板上实测双流并行被饿死）
+        except Exception:
+            self.recording_active = False
+            raise
+        self._rec_task = asyncio.ensure_future(self._record_loop(max_seconds))
 
-        callback+queue 模式（阻塞等待不占共享事件循环——评审 P1 纪律）；录音
-        质量为设备实际拾音（PipeWire 多路捕获与主循环并存，M7 实机验证项）。
-        """
+    async def stop_recording(self) -> tuple[bytes, float]:
+        """结束录音：返回 (wav 字节, 实际秒数)；未在录音返回 (b"", 0.0)。"""
+        if not self.recording_active:
+            return b"", 0.0
+        if self._rec_stop is not None:
+            self._rec_stop.set()
+        task = self._rec_task
+        if task is not None:
+            try:
+                await task
+            except Exception:  # noqa: BLE001 - 采集循环异常按空结果处理
+                self._rec_result = (b"", 0.0)
+        self.recording_active = False
+        await self.runtime.mic_resume()
+        wav, seconds = self._rec_result or (b"", 0.0)
+        self._rec_task = None
+        return wav, seconds
+
+    async def _record_loop(self, max_seconds: float) -> None:
+        """采集循环：静音窗口内独占录音，直至 stop 事件或时长上限。"""
         import io
         import wave
 
@@ -87,9 +120,9 @@ class DevHandle:
         )
         stream.start()
         chunks: list[bytes] = []
-        deadline = loop.time() + seconds
+        started = loop.time()
         try:
-            while loop.time() < deadline:
+            while loop.time() - started < max_seconds and not self._rec_stop.is_set():
                 try:
                     chunks.append(await asyncio.wait_for(queue.get(), timeout=0.5))
                 except TimeoutError:
@@ -97,6 +130,7 @@ class DevHandle:
         finally:
             stream.stop()
             stream.close()
+        seconds = loop.time() - started
         pcm = b"".join(chunks)
         buf = io.BytesIO()
         with wave.open(buf, "wb") as wf:
@@ -104,7 +138,7 @@ class DevHandle:
             wf.setsampwidth(2)
             wf.setframerate(SAMPLE_RATE)
             wf.writeframes(pcm)
-        return buf.getvalue()
+        self._rec_result = (buf.getvalue(), seconds)
 
 
 def _session_secret(store: ApplianceStore) -> str:
@@ -163,6 +197,25 @@ def _decode_jpeg(raw: bytes):
     if image is None:
         raise ValueError("拍摄内容无法解码")
     return image
+
+
+def _downscale_jpeg_b64(raw: bytes, width: int = 640) -> str:
+    """JPEG → 缩放宽 640 的 JPEG base64（预览/回显；CPU 密集，调用方 to_thread）。"""
+    import base64
+
+    import cv2
+    import numpy as np
+
+    img = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if img is None:
+        raise ValueError("图像解码失败")
+    h, w = img.shape[:2]
+    if w > width:
+        img = cv2.resize(img, (width, int(h * width / w)))
+    ok, jpeg = cv2.imencode(".jpg", img, [cv2.IMWRITE_JPEG_QUALITY, 70])
+    if not ok:
+        raise ValueError("图像编码失败")
+    return base64.b64encode(jpeg.tobytes()).decode("ascii")
 
 
 def _offline_transcribe(asr, wav_bytes: bytes) -> str:
@@ -336,26 +389,45 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         logger.info("dev event=tts_test result=%s elapsed_ms=%d", result, elapsed_ms)
         return JSONResponse({"result": result, "elapsed_ms": elapsed_ms})
 
-    @app.post("/dev/api/record")
-    async def dev_record(request: Request):
+    @app.post("/dev/api/record/start")
+    async def dev_record_start(request: Request):
         denied = _require_session(request, api=True)
         if denied is not None:
             return denied
         privacy_denied = await _privacy_reject()
         if privacy_denied is not None:
             return privacy_denied
-        if handle.dev_mutex.locked():
-            return JSONResponse({"error": "测试进行中，请稍后再试"}, status_code=409)
-        async with handle.dev_mutex:
-            try:
-                wav = await handle.record_clip(10.0)
-            except Exception as exc:  # noqa: BLE001 - 设备错误折叠为友好响应
-                logger.warning("dev event=record error=%s", type(exc).__name__)
-                return JSONResponse({"error": f"录音失败: {exc}"}, status_code=503)
+        if handle.recording_active:
+            return JSONResponse({"error": "录音已在进行中"}, status_code=409)
+        try:
+            await handle.start_recording(60.0)  # 硬上限 60s（防忘记停止）
+        except Exception as exc:  # noqa: BLE001 - 设备错误折叠为友好响应
+            logger.warning("dev event=record_start error=%s", type(exc).__name__)
+            return JSONResponse({"error": f"录音启动失败: {exc}"}, status_code=503)
+        logger.info("dev event=record_start max_seconds=60")
+        return JSONResponse({"recording": True, "max_seconds": 60})
+
+    @app.post("/dev/api/record/stop")
+    async def dev_record_stop(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        if not handle.recording_active:
+            return JSONResponse({"error": "当前没有进行中的录音"}, status_code=400)
+        wav, seconds = await handle.stop_recording()
+        if handle.runtime.privacy.is_on and wav:
+            # 录音中途开启隐私：严格联锁 -> 丢弃已采内容
+            clip_state["wav"] = None
+            logger.info("dev event=record_stop discarded=privacy_on")
+            return JSONResponse(
+                {"discarded": True, "reason": "录音中途开启隐私，已按联锁丢弃"}
+            )
         clip_state["wav"] = wav
         clip_state["ts"] = time.time()
-        logger.info("dev event=record seconds=10 bytes=%d", len(wav))
-        return JSONResponse({"ok": True, "seconds": 10, "bytes": len(wav)})
+        logger.info("dev event=record_stop seconds=%.1f bytes=%d", seconds, len(wav))
+        return JSONResponse(
+            {"ok": True, "seconds": round(seconds, 1), "bytes": len(wav)}
+        )
 
     @app.get("/dev/api/clip")
     async def dev_clip(request: Request):
@@ -377,6 +449,8 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         privacy_denied = await _privacy_reject()
         if privacy_denied is not None:
             return privacy_denied
+        if handle.recording_active:
+            return JSONResponse({"error": "录音进行中（先结束录音再识别）"}, status_code=409)
         form = await request.form()
         upload = form.get("file")
         if upload is not None and hasattr(upload, "read"):
@@ -426,6 +500,7 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
                 return JSONResponse({"error": f"拍摄失败: {exc}"}, status_code=503)
             t_capture = time.monotonic() - started
             image = await asyncio.to_thread(_decode_jpeg, raw)
+            preview_b64 = await asyncio.to_thread(_downscale_jpeg_b64, raw)
             t_decode = time.monotonic() - started - t_capture
             polygons = await asyncio.to_thread(ocr.detect, image)
             t_det = time.monotonic() - started - t_capture - t_decode
@@ -450,7 +525,41 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             len(ordered), timings["det_ms"], timings["rec_ms"],
         )
         return JSONResponse(
-            {"text": "\n".join(t.strip() for t in texts if t.strip()), "timings_ms": timings}
+            {
+                "text": "\n".join(t.strip() for t in texts if t.strip()),
+                "timings_ms": timings,
+                "image": "data:image/jpeg;base64," + preview_b64,
+            }
+        )
+
+    # ---------- 视觉预览（实时画面 = 慢速单帧轮询；相机路径 ~0.5fps 级） ----------
+
+    @app.get("/dev/api/vision/frame")
+    async def dev_vision_frame(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
+        camera = getattr(handle.runtime, "camera", None)
+        if camera is None:
+            return JSONResponse({"error": "相机未就绪"}, status_code=503)
+        try:
+            raw = await camera.capture()
+            jpeg = await asyncio.to_thread(_downscale_jpeg_b64, raw)
+        except Exception as exc:  # noqa: BLE001 - HAL/解码错误族折叠
+            logger.warning("dev event=vision_frame error=%s", type(exc).__name__)
+            return JSONResponse({"error": f"取帧失败: {exc}"}, status_code=503)
+        logger.info("dev event=vision_frame")
+        import base64
+
+        from fastapi.responses import Response
+
+        return Response(
+            content=base64.b64decode(jpeg),
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store"},
         )
 
     # ---------- 同步测试（U5） ----------
@@ -597,8 +706,9 @@ def _dev_page_html() -> str:
   <h2>语音链路测试</h2>
   <div class="row">TTS 文本（POST body）：<input id="tts-text" size="40">
     <button onclick="ttsSpeak()">播报</button><span id="tts-out"></span></div>
-  <div class="row"><button id="rec-btn" onclick="record()">录音 10 秒</button>
-    <span id="rec-out" class="muted"></span>
+  <div class="row">
+    <button id="rec-btn" onclick="recordToggle()">开始录音</button>
+    <span id="rec-out" class="muted">录音期间主循环语音暂停（独占设备）</span>
     <audio id="clip" controls style="display:none"></audio></div>
   <div class="row"><button onclick="asrTest()">识别上一步录音（ASR→意图）</button>
     <span id="asr-out"></span></div>
@@ -606,8 +716,13 @@ def _dev_page_html() -> str:
 
 <section id="sec-vision">
   <h2>视觉链路测试</h2>
-  <div class="row"><button onclick="visionTest()">拍摄 + OCR</button>
+  <div class="row">
+    <button id="preview-btn" onclick="previewToggle()">开启实时预览（~0.5fps）</button>
+    <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
+  <img id="preview-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="preview">
+  <div class="row" style="margin-top:8px"><button onclick="visionTest()">拍摄 + OCR</button>
     <span id="vis-out"></span></div>
+  <img id="vis-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="capture">
   <pre id="vis-view"></pre>
 </section>
 
@@ -626,6 +741,7 @@ def _dev_page_html() -> str:
 </section>
 
 <script>
+let recording = false, previewOn = false, previewTimer = null, fetching = false;
 async function api(path, opts) {
   const r = await fetch(path, Object.assign({headers: {'Content-Type': 'application/json'}}, opts||{}));
   const t = await r.text();
@@ -666,26 +782,70 @@ async function ttsSpeak() {
   const r = await api('/dev/api/tts', {method: 'POST', body: JSON.stringify({text})});
   out('tts-out', r.status === 200 ? ('已播报 ' + r.body.elapsed_ms + 'ms') : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
 }
-async function record() {
+async function recordToggle() {
   const btn = document.getElementById('rec-btn');
-  btn.disabled = true;
-  for (let left = 10; left > 0; left--) { out('rec-out', '录音中…剩 ' + left + 's'); await new Promise(res => setTimeout(res, 1000)); }
-  const r = await api('/dev/api/record', {method: 'POST', body: '{}'});
-  btn.disabled = false;
-  if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
-  out('rec-out', '完成', 'ok');
-  const clip = document.getElementById('clip');
-  clip.src = '/dev/api/clip?ts=' + Date.now(); clip.style.display = 'block'; clip.play();
+  if (!recording) {
+    const r = await api('/dev/api/record/start', {method: 'POST', body: '{}'});
+    if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
+    recording = true;
+    btn.textContent = '结束录音';
+    recLeft = 0;
+    recTimer = setInterval(() => { recLeft += 1; out('rec-out', '录音中… ' + recLeft + 's（上限 60s）'); }, 1000);
+    out('rec-out', '录音中…', 'ok');
+  } else {
+    clearInterval(recTimer);
+    const r = await api('/dev/api/record/stop', {method: 'POST', body: '{}'});
+    recording = false;
+    btn.textContent = '开始录音';
+    if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
+    if (r.body.discarded) return out('rec-out', '已按隐私联锁丢弃本次录音', 'err');
+    out('rec-out', '完成 ' + r.body.seconds + 's / ' + r.body.bytes + 'B', 'ok');
+    const clip = document.getElementById('clip');
+    clip.src = '/dev/api/clip?ts=' + Date.now(); clip.style.display = 'block'; clip.play();
+  }
 }
 async function asrTest() {
   const r = await api('/dev/api/asr', {method: 'POST', body: '{}'});
-  out('asr-out', r.status === 200 ? ('意图: ' + JSON.stringify(r.body.intent) + ' 文本: ' + r.body.text) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
+  out('asr-out', r.status === 200 ? ('文本: ' + r.body.text + ' | 意图: ' + JSON.stringify(r.body.intent)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
 }
 async function visionTest() {
+  out('vis-out', '拍摄识别中…（慢速单帧，约数秒）');
   const r = await api('/dev/api/vision', {method: 'POST', body: '{}'});
   if (r.status !== 200) return out('vis-out', r.body.error || r.status, 'err');
+  const img = document.getElementById('vis-img');
+  img.src = r.body.image; img.style.display = 'block';
   document.getElementById('vis-view').textContent = r.body.text || '（无文字）';
   out('vis-out', '耗时: ' + JSON.stringify(r.body.timings_ms), 'ok');
+}
+async function previewToggle() {
+  const btn = document.getElementById('preview-btn');
+  if (previewOn) {
+    previewOn = false; clearInterval(previewTimer);
+    btn.textContent = '开启实时预览（~0.5fps）';
+    document.getElementById('preview-img').style.display = 'none';
+    return out('preview-out', '预览已停止');
+  }
+  previewOn = true;
+  btn.textContent = '停止预览';
+  const frame = async () => {
+    const r = await fetch('/dev/api/vision/frame?ts=' + Date.now());
+    if (r.status === 200) {
+      const blob = await r.blob();
+      const img = document.getElementById('preview-img');
+      img.src = URL.createObjectURL(blob); img.style.display = 'block';
+      out('preview-out', '预览中…');
+    } else {
+      previewOn = false; clearInterval(previewTimer);
+      btn.textContent = '开启实时预览（~0.5fps）';
+      out('preview-out', '取帧失败已停止: ' + r.status, 'err');
+    }
+  };
+  await frame();
+  previewTimer = setInterval(async () => {
+    if (!previewOn || fetching) return;
+    fetching = true;
+    try { await frame(); } finally { fetching = false; }
+  }, 2200);
 }
 async function syncPull() {
   const r = await api('/dev/api/sync/pull', {method: 'POST', body: '{}'});

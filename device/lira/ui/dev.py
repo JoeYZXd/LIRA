@@ -242,10 +242,13 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
 
     @app.get("/dev")
     async def dev_page(request: Request):
-        denied = _require_session(request, api=False)
-        if denied is not None:
-            return denied
-        return HTMLResponse(_dev_page_html())
+        if _session_ok(request):
+            return HTMLResponse(_dev_page_html())
+        if not handle.vault.is_set():
+            # 首启引导：口令未设（fail-closed，去设备 UI 的设置页）
+            return RedirectResponse("/passphrase/setup", status_code=303)
+        # 口令已设：返回控制台专属登录页（浏览器唯一登录入口）
+        return HTMLResponse(_dev_login_html())
 
     @app.post("/dev/login")
     async def dev_login(request: Request):
@@ -513,6 +516,39 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             "spoken": list(rt.recent_speaks)[spoken_before:],
             "state": rt.engine.state.value,
         })
+
+
+def _dev_login_html() -> str:
+    """控制台登录页（口令已设时的 /dev 未鉴权着陆页；fetch 提交）。"""
+    return """<!doctype html>
+<html lang="zh"><head><meta charset="utf-8"><title>LIRA 开发者控制台 - 登录</title>
+<style>
+ body{font-family:system-ui,sans-serif;margin:0;display:flex;align-items:center;
+      justify-content:center;height:100vh;background:#fafafa}
+ .card{border:1px solid #ccc;border-radius:10px;padding:28px;background:#fff;width:300px}
+ input{width:100%;padding:8px;margin:8px 0;box-sizing:border-box}
+ button{width:100%;padding:8px} .err{color:#c00;font-size:13px;min-height:18px}
+ h1{font-size:17px;margin:0 0 12px}
+</style></head><body>
+<div class="card">
+ <h1>LIRA 开发者控制台</h1>
+ <input id="pass" type="password" placeholder="设备口令" onkeydown="if(event.key==='Enter')doLogin()">
+ <button onclick="doLogin()">登录</button>
+ <div id="err" class="err"></div>
+ <p class="muted" style="font-size:12px;color:#666">首次使用请先在 <a href="/passphrase/setup">设备面板</a> 设置口令</p>
+</div>
+<script>
+async function doLogin() {
+  const r = await fetch('/dev/login', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({passphrase: document.getElementById('pass').value})
+  });
+  if (r.ok) { location.href = '/dev'; return; }
+  const j = await r.json().catch(() => ({error: 'HTTP ' + r.status}));
+  document.getElementById('err').textContent = j.error || ('HTTP ' + r.status);
+}
+</script>
+</body></html>"""
 
 
 def _dev_page_html() -> str:

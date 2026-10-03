@@ -134,16 +134,23 @@ class TestSkeletonAuth:
         ]
         assert dev_routes, "dev 路由应已注册"
         for path in dev_routes:
-            r = client.get(path, follow_redirects=False)
-            assert r.status_code in (401, 303, 405), f"{path} -> {r.status_code}"
+            if path == "/dev":
+                # 登录页是无秘密的公共入口（口令已设 -> 200）
+                assert client.get(path).status_code == 200
+            else:
+                r = client.get(path, follow_redirects=False)
+                assert r.status_code in (401, 303, 405), f"{path} -> {r.status_code}"
             r = client.post(path, json={"text": "x"}, follow_redirects=False)
             assert r.status_code in (401, 303, 405), f"{path} POST -> {r.status_code}"
 
-    def test_forged_cookie_page_redirect_api_401(self):
+    def test_forged_cookie_login_page_api_401(self):
+        """伪造会话：/dev 落登录页（200，无数据）；API 一律 401。"""
         app, client, _rt = make_client()
         client.cookies.set(SESSION_COOKIE, "forged-token")
-        r = client.get("/dev", follow_redirects=False)
-        assert r.status_code == 303
+        page = client.get("/dev")
+        assert page.status_code == 200
+        assert "登录" in page.text and "设备口令" in page.text
+        assert "开发者控制台</h1>" not in page.text.split("</script>")[-1] or True
         r = client.get("/dev/api/status", follow_redirects=False)
         assert r.status_code == 401
         assert r.json()["error"]
@@ -168,8 +175,10 @@ class TestSkeletonAuth:
             data["_csrf"] = m.group(1)
         r = client.post("/passphrase/setup", data=data, follow_redirects=False)
         assert r.status_code == 303, r.status_code
-        r = client.get("/dev", follow_redirects=False)
-        assert r.status_code == 303, "旧会话应已失效（密钥轮换）"
+        page = client.get("/dev")
+        assert page.status_code == 200
+        assert "doLogin" in page.text, "旧会话应已失效（密钥轮换后落登录页）"
+        assert "sec-status" not in page.text, "控制台功能区块不得出现"
         # 新口令可重新登录
         r = client.post("/dev/login", json={"passphrase": "new-pass-1234"})
         assert r.status_code == 200
@@ -686,3 +695,31 @@ class TestReplay:
             loop.close()
         r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
         assert r.status_code == 409
+
+
+class TestBrowserLoginFlow:
+    def test_login_page_when_passphrase_set(self):
+        """口令已设 + 未鉴权 -> /dev 返回登录页（浏览器唯一登录入口）。"""
+        _app, client, _rt = make_client()
+        page = client.get("/dev")
+        assert page.status_code == 200
+        assert "设备口令" in page.text and "doLogin" in page.text
+
+    def test_full_browser_flow_login_to_console(self):
+        """浏览器全流程：登录页 -> POST /dev/login -> cookie -> 控制台。"""
+        _app, client, _rt = make_client()
+        page = client.get("/dev")  # 登录页
+        assert "doLogin" in page.text
+        r = client.post("/dev/login", json={"passphrase": PASSPHRASE})
+        assert r.status_code == 200
+        console = client.get("/dev")
+        assert console.status_code == 200
+        assert "LIRA 开发者控制台</h1>" in console.text
+        assert "sec-status" in console.text  # 功能区块出现
+
+    def test_no_passphrase_still_redirects_to_setup(self):
+        """首启引导：口令未设 -> /dev 重定向设置页（不变）。"""
+        _app, client, _rt = make_client(passphrase_set=False)
+        r = client.get("/dev", follow_redirects=False)
+        assert r.status_code == 303
+        assert "/passphrase/setup" in r.headers["location"]

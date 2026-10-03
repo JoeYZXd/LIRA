@@ -154,6 +154,15 @@ desktop 镜像白占内存与 eMMC（设备无头）。6.1 BSP 内核的 rknpu �
 - **x86 并行任务**：OCR 模型转换环境同机搭建（paddle2onnx → rknn-toolkit2 转 rk3588s，
   产出 det/rec 两个 `.rknn`）。det 绑 NPU core0、rec 绑 core1（计划 U10）。
   转换器与 librknnrt 同版本对齐。
+- **x86 转换环境实况（2026-10-03，已完成）**：WSL Ubuntu 24.04 + **py3.11 venv `~/rknn311`**
+  （toolkit2 2.3.0 cp311 wheel 仓库自带 + **onnx==1.15.0 钉版** + opencv-headless，
+  pip 走 TUNA）。两个坑入册：① onnx≥1.16 删了 `onnx.mapping` 且 toolkit2 优化器在
+  rec 图上**原生 abort**（SIGABRT 无报错），而 py3.12 装不上 onnx≤1.15 → **必须 py3.11**；
+  ② WSL apt 曾被残废代理 `/etc/apt/apt.conf.d/proxy.conf`（指向不可达的 192.168.101.24）
+  卡死 → 移为 `.bak` 并切 TUNA 源。模型源用 `models/download_models.py`（rknn_model_zoo
+  网盘 CDN 的 ONNX + ppocr_keys_v1.txt 字典）；det i8 校准集用 rknn_model_zoo 自带
+  `datasets/PPOCR/imgs/dataset_20.txt`。产物：`models/ppocrv4_det.rknn`（2.6MB i8）、
+  `models/ppocrv4_rec.rknn`（7.1MB fp16）。
 
 ### 2.3 M2：音频出声（蓝牙临时喇叭，小爱音箱 A2DP）
 
@@ -302,7 +311,7 @@ sync:
 | KWS | 唤醒词误触/漏触（实机 10 分钟） | 待填 | — |
 | ASR | 流式 RTF | 待填 | — |
 | TTS | RTF / 首包延迟 | 待填 | — |
-| OCR | 端到端时延（拍摄→TTS 首音） | 待填 | — |
+| OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；全链路（含拍摄/TTS）待 M7 接线后测 | 2026-10-03 |
 | 资源 | 内存峰值 / NPU 占用 / 温度（含散热壳） | 待填 | — |
 
 > **M0 实测附注**（2026-10-02）：镜像自带 zram0 swap（3.9G，RAM 介质，不磨损 eMMC——

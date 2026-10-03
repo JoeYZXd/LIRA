@@ -330,6 +330,8 @@ class DeviceCallbacks:
         self._rt = runtime
 
     def speak(self, text: str) -> None:
+        # 最近播报环形记录（内存，不落盘；dev 回放/状态区展示面）
+        self._rt.recent_speaks.append(text)
         tts = self._rt.tts
         if tts is None:
             # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
@@ -429,8 +431,12 @@ class DeviceRuntime:
         self.vault = self._vault
         #: 同步会话状态（_run_sync 维护；R1 状态面 + dev 状态区数据源）
         self.sync_status: dict[str, object] = {"session": "not_configured"}
-        #: 当前同步客户端句柄（会话存活期非 None；U5 手动拉取用）
+        #: 当前同步客户端句柄（会话存活期非 None；手动拉取直发心跳用）
         self._sync_client = None
+        #: 手动拉取事件（断线期缩短重连退避；会话存活期走直发心跳）
+        self.sync_pull_event = asyncio.Event()
+        #: 最近播报环形记录（dev 回放/状态区展示；内存，不落盘）
+        self.recent_speaks: deque[str] = deque(maxlen=20)
 
         # 环形日志缓冲幂等挂载（dev 控制台数据源；进程级单例）
         ensure_ring_handler()
@@ -444,6 +450,9 @@ class DeviceRuntime:
         self.speaker = speaker or TtsBlockSpeaker(audio.tts)
         #: ASR 引擎引用（dev 控制台识别测试用；离线喂流自建独立流）
         self.asr = audio.asr
+        #: 相机/OCR 公开别名（dev 控制台视觉测试用；与管线共享实例，互斥锁防并发）
+        self.camera = hal["camera"]
+        self.ocr = ocr
         self.wake_stream = audio.wake_kws.create_stream()
         self.asr_stream = audio.asr.create_stream()
         self.playback_stream = audio.playback_kws.create_stream()
@@ -524,6 +533,16 @@ class DeviceRuntime:
                 "ocr": _ocr_models_ready(self._cfg),
             },
         }
+
+    def sync_pull(self) -> str:
+        """手动拉取（dev/同步测试）：会话存活 → 立即心跳；断线 → 提前重连。"""
+        if self._sync_client is not None:
+            self.spawn(self._sync_client.heartbeat_once())
+            return "heartbeat"
+        if not self._cfg.sync.ws_url:
+            return "not_configured"
+        self.sync_pull_event.set()
+        return "reconnect"
 
     def _spawn(self, coro, tasks: set, *, log_errors: bool = False) -> asyncio.Task:
         """任务跟踪骨架：tasks 集合归属区分长驻伴随与引擎在途工作。"""
@@ -652,10 +671,18 @@ class DeviceRuntime:
                 backoff = SYNC_RECONNECT_MIN_SECONDS
             if self._stop.is_set():
                 return
-            try:
-                await asyncio.wait_for(self._stop.wait(), timeout=backoff)
-            except TimeoutError:
-                pass
+            # 退避等待：stop 或 pull 事件先到即醒（pull = 提前重连尝试）
+            stop_wait = asyncio.ensure_future(self._stop.wait())
+            pull_wait = asyncio.ensure_future(self.sync_pull_event.wait())
+            done, pending = await asyncio.wait(
+                {stop_wait, pull_wait},
+                timeout=backoff,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for task in pending:
+                task.cancel()
+            await asyncio.gather(*pending, return_exceptions=True)
+            self.sync_pull_event.clear()
             backoff = min(backoff * 2, SYNC_RECONNECT_MAX_SECONDS)
 
     def _dev_handle(self):

@@ -34,6 +34,24 @@ class FakeRuntime:
         self.vault = PassphraseVault(self.store)
         self.settings = DeviceSettings()
         self.sync_status = {"session": "not_configured"}
+        self._sync_client = None
+        self.sync_pull_event = asyncio.Event()
+        self.camera = None
+        self.ocr = None
+        self.recent_speaks: list[str] = []
+        self.engine = _FakeEngine(speaks=self.recent_speaks)
+        self._pulled: list[str] = []
+
+    def sync_pull(self) -> str:
+        """dev 测试面：心跳/重连/未配置三路（_sync_client/pull_event 可注入）。"""
+        if self._sync_client is not None:
+            self._sync_client.heartbeat_once_called = True
+            return "heartbeat"
+        if getattr(self, "_ws_configured", False):
+            self.sync_pull_event.set()
+            self._pulled.append("reconnect")
+            return "reconnect"
+        return "not_configured"
 
     def status(self) -> dict:
         return {
@@ -177,6 +195,42 @@ class TestConfigBoolEnv:
         path.write_text("dev_console:\n  enabled: true\n", encoding="utf-8")
         cfg = load_config(path, env={"LIRA_DEV_CONSOLE": "false"}, require_api_key=False)
         assert cfg.dev_console.enabled is False, "env false 必须能关掉 yaml true"
+
+
+class _FakeEngine:
+    """状态机替身：state 具 .value；on_wake/on_asr_text 可编程迁移。
+
+    speaks 为 runtime.recent_speaks 的引用（模拟播报经回调写入环形记录）。
+    """
+
+    def __init__(self, speaks: list[str] | None = None) -> None:
+        from types import SimpleNamespace
+
+        self._state = SimpleNamespace(value="standby")
+        self.transitions: list[str] = []
+        self.wake_transitions = True
+        self.speaks = speaks if speaks is not None else []
+
+    @property
+    def state(self):
+        return self._state
+
+    async def on_wake(self) -> None:
+        from types import SimpleNamespace
+
+        if self.wake_transitions:
+            self.transitions.append("standby->listening")
+            self.speaks.append("我在听。")
+            self._state = SimpleNamespace(value="listening")
+
+    async def on_asr_text(self, text: str) -> None:
+        from types import SimpleNamespace
+
+        if self._state.value == "listening":
+            self.transitions.append("listening->executing")
+            self.transitions.append("executing->standby")
+            self.speaks.append(f"好的，{text}指令已发出。")
+            self._state = SimpleNamespace(value="standby")
 
 
 # ---------- U2：状态 / 日志 / 运行参数 ----------
@@ -460,3 +514,188 @@ class TestVoiceEndpoints:
         rt.privacy._on = True
         r = client.post("/dev/api/asr", json={})
         assert r.status_code == 403
+
+
+# ---------- U4：视觉链路测试 ----------
+
+
+class FakeCamera:
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+        self.calls = 0
+
+    async def capture(self) -> bytes:
+        self.calls += 1
+        if self.fail:
+            raise OSError("no /dev/video0")
+        import cv2
+        import numpy as np
+
+        image = np.full((60, 200, 3), 255, dtype=np.uint8)
+        ok, jpeg = cv2.imencode(".jpg", image)
+        assert ok
+        return jpeg.tobytes()
+
+
+class FakeOcr:
+    def detect(self, image):
+        import numpy as np
+
+        y = 10.0
+        return [np.array([[5, y], [195, y], [195, y + 20], [5, y + 20]], dtype=np.float32)]
+
+    def recognize(self, crop) -> str:
+        return "开发台灯测试行"
+
+
+def make_vision_client(*, camera_fail: bool = False):
+    rt = VoiceRuntime()
+    rt.camera = FakeCamera(fail=camera_fail)
+    rt.ocr = FakeOcr()
+    app, client, _rt = make_client(runtime=rt)
+    from lira.ui.dev import clip_state
+
+    clip_state["wav"] = None
+    return app, client, rt
+
+
+class TestVisionEndpoint:
+    def test_vision_happy_returns_text_and_timings(self):
+        _app, client, _rt = make_vision_client()
+        login(client)
+        r = client.post("/dev/api/vision", json={})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "开发台灯测试行" in body["text"]
+        for key in ("capture_ms", "decode_ms", "det_ms", "rec_ms"):
+            assert key in body["timings_ms"]
+            assert body["timings_ms"][key] >= 0
+
+    def test_vision_privacy_interlock(self):
+        """AE2 语义：隐私 ON → 拒绝。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        rt.privacy._on = True
+        r = client.post("/dev/api/vision", json={})
+        assert r.status_code == 403
+
+    def test_vision_camera_error_503(self):
+        _app, client, _rt = make_vision_client(camera_fail=True)
+        login(client)
+        r = client.post("/dev/api/vision", json={})
+        assert r.status_code == 503
+        assert "拍摄失败" in r.json()["error"]
+
+    def test_vision_mutex_409(self):
+        _app, client, rt = make_vision_client()
+        login(client)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(rt.dev_handle.dev_mutex.acquire())
+        finally:
+            loop.close()
+        r = client.post("/dev/api/vision", json={})
+        assert r.status_code == 409
+
+
+# ---------- U5：同步测试 ----------
+
+
+class TestSyncPull:
+    def test_pull_heartbeat_when_session_alive(self):
+        """会话存活 → 直发心跳（评审修正的双路机制）。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+
+        class _Client:
+            heartbeat_once_called = False
+
+            async def heartbeat_once(self):
+                self.heartbeat_once_called = True
+
+        rt._sync_client = _Client()
+        r = client.post("/dev/api/sync/pull", json={})
+        assert r.status_code == 200
+        assert r.json()["triggered"] == "heartbeat"
+        assert rt._sync_client.heartbeat_once_called
+
+    def test_pull_reconnect_when_disconnected(self):
+        _app, client, rt = make_vision_client()
+        login(client)
+        rt._ws_configured = True
+        r = client.post("/dev/api/sync/pull", json={})
+        assert r.status_code == 200
+        assert r.json()["triggered"] == "reconnect"
+        assert rt.sync_pull_event.is_set()
+
+    def test_pull_not_configured(self):
+        _app, client, _rt = make_vision_client()
+        login(client)
+        r = client.post("/dev/api/sync/pull", json={})
+        assert r.status_code == 200
+        assert r.json()["triggered"] == "not_configured"
+
+
+# ---------- U6：整机场景回放 ----------
+
+
+class TestReplay:
+    def test_replay_requires_confirm(self):
+        _app, client, _rt = make_vision_client()
+        login(client)
+        r = client.post("/dev/api/replay", json={"text": "打开台灯"})
+        assert r.status_code == 400
+        assert "确认" in r.json()["error"]
+        assert client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": False}).status_code == 400
+
+    def test_replay_privacy_rejected_upfront(self):
+        """显式隐私预检：引擎静默拒唤前就返回原因。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        rt.privacy._on = True
+        r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
+        assert r.status_code == 403
+        assert "隐私" in r.json()["error"]
+        assert rt.engine.transitions == [], "隐私期不得触碰引擎"
+
+    def test_replay_rejects_non_standby(self):
+        _app, client, rt = make_vision_client()
+        login(client)
+        from types import SimpleNamespace
+
+        rt.engine._state = SimpleNamespace(value="listening")
+        r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
+        assert r.status_code == 409
+        assert "非待机" in r.json()["error"]
+
+    def test_replay_happy_collects_transitions_and_speaks(self):
+        _app, client, rt = make_vision_client()
+        login(client)
+        rt.recent_speaks.append("回放前的旧播报")
+        task = asyncio.ensure_future  # noqa: F841
+        r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert "listening" in " ".join(body["transitions"])
+        assert body["state"] == "standby"
+        assert any("台灯" in s for s in body["spoken"])
+
+    def test_replay_wake_timeout_returns_504(self):
+        """唤醒未落地（引擎不迁移）→ 504 而非挂起。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        rt.engine.wake_transitions = False
+        r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
+        assert r.status_code == 504
+        assert "唤醒未落地" in r.json()["error"]
+
+    def test_replay_mutex_409(self):
+        _app, client, rt = make_vision_client()
+        login(client)
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(rt.dev_handle.dev_mutex.acquire())
+        finally:
+            loop.close()
+        r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
+        assert r.status_code == 409

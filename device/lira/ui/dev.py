@@ -154,6 +154,17 @@ class _RateLimiter:
         self.locked_until = 0.0
 
 
+def _decode_jpeg(raw: bytes):
+    """JPEG 字节 → BGR 图像（CPU 密集，调用方 to_thread）。"""
+    import cv2
+    import numpy as np
+
+    image = cv2.imdecode(np.frombuffer(raw, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if image is None:
+        raise ValueError("拍摄内容无法解码")
+    return image
+
+
 def _offline_transcribe(asr, wav_bytes: bytes) -> str:
     """wav 字节 -> 离线喂独立 AsrStream -> 识别文本（CPU 密集，调用方 to_thread）。"""
     import io
@@ -387,7 +398,121 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         logger.info("dev event=asr chars=%d matched=%s", len(text), intent is not None)
         return JSONResponse({"text": text, "intent": intent})
 
-    # ---------- U4+/U5+/U6+ 的端点在后续单元追加 ----------
+    # ---------- 视觉链路测试（U4） ----------
+
+    @app.post("/dev/api/vision")
+    async def dev_vision(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
+        if handle.dev_mutex.locked():
+            return JSONResponse({"error": "测试进行中，请稍后再试"}, status_code=409)
+        camera = getattr(handle.runtime, "camera", None)
+        ocr = getattr(handle.runtime, "ocr", None)
+        if camera is None or ocr is None:
+            return JSONResponse({"error": "相机/OCR 未就绪"}, status_code=503)
+        async with handle.dev_mutex:
+            started = time.monotonic()
+            try:
+                raw = await camera.capture()
+            except Exception as exc:  # noqa: BLE001 - HAL 错误族折叠为友好响应
+                logger.warning("dev event=vision error=capture %s", type(exc).__name__)
+                return JSONResponse({"error": f"拍摄失败: {exc}"}, status_code=503)
+            t_capture = time.monotonic() - started
+            image = await asyncio.to_thread(_decode_jpeg, raw)
+            t_decode = time.monotonic() - started - t_capture
+            polygons = await asyncio.to_thread(ocr.detect, image)
+            t_det = time.monotonic() - started - t_capture - t_decode
+            from lira.vision.engine import crop_rotated_box
+            from lira.vision.layout import sort_reading_order
+
+            ordered = sort_reading_order(polygons)
+            texts: list[str] = []
+            rec_started = time.monotonic()
+            for poly in ordered:
+                crop = crop_rotated_box(image, poly)
+                texts.append(await asyncio.to_thread(ocr.recognize, crop))
+            t_rec = time.monotonic() - rec_started
+        timings = {
+            "capture_ms": int(t_capture * 1000),
+            "decode_ms": int(t_decode * 1000),
+            "det_ms": int(t_det * 1000),
+            "rec_ms": int(t_rec * 1000),
+        }
+        logger.info(
+            "dev event=vision lines=%d det_ms=%d rec_ms=%d",
+            len(ordered), timings["det_ms"], timings["rec_ms"],
+        )
+        return JSONResponse(
+            {"text": "\n".join(t.strip() for t in texts if t.strip()), "timings_ms": timings}
+        )
+
+    # ---------- 同步测试（U5） ----------
+
+    @app.post("/dev/api/sync/pull")
+    async def dev_sync_pull(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        triggered = handle.runtime.sync_pull()
+        logger.info("dev event=sync_pull mode=%s", triggered)
+        sync = dict(getattr(handle.runtime.status(), "sync", {}))
+        return JSONResponse({"triggered": triggered, "sync": sync})
+
+    # ---------- 整机场景回放（U6） ----------
+
+    @app.post("/dev/api/replay")
+    async def dev_replay(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        body = await request.json()
+        text = str(body.get("text", "")).strip()
+        if not body.get("confirm"):
+            return JSONResponse(
+                {"error": "缺少确认标记（回放会真实出声并驱动状态机）"}, status_code=400
+            )
+        if not text:
+            return JSONResponse({"error": "缺少指令文本"}, status_code=400)
+        if handle.dev_mutex.locked():
+            return JSONResponse({"error": "测试进行中，请稍后再试"}, status_code=409)
+        rt = handle.runtime
+        # 显式隐私预检（唤醒被引擎门拒时静默返回，不可等状态区分原因）
+        if rt.privacy.is_on:
+            return JSONResponse({"error": "隐私模式开启，唤醒被拒（回放不可用）"}, status_code=403)
+        if rt.engine.state.value != "standby":
+            return JSONResponse(
+                {"error": f"引擎非待机（当前 {rt.engine.state.value}）"}, status_code=409
+            )
+        async with handle.dev_mutex:
+            transitions_before = len(rt.engine.transitions)
+            spoken_before = len(rt.recent_speaks)
+            await rt.engine.on_wake()
+            # 轮询 LISTENING（~2s；镜像 harness.wait_state）
+            deadline = time.monotonic() + 2.0
+            while time.monotonic() < deadline and rt.engine.state.value != "listening":
+                await asyncio.sleep(0.05)
+            if rt.engine.state.value != "listening":
+                return JSONResponse(
+                    {"error": "唤醒未落地（引擎未进入聆听）", "transitions": []},
+                    status_code=504,
+                )
+            # 会话竞争守卫：真实唤醒词中途插入会使状态偏离，注入前复核
+            if rt.engine.state.value != "listening":
+                return JSONResponse({"error": "会话竞争，回放中止"}, status_code=409)
+            await rt.engine.on_asr_text(text)
+            # 等待回待机（整体上界 ~15s；LLM 路径可能更长——超时返回部分结果）
+            deadline = time.monotonic() + 15.0
+            while time.monotonic() < deadline and rt.engine.state.value != "standby":
+                await asyncio.sleep(0.1)
+        return JSONResponse({
+            "transitions": rt.engine.transitions[transitions_before:],
+            "spoken": list(rt.recent_speaks)[spoken_before:],
+            "state": rt.engine.state.value,
+        })
 
 
 def _dev_page_html() -> str:

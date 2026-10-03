@@ -58,5 +58,12 @@
 
 ## 评审覆盖率说明
 
-- reliability 评审员超时未交付（10 派 9 交）；其余 9 份产物含完整 residual_risks/testing_gaps
-- 原 JSON 产物：`C:\Users\Joey\AppData\Local\Temp\claude-run-artifacts\ce-code-review\`（会话临时目录，已摘录入册）
+- reliability 评审员未交付（10 派 9 交；原因：API 429 限流）。其关注域的关键面
+  （重连退避语义、停机顺序、uvicorn 端口失败降级）已由 adversarial/correctness/
+  testing 覆盖并在 1222d13 修复；遗留缺口见 R5 测试项
+- 其余 9 份产物含完整 residual_risks/testing_gaps；原 JSON 产物：
+  `C:\Users\Joey\AppData\Local\Temp\claude-run-artifacts\ce-code-review\`（会话临时目录，已摘录入册）
+- 另两条 P3 advisory 未入 R1–R5（低价值备案）：config 默认值三处可漂移
+  （DEFAULTS/数据类字段默认/config.yaml 注释，建议 DEFAULTS 为唯一权威）；
+  print_assembly 硬编码 '/dev/video0'（与 camera_raw.DEFAULT_DEVICE 重复，
+  但惰性导入会破坏 dry-run 的仅 PyYAML 承诺，故保留并注明）

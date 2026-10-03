@@ -73,15 +73,16 @@ __all__ = [
     "main",
 ]
 
-#: 主循环分发块长：0.1s = 1600 帧 = 3200 字节（与 MicDistributor 同粒度）
-CHUNK_FRAMES = 1600
-
 #: 唤醒词回退值（词表读取失败时；正常路径从拼音表首行解析）
 WAKEWORD_FALLBACK = "小丽拉"
 
-#: 同步重连退避 (秒)：指数退避边界，成功会话后重置
+#: 同步重连退避 (秒)：指数退避边界；健康会话时长阈值（短命会话不重置退避）
 SYNC_RECONNECT_MIN_SECONDS = 2.0
 SYNC_RECONNECT_MAX_SECONDS = 60.0
+SYNC_HEALTHY_SESSION_SECONDS = 60.0
+
+#: 网络探测周期（秒）：后台伴随任务节奏，probe() 同步读缓存
+NETWORK_PROBE_INTERVAL_SECONDS = 10.0
 
 
 def _hal_device(value: str) -> int | str | None:
@@ -193,46 +194,70 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
 
 def build_ocr(cfg: AppConfig):
     """OCR 引擎按后端选择：board -> RKNNLite（det core0/rec core1）；
-    mock -> onnxruntime（x86 开发）。缺模型/依赖抛 ConfigError（含修复指引）。"""
+    mock -> onnxruntime（x86 开发）。模型/依赖缺失抛 ConfigError（修复指引按因分叉）。"""
     if cfg.hal.backend == "board":
         from lira.vision.ocr_rknn import RknnOcrEngine
 
         factory = RknnOcrEngine
-        missing = "OCR .rknn 模型缺失。请确认 models/ 下 ppocrv4_det.rknn 与 ppocrv4_rec.rknn（x86 转换产物已拷入）。"
+        model_hint = "OCR .rknn 模型缺失。请确认 models/ 下 ppocrv4_det.rknn 与 ppocrv4_rec.rknn（x86 转换产物已拷入）。"
+        dep_hint = "OCR 板上推理依赖未安装（pip install rknn-toolkit-lite2，见 SETUP.md 2.1/2.8）。"
     else:
         from lira.vision.ocr_x86 import OnnxOcrEngine
 
         factory = OnnxOcrEngine
-        missing = "OCR ONNX 模型缺失。请运行: python3 models/download_models.py"
+        model_hint = "OCR ONNX 模型缺失。请运行: python3 models/download_models.py"
+        dep_hint = "OCR x86 依赖未安装（pip install -e '.[ocr-x86]'）。"
     try:
         return factory()
-    except (FileNotFoundError, ImportError) as exc:
-        raise ConfigError(f"{missing}（原因: {exc}）") from exc
+    except FileNotFoundError as exc:
+        raise ConfigError(f"{model_hint}（原因: {exc}）") from exc
+    except ImportError as exc:
+        raise ConfigError(f"{dep_hint}（原因: {exc}）") from exc
 
 
 def _make_network_probe(base_url: str, interval_seconds: float = 10.0):
-    """R10 基础联网检测：TCP 连通 base_url 主机（结果缓存 10s，避免高频探测）。"""
-    from urllib.parse import urlparse
+    """R10 基础联网检测：后台伴随任务周期探测（to_thread），调用方同步读缓存。
 
-    parsed = urlparse(base_url)
-    host = parsed.hostname
-    port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    state = {"ok": False, "at": -1e9}
+    socket.create_connection 是阻塞调用（2s 超时 + 隐含 DNS 解析），绝不能在
+    事件循环线程执行——否则断网期间每 10s 卡住音频编排/状态机 tick/UI 长达
+    2s（评审 P1，correctness/adversarial/performance/python 四方共识）。
+    """
 
-    def probe() -> bool:
-        now = time.monotonic()
-        if now - state["at"] < interval_seconds:
-            return state["ok"]
+    def probe_sync() -> bool:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(base_url)
+        host = parsed.hostname
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
         try:
             with socket.create_connection((host, port), timeout=2.0):
-                result = True
+                return True
         except OSError:
-            result = False
-        state["ok"] = result
-        state["at"] = now
-        return result
+            return False
 
-    return probe
+    return probe_sync
+
+
+class _NetworkProbe:
+    """探测结果缓存 + 后台刷新器：probe() 同步读最近一次结果（不阻塞）。"""
+
+    def __init__(self, probe_sync, interval_seconds: float) -> None:
+        self._probe_sync = probe_sync
+        self._interval = interval_seconds
+        self._next_refresh = -1e9
+        self.ok = False
+
+    def __call__(self) -> bool:
+        return self.ok
+
+    async def run(self, stop: asyncio.Event) -> None:
+        """周期探测（to_thread），直至 stop。启动时先探一次。"""
+        while True:
+            self.ok = await asyncio.to_thread(self._probe_sync)
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=self._interval)
+            except TimeoutError:
+                continue
 
 
 def build_llm(cfg: AppConfig, *, privacy: PrivacyState, network_ok, on_wait_feedback):
@@ -267,7 +292,8 @@ class DeviceCallbacks:
     def speak(self, text: str) -> None:
         tts = self._rt.tts
         if tts is None:
-            logging.info("[播报/无语音栈] %s", text)
+            # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
+            logging.info("播报降级 event=spoken_no_tts chars=%d", len(text))
             return
         tts.speak(
             text,
@@ -282,7 +308,7 @@ class DeviceCallbacks:
     def set_audio_route(self, route: AudioRoute) -> None:
         self._rt.route = route
 
-    def start_capture(self):
+    def start_capture(self) -> asyncio.Task:
         # 新阅读会话以全局音量/语速起步（会话内"大声点/小声点"再由 R21 调整）
         speaker = self._rt.speaker
         speaker.volume = self._rt.settings.volume
@@ -350,11 +376,14 @@ class DeviceRuntime:
         self._hal = hal
         self._clock = clock
         self._sync_transport_factory = sync_transport_factory
-        self._network_ok = _make_network_probe(cfg.llm.base_url)
+        self._network_ok = _NetworkProbe(
+            _make_network_probe(cfg.llm.base_url), NETWORK_PROBE_INTERVAL_SECONDS
+        )
         self._stop = asyncio.Event()
         self._pending: set[asyncio.Task] = set()
         self._companions: set[asyncio.Task] = set()
         self._ui_server = None
+        self._ui_task = None
         self._vault = PassphraseVault(store)
 
         self.privacy = privacy or PrivacyState()
@@ -371,6 +400,19 @@ class DeviceRuntime:
         self.ir_service = IRService(store, hal["ir"])
         self.learning = LearningManager(self.ir_service)
         self.callbacks = DeviceCallbacks(self)
+
+        # LLM 注入点：未注入按配置构建（R28 等待反馈挂播报）；显式落属性，
+        # 消除 _build_engine 的隐藏副作用（评审：装配顺序耦合）
+        if llm is None:
+            llm = build_llm(
+                cfg,
+                privacy=self.privacy,
+                network_ok=self._network_ok,
+                on_wait_feedback=lambda: self.callbacks.speak(pb.WAIT_REMOTE),
+            )
+        self._llm = llm
+        self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
+
         self.engine = self._build_engine(llm)
         self.pipeline = ReadingPipeline(
             hal["camera"],
@@ -384,20 +426,13 @@ class DeviceRuntime:
             RouteDispatch(streams=self, wakeword=self.wakeword, spawn=self.spawn),
             self.privacy,
         )
+        # 隐私门订阅注册（privacy.py 约定的广播次序：gate.apply -> 唤醒门 -> 播报）
+        self.privacy.subscribe(self._gate.apply)
         # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
         attach_announcer(self.privacy, self.callbacks.speak)
 
     def _build_engine(self, llm):
-        """状态机 + 三级路由装配；LLM 未注入时按配置构建（R28 等待反馈挂播报）。"""
-        if llm is None:
-            llm = build_llm(
-                self._cfg,
-                privacy=self.privacy,
-                network_ok=self._network_ok,
-                on_wait_feedback=lambda: self.callbacks.speak(pb.WAIT_REMOTE),
-            )
-        self._llm = llm
-        self._snapshot_announcer = make_snapshot_announcer(self.store, self.callbacks.speak)
+        """状态机 + 三级路由装配。"""
         from lira.llm.client import make_remote_handler
 
         router = Router(
@@ -456,7 +491,8 @@ class DeviceRuntime:
                 self.spawn_companion(self._run_sync())
             else:
                 logging.info("同步未配置（sync.ws_url 为空）：离线纯本地运行")
-            self.spawn_companion(self._run_ui())
+            self._ui_task = self.spawn_companion(self._run_ui())
+            self.spawn_companion(self._network_ok.run(self._stop))
             print("LIRA 运行中（Ctrl-C 退出）...")
             await self._orchestrate()
         finally:
@@ -465,6 +501,7 @@ class DeviceRuntime:
     async def _orchestrate(self) -> None:
         """编排主循环：音频读取 -> 隐私门 -> 路由分发 -> 状态机 tick。"""
         import numpy as np  # 惰性导入：仅真实主循环需要（dry-run 不触发）
+        from lira.audio.mic import CHUNK_FRAMES  # 同上：mic 顶部导入 numpy
 
         source = self._hal["audio"]
         while not self._stop.is_set():
@@ -480,7 +517,12 @@ class DeviceRuntime:
     # ---------- 伴随任务：同步 / UI ----------
 
     async def _run_sync(self) -> None:
-        """同步伴随任务：断线指数退避重连（transport 工厂可注入，测试用替身）。"""
+        """同步伴随任务：断线指数退避重连（transport 工厂可注入，测试用替身）。
+
+        退避重置纪律（评审修正）：connect() 成功不足以重置——只有健康会话
+        （时长 >= SYNC_HEALTHY_SESSION_SECONDS）结束才重置，否则"连上即死"的
+        后端会以固定 2s 节奏无限重连。生产 transport 须先 open()（P0 修复）。
+        """
         sync_cfg = self._cfg.sync
         backoff = SYNC_RECONNECT_MIN_SECONDS
         while not self._stop.is_set():
@@ -494,23 +536,32 @@ class DeviceRuntime:
                 tts_settings=self.settings,
                 on_snapshot_applied=self._snapshot_announcer,
             )
+            session_ok = False
             try:
+                # 生产传输层显式建连（ScriptedTransport 等测试替身可无 open）
+                opener = getattr(transport, "open", None)
+                if opener is not None:
+                    await opener()
+                started = time.monotonic()
                 await client.connect()
                 logging.info("后台同步已连接")
-                backoff = SYNC_RECONNECT_MIN_SECONDS
                 await client.run_forever(heartbeat_seconds=sync_cfg.heartbeat_seconds)
+                session_ok = True
                 logging.info("同步会话结束（后台关闭连接）")
             except asyncio.CancelledError:
                 raise
-            except Exception as exc:  # noqa: BLE001
+            except Exception as exc:  # noqa: BLE001 - 中断由监督循环退避重连，不拖垮主循环
                 logging.warning("同步会话中断: %s（%.0fs 后重连）", exc, backoff)
             finally:
                 await transport.close()
+            # 健康会话才重置退避（短命会话继续指数退避，防固定节奏重连风暴）
+            if session_ok and (time.monotonic() - started) >= SYNC_HEALTHY_SESSION_SECONDS:
+                backoff = SYNC_RECONNECT_MIN_SECONDS
             if self._stop.is_set():
                 return
             try:
                 await asyncio.wait_for(self._stop.wait(), timeout=backoff)
-            except (asyncio.TimeoutError, TimeoutError):
+            except TimeoutError:
                 pass
             backoff = min(backoff * 2, SYNC_RECONNECT_MAX_SECONDS)
 
@@ -544,29 +595,38 @@ class DeviceRuntime:
         self._ui_server = server
         try:
             await server.serve()
+        except (SystemExit, OSError) as exc:
+            # uvicorn 端口绑定失败走 sys.exit(1)（SystemExit）或抛 OSError：
+            # 语音主功能不陪葬，降级为纯语音运行（评审 P2）
+            logging.warning("UI 服务不可用（%s），设备降级为纯语音模式", exc)
         finally:
-            # Ctrl-C 由 uvicorn 捕获时（capture_signals 替换信号处理）：serve 返回
-            # 即驱动整机停机，保证停机路径单一
-            self._stop.set()
+            # Ctrl-C/SIGTERM 由 uvicorn 捕获时（capture_signals 暂接管信号）：
+            # serve 正常返回即驱动整机停机；UI 自身故障（绑端口失败）不触发停机
+            if server.should_exit:
+                self._stop.set()
 
     async def _shutdown(self, stack) -> None:
-        """优雅停机：UI 先退（should_exit -> serve 自然返回，无取消噪声）->
+        """优雅停机：UI 先退（should_exit -> serve 自然返回）->
         取消引擎在途任务与伴随任务 -> 释放 HAL。幂等。"""
         if self._ui_server is not None:
             self._ui_server.should_exit = True
-        tasks = list(self._pending) + list(self._companions)
+        if self._ui_task is not None and not self._ui_task.done():
+            # 等 serve 自然返回（0.1s 轮询），超时取消兜底
+            try:
+                await asyncio.wait_for(asyncio.shield(self._ui_task), timeout=3.0)
+            except (TimeoutError, asyncio.CancelledError):
+                self._ui_task.cancel()
+        tasks = [
+            t
+            for t in list(self._pending) + list(self._companions)
+            if t is not self._ui_task
+        ]
         for task in tasks:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await stack.aclose()
         logging.info("LIRA 已退出，HAL 资源已释放。")
-
-
-# ---------- 模块级装配辅助 ----------
-
-
-
 
 
 # ---------- dry-run 装配图（仅 cfg + 模型文件探测，不构造引擎） ----------
@@ -665,6 +725,10 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     # 真实运行：引擎装配（缺失 -> 明确报错退出，绝不静默残缺运行）
+    from lira.appliances.store import ApplianceStore
+    from lira.settings import DeviceSettings
+
+    store = None
     try:
         hal = build_mock_hal(cfg) if cfg.hal.backend == "mock" else build_board_hal(cfg)
         audio = build_audio_stack(cfg)
@@ -680,15 +744,19 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 2
 
-    from lira.appliances.store import ApplianceStore
-    from lira.ui.app import DeviceSettings
-
     store = ApplianceStore(cfg.db_path)
-    settings = DeviceSettings()
-    runtime = DeviceRuntime(
-        cfg=cfg, hal=hal, store=store, settings=settings,
-        audio=audio, ocr=ocr, privacy=privacy,
-    )
+    try:
+        settings = DeviceSettings()
+        runtime = DeviceRuntime(
+            cfg=cfg, hal=hal, store=store, settings=settings,
+            audio=audio, ocr=ocr, privacy=privacy,
+        )
+    except ConfigError as exc:
+        # build_llm 依赖缺失等装配期错误（store 已建，保证关闭）
+        print(f"[装配失败] {exc}", file=sys.stderr)
+        store.close()
+        return 2
+
     try:
         asyncio.run(runtime.run())
     except KeyboardInterrupt:

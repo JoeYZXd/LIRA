@@ -275,6 +275,12 @@ class ReadingPipeline:
                 self._session.stop()
                 self._session = None
             raise
+        except Exception:  # noqa: BLE001 - 拍摄/引导非预期故障也必须回执（评审：CAPTURING 卡死防线）
+            # F3 同款纪律：状态机 CAPTURING 无计时器（拍摄开始即 disarm），协程若
+            # 带 unretrieved 异常死掉，on_capture_done 永不到达 -> 引擎永久卡在
+            # CAPTURING（唤醒词失效）。终局故障按"未检出"走 R26 引导/重拍。
+            logging.exception("拍摄流程非预期故障（按未检出处理）")
+            self._on_capture_done(False)
 
     async def _polish(self, raw_lines: list[str]) -> list[str]:
         """可选口语化加工（AE2）：失败/空结果回退原文，不静默、不拒读。"""

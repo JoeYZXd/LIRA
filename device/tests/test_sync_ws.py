@@ -68,7 +68,7 @@ class TestWsSyncTransport:
             await transport.open()
             await transport.send(HelloMsg(token="t").to_json())
             assert (await transport.receive()) == {"type": "auth_ok"}
-            with pytest.raises((asyncio.TimeoutError, TimeoutError)):
+            with pytest.raises(TimeoutError):
                 await asyncio.wait_for(transport.receive(), timeout=0.02)
             frame = await asyncio.wait_for(transport.receive(), timeout=2.0)
             frames_after.append(frame)
@@ -91,10 +91,19 @@ class TestWsSyncTransport:
             await transport.open()
             await transport.send(HelloMsg(token="t").to_json())
             await transport.receive()
+            # 服务端处理器返回即关闭连接：泵投递哨兵 -> receive 抛 SyncError
+            # （监督循环的重连触发路径，评审：本地 close 先行时测不到该分支）
+            for _ in range(50):
+                if transport._queue.qsize() > 0 or transport._pump.done():
+                    break
+                await asyncio.sleep(0.02)
+            with pytest.raises(SyncError):
+                await transport.receive()
         finally:
             await transport.close()
             server.close()
             await server.wait_closed()
+        # close 后仍拒绝（_ws 已置 None 的守卫分支）
         with pytest.raises(SyncError):
             await transport.receive()
 

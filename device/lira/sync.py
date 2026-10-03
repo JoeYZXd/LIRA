@@ -321,9 +321,6 @@ def _cli(argv: list[str] | None = None) -> int:
     return 0
 
 
-if __name__ == "__main__":
-    raise SystemExit(_cli())
-
 def make_snapshot_announcer(store, speak):
     """快照应用钩子（AE7）：对比应用前后 enabled，本次新禁用的家电口语播报。
 
@@ -339,3 +336,7 @@ def make_snapshot_announcer(store, speak):
             speak(text)
 
     return announce
+
+
+if __name__ == "__main__":
+    raise SystemExit(_cli())

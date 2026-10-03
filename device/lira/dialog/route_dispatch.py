@@ -21,13 +21,14 @@ class RouteDispatch:
 
     def __init__(self, *, streams, wakeword: str, spawn) -> None:
         """Args:
-        streams: 持有 route/wake_stream/asr_stream/playback_stream 的对象
-            （生产 = DeviceRuntime，测试 = DeviceHarness）。
-        wakeword: 唤醒词原文（KWS 命中结果含关键词原文，比对用）。
+        streams: 持有 route / wake_stream / asr_stream / playback_stream /
+            engine 的对象（生产 = DeviceRuntime，测试 = DeviceHarness）。
+        wakeword: 唤醒词原文（KWS 命中结果含关键词原文，比对用）。**参数权威**
+            ——持有者即使带同名属性也不读（单一真值来源，评审共识项）。
         spawn: 协程启动器（生产 = runtime.spawn 异常记录；e2e = ensure_future）。
         """
         self._streams = streams
-        self._wakeword = streams.wakeword if hasattr(streams, "wakeword") else wakeword
+        self._wakeword = wakeword
         self._spawn = spawn
 
     def feed(self, samples) -> None:

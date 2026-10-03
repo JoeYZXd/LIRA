@@ -19,7 +19,6 @@
 from __future__ import annotations
 
 import logging
-import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
@@ -30,6 +29,7 @@ from fastapi.templating import Jinja2Templates
 
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PassphraseVault, PrivacyState
+from lira.settings import DeviceSettings
 
 __all__ = ["DeviceSettings", "UiServices", "create_app", "TEMPLATES_DIR"]
 
@@ -38,45 +38,6 @@ logger = logging.getLogger(__name__)
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
-
-
-class DeviceSettings:
-    """音量 / TTS 语速的运行时可变设置（线程安全；持久化留给后续单元）。
-
-    边界拒绝：越界值抛 ValueError（UI 层转为 400），不静默夹紧——
-    家属在屏上设错时应当被明确告知，而不是悄悄改成功。
-    """
-
-    VOLUME_RANGE = (0.1, 2.0)
-    SPEED_RANGE = (0.5, 2.0)
-
-    def __init__(self, volume: float = 1.0, tts_speed: float = 1.0) -> None:
-        self._lock = threading.Lock()
-        self._volume = volume
-        self._tts_speed = tts_speed
-
-    @property
-    def volume(self) -> float:
-        return self._volume
-
-    @property
-    def tts_speed(self) -> float:
-        return self._tts_speed
-
-    @staticmethod
-    def _check(value: float, bounds: tuple[float, float], name: str) -> float:
-        low, high = bounds
-        if not low <= value <= high:
-            raise ValueError(f"{name} 须在 {low}~{high} 之间。")
-        return value
-
-    def set_volume(self, value: float) -> None:
-        with self._lock:
-            self._volume = self._check(value, self.VOLUME_RANGE, "音量")
-
-    def set_tts_speed(self, value: float) -> None:
-        with self._lock:
-            self._tts_speed = self._check(value, self.SPEED_RANGE, "语速")
 
 
 @dataclass

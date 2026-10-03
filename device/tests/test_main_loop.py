@@ -16,17 +16,14 @@ import logging
 from dataclasses import dataclass
 
 import numpy as np
+import pytest
 
 from lira.hal.base import AudioIO
 from lira.hal.mock import MockDisplay, MockIrController
+from lira.audio._paths import SAMPLE_RATE
 from lira.config import load_config
-from lira.main import (
-    AudioStack,
-    DeviceRuntime,
-    build_board_hal,
-    make_snapshot_announcer,
-)
-from lira.sync import SyncError
+from lira.main import AudioStack, DeviceRuntime, build_board_hal
+from lira.sync import SyncError, make_snapshot_announcer
 
 # ---------- 替身 ----------
 
@@ -43,7 +40,6 @@ class FakeStream:
     def feed_and_poll(self, samples) -> str | None:
         if self.hits:
             return self.hits.pop(0)
-        return None
         return None
 
     def text(self) -> str:
@@ -161,6 +157,14 @@ class SilenceSource(AudioIO):
     async def play(self, data: bytes) -> None:
         raise NotImplementedError
 
+    def push_silence(self, seconds: float) -> None:
+        """按 0.1s 块投递静音（驱动编排循环与 tick）。"""
+        samples = np.zeros(int(SAMPLE_RATE * seconds), dtype=np.float32)
+        for start in range(0, len(samples), 1600):
+            self._queue.put_nowait(
+                (samples[start : start + 1600] * 32767.0).astype(np.int16).tobytes()
+            )
+
     def push_eof(self) -> None:
         """投递 EOF 哨兵（不覆盖 HAL 的 async close）。"""
         self._queue.put_nowait(b"")
@@ -197,11 +201,11 @@ class Rig:
     ir: MockIrController
 
 
-def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int = 0):
+def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int = 0, clock=None):
     """整机替身装配（mock HAL + 假语音栈 + 假 LLM/OCR）。"""
     from lira.appliances.models import ApplianceModel
     from lira.appliances.store import ApplianceStore
-    from lira.ui.app import DeviceSettings
+    from lira.settings import DeviceSettings
 
     cfg = make_cfg(tmp_path, ws_url=ws_url, ui_port=ui_port)
     store = ApplianceStore(tmp_path / "device.db")
@@ -221,6 +225,8 @@ def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int
     kwargs = {}
     if transport_factory is not None:
         kwargs["sync_transport_factory"] = transport_factory
+    if clock is not None:
+        kwargs["clock"] = clock
     runtime = DeviceRuntime(
         cfg=cfg,
         hal=hal,
@@ -446,6 +452,70 @@ class TestAssemblyHelpers:
             async with httpx.AsyncClient() as client:
                 r = await client.get(f"http://127.0.0.1:{port}/")
             assert r.status_code == 200 and "隐私" in r.text
+        finally:
+            rig.source.push_eof()
+            await asyncio.wait_for(task, timeout=5.0)
+
+
+class TestReviewFixes:
+    async def test_sync_supervisor_uses_real_transport_open(self, tmp_path):
+        """评审 P0 回归：_run_sync 必须先 transport.open() 再 hello——
+        用真实 WsSyncTransport 对本地 websockets 服务联跑（替身掩盖过此缺陷）。"""
+        import json
+
+        pytest.importorskip("websockets")
+        from websockets.asyncio.server import serve
+
+        hellos: list[dict] = []
+        got_reply = asyncio.Event()
+
+        async def handler(ws):
+            frame = json.loads(await ws.recv())
+            hellos.append(frame)
+            await ws.send(json.dumps({"type": "auth_ok"}))
+            await got_reply.wait()  # 保持连接直至用例收尾
+
+        server = await serve(handler, "127.0.0.1", 0)
+        port = server.sockets[0].getsockname()[1]
+        rig = make_rig(tmp_path, ws_url=f"ws://127.0.0.1:{port}")
+        task = asyncio.ensure_future(rig.runtime.run())
+        try:
+            for _ in range(100):
+                if hellos:
+                    break
+                await asyncio.sleep(0.05)
+            assert hellos and hellos[0]["type"] == "hello" and hellos[0]["token"] == "tok-1"
+        finally:
+            got_reply.set()
+            rig.source.push_eof()
+            await asyncio.wait_for(task, timeout=5.0)
+            server.close()
+            await server.wait_closed()
+
+    async def test_engine_tick_wiring_via_injected_clock(self, tmp_path):
+        """评审：engine.tick 接线此前无覆盖（删掉 tick 调用测试照绿）。
+        注入假时钟快进 LISTENING 8s 窗口 x2 -> 复述提示 -> 礼貌回待机。"""
+        now = {"t": 1000.0}
+
+        def fake_clock() -> float:
+            return now["t"]
+
+        rig = make_rig(tmp_path, clock=fake_clock)
+        task = asyncio.ensure_future(rig.runtime.run())
+        try:
+            await asyncio.sleep(0.05)
+            await rig.runtime.engine.on_wake()
+            assert rig.runtime.engine.state.value == "listening"
+            now["t"] += 9.0  # 第一个 8s 窗口超时
+            rig.source.push_silence(0.2)
+            await asyncio.sleep(0.3)  # 等编排循环消费静音块并触发 tick
+            await settle(rig.runtime)
+            assert any("指令" in t for t, _, _ in rig.tts.spoken)
+            now["t"] += 9.0  # 第二个窗口超时
+            rig.source.push_silence(0.2)
+            await asyncio.sleep(0.3)
+            await settle(rig.runtime)
+            assert rig.runtime.engine.state.value == "standby"
         finally:
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)

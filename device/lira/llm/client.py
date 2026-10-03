@@ -22,7 +22,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-from typing import Awaitable, Callable, Iterable
+from typing import Awaitable, Callable
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 
@@ -41,6 +41,7 @@ __all__ = [
     "LlmError",
     "PrivacyBlocked",
     "make_remote_handler",
+    "make_text_polisher",
     "WAIT_REMOTE",  # re-export：等待反馈话术唯一出处仍是 phrasebook
 ]
 
@@ -215,7 +216,7 @@ def make_remote_handler(client: LlmClient) -> Callable[[str], Awaitable[str | No
 
     return handler
 
-def make_text_polisher(llm: "LlmClient"):
+def make_text_polisher(llm: LlmClient):
     """R3/R27/AE2 阅读白话钩子：简单文本本地直读；复杂文本远程转白话；
     隐私/断网/失败 -> 原文 + 免责提示（不静默、不拒读）。
 

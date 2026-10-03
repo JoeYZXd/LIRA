@@ -562,8 +562,11 @@ class DeviceRuntime:
         return self._spawn(coro, self._pending, log_errors=True)
 
     def spawn_companion(self, coro) -> asyncio.Task:
-        """长驻伴随任务（UI serve / 同步监督）：停机统一取消，不进 _pending。"""
-        return self._spawn(coro, self._companions)
+        """长驻伴随任务（UI serve / 同步监督）：停机统一取消，不进 _pending。
+
+        异常同样记 ERROR——伴随任务静默死亡 = UI/同步无声消失，必须可见。
+        """
+        return self._spawn(coro, self._companions, log_errors=True)
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
@@ -713,13 +716,38 @@ class DeviceRuntime:
             dev=self._dev_handle(),
         )
         app = create_app(services)
+        # 显式 int 级别的日志配置：板上实测 uvicorn 默认 dictConfig 的字符串
+        # 级别（'INFO'）会在 _checkLevel 处报 Unknown level（仅完整运行进程内
+        # 复现，隔离不可复现；int 级别绕开字符串解析，根因存疑待查）
+        uvicorn_log_config = {
+            "version": 1,
+            "disable_existing_loggers": False,
+            "formatters": {
+                "default": {
+                    "()": "uvicorn.logging.DefaultFormatter",
+                    "fmt": "%(levelprefix)s %(message)s",
+                }
+            },
+            "handlers": {
+                "default": {
+                    "formatter": "default",
+                    "class": "logging.StreamHandler",
+                    "stream": "ext://sys.stderr",
+                }
+            },
+            "loggers": {
+                "uvicorn": {"handlers": ["default"], "level": 20, "propagate": False},
+                "uvicorn.error": {"level": 20},
+                "uvicorn.access": {"handlers": ["default"], "level": 20, "propagate": False},
+            },
+        }
         server = uvicorn.Server(
             uvicorn.Config(
                 app,
                 host=self._cfg.ui.host,
                 port=self._cfg.ui.port,
-                log_level="warning",
                 access_log=False,
+                log_config=uvicorn_log_config,
             )
         )
         self._ui_server = server

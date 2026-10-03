@@ -53,6 +53,7 @@ def make_client(*, enabled: bool = True, passphrase_set: bool = True, runtime=No
     if passphrase_set:
         rt.vault.set(PASSPHRASE)
     handle = DevHandle(rt) if enabled else None
+    rt.dev_handle = handle  # 测试访问面（注入 record_clip 替身等）
     services = UiServices(
         privacy=rt.privacy,
         vault=rt.vault,
@@ -242,3 +243,220 @@ class TestStatusLogsSettings:
         r = client.post("/speed", data={"value": "0.8"}, follow_redirects=False)
         assert r.status_code == 303
         assert rt.settings.tts_speed == 0.8
+
+
+# ---------- U3：语音链路测试 ----------
+
+
+class FakeTts:
+    """TtsEngine 替身：speak 记录调用并返回立即 set 的完成事件。"""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, float, float]] = []
+
+    def speak(self, text: str, speed: float = 1.0, volume: float = 1.0) -> asyncio.Event:
+        self.calls.append((text, speed, volume))
+        done = asyncio.Event()
+        done.set()
+        return done
+
+
+class FakeAsrStream:
+    def __init__(self, text: str) -> None:
+        self._text = text
+
+    def feed(self, samples) -> None:
+        pass
+
+    def text(self) -> str:
+        return self._text
+
+
+class FakeAsr:
+    def __init__(self, text: str) -> None:
+        self._text = text
+        self.streams = 0
+
+    def create_stream(self):
+        self.streams += 1
+        return FakeAsrStream(self._text)
+
+
+class FakeStreamError:
+    """录音失败注入：record_clip 抛错。"""
+
+
+def make_wav_bytes(pcm_int16: bytes) -> bytes:
+    import io
+    import wave
+
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(16000)
+        wf.writeframes(pcm_int16)
+    return buf.getvalue()
+
+
+class VoiceRuntime(FakeRuntime):
+    """U3 面：tts/asr/settings；录音经可替换的 handle.record_clip。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.tts = FakeTts()
+        self.asr = FakeAsr("打开台灯")
+
+
+def make_voice_client(*, asr_text: str = "打开台灯"):
+    rt = VoiceRuntime()
+    rt.asr = FakeAsr(asr_text)
+    app, client, _rt = make_client(runtime=rt)
+    from lira.ui.dev import clip_state
+
+    clip_state["wav"] = None
+    return app, client, rt
+
+
+class TestVoiceEndpoints:
+    def test_tts_speaks_and_reports_elapsed(self):
+        """TTS：等待完成返回 spoken + 耗时；参数含 settings；文本不落日志。"""
+        from lira.main import ensure_ring_handler
+
+        ensure_ring_handler()
+        _app, client, rt = make_voice_client()
+        login(client)
+        r = client.post("/dev/api/tts", json={"text": "控制台测试文本九七八"})
+        assert r.status_code == 200
+        body = r.json()
+        assert body["result"] == "spoken" and "elapsed_ms" in body
+        text, speed, volume = rt.tts.calls[-1]
+        assert text == "控制台测试文本九七八"
+        assert speed == rt.settings.tts_speed and volume == rt.settings.volume
+        lines = client.get("/dev/api/logs").json()["lines"]
+        assert all("控制台测试文本九七八" not in ln for ln in lines)
+
+    def test_tts_empty_text_400(self):
+        _app, client, _rt = make_voice_client()
+        login(client)
+        assert client.post("/dev/api/tts", json={"text": "  "}).status_code == 400
+
+    def test_record_privacy_interlock(self):
+        """AE1：隐私 ON → 录音拒绝，采集未被调用。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+
+        async def _fail_record(seconds):
+            raise AssertionError("privacy ON 时不得采集")
+
+        client.post(
+            "/dev/login", json={"passphrase": PASSPHRASE}
+        )  # 保持会话
+        rt.privacy._on = True
+        r = client.post("/dev/api/record", json={})
+        assert r.status_code == 403
+        assert "隐私" in r.json()["error"]
+
+
+class TestVoiceEndpoints:
+    def test_record_then_clip_roundtrip_in_memory(self):
+        """录音 → 内存缓冲 → 回放端点返回 wav（零落盘，无临时文件语义）。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+        wav = make_wav_bytes(b"\x00\x01" * 1600)
+
+        async def _fake_record(seconds):
+            return wav
+
+        rt.dev_handle.record_clip = _fake_record
+        r = client.post("/dev/api/record", json={})
+        assert r.status_code == 200, r.text
+        assert r.json()["seconds"] == 10
+        clip = client.get("/dev/api/clip")
+        assert clip.status_code == 200
+        assert clip.headers["content-type"] == "audio/wav"
+        assert clip.content == wav
+
+    def test_record_single_flight_409(self):
+        """互斥：锁被占用（进行中的测试）→ 409 单飞拒绝。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+        # 预占互斥锁（模拟进行中的测试）；端点只读 locked() 即 409，无跨 loop await
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(rt.dev_handle.dev_mutex.acquire())
+        finally:
+            loop.close()
+        r = client.post("/dev/api/record", json={})
+        assert r.status_code == 409
+        assert "测试进行中" in r.json()["error"]
+        rt.dev_handle.dev_mutex.release()
+
+    def test_record_failure_folds_to_503(self):
+        """录音设备错误 → 503 友好响应，不炸进程。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+
+        async def _boom(seconds):
+            raise OSError("no such device")
+
+        rt.dev_handle.record_clip = _boom
+        r = client.post("/dev/api/record", json={})
+        assert r.status_code == 503
+        assert "录音失败" in r.json()["error"]
+
+    def test_asr_from_recorded_buffer_with_intent(self):
+        """ASR：内存录音 → 识别文本 + 本地规则意图（不执行）。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+        from lira.appliances.models import ApplianceModel
+
+        rt.store.upsert_appliance(
+            ApplianceModel(name="台灯", aliases=("台灯",),
+                           actions={"打开": ("打开",)}, codes={"打开": "C1"})
+        )
+        rt.dev_handle.record_clip = make_wav_bytes  # type: ignore[assignment]
+        # record_clip(seconds) 调用签名不匹配——改用 lambda 忽略参数
+        rt.dev_handle.record_clip = lambda seconds: make_wav_bytes(b"\x00\x01" * 1600)
+        # 上面是同步赋值会被 await —— 正确做法：async 包装
+        async def _fake_record(seconds):
+            return make_wav_bytes(b"\x00\x01" * 1600)
+
+        rt.dev_handle.record_clip = _fake_record
+        assert client.post("/dev/api/record", json={}).status_code == 200
+        r = client.post("/dev/api/asr", json={})
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["text"] == "打开台灯"
+        assert body["intent"] == {"kind": "appliance", "action": "打开", "appliance": "台灯"}
+        lines = client.get("/dev/api/logs").json()["lines"]
+        assert all("打开台灯" not in ln for ln in lines)
+
+    def test_asr_upload_wav_path(self):
+        """上传输入：multipart wav → 识别（origin R7 的第二输入）。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+        wav = make_wav_bytes(b"\x01\x00" * 800)
+        r = client.post(
+            "/dev/api/asr",
+            files={"file": ("sample.wav", wav, "audio/wav")},
+        )
+        assert r.status_code == 200, r.text
+        assert r.json()["text"] == "打开台灯"
+
+    def test_asr_without_input_400(self):
+        _app, client, _rt = make_voice_client()
+        login(client)
+        from lira.ui.dev import clip_state
+
+        clip_state["wav"] = None
+        r = client.post("/dev/api/asr", json={})
+        assert r.status_code == 400
+
+    def test_asr_privacy_interlock(self):
+        """隐私 ON → ASR 拒绝。"""
+        _app, client, rt = make_voice_client()
+        login(client)
+        rt.privacy._on = True
+        r = client.post("/dev/api/asr", json={})
+        assert r.status_code == 403

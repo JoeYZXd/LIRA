@@ -39,6 +39,10 @@ _SALT = "lira-dev-session"
 
 _MAX_FAILED = 5
 _LOCK_SECONDS = 300.0
+_MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+#: 录音内存缓冲（零落盘；进程内，覆盖复用）
+clip_state: dict[str, bytes | None] = {"wav": None, "ts": 0.0}
 
 
 class DevHandle:
@@ -56,6 +60,51 @@ class DevHandle:
     @property
     def vault(self) -> PassphraseVault:
         return self.runtime.vault
+
+    async def record_clip(self, seconds: float = 10.0) -> bytes:
+        """服务端录音 -> 内存 wav（采集零落盘）。
+
+        callback+queue 模式（阻塞等待不占共享事件循环——评审 P1 纪律）；录音
+        质量为设备实际拾音（PipeWire 多路捕获与主循环并存，M7 实机验证项）。
+        """
+        import io
+        import wave
+
+        import sounddevice as sd
+
+        from lira.audio._paths import SAMPLE_RATE
+
+        loop = asyncio.get_running_loop()
+        queue: asyncio.Queue[bytes] = asyncio.Queue()
+        stream = sd.InputStream(
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            dtype="int16",
+            blocksize=1600,
+            callback=lambda indata, frames, t, status: loop.call_soon_threadsafe(
+                queue.put_nowait, bytes(indata)
+            ),
+        )
+        stream.start()
+        chunks: list[bytes] = []
+        deadline = loop.time() + seconds
+        try:
+            while loop.time() < deadline:
+                try:
+                    chunks.append(await asyncio.wait_for(queue.get(), timeout=0.5))
+                except TimeoutError:
+                    continue
+        finally:
+            stream.stop()
+            stream.close()
+        pcm = b"".join(chunks)
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(SAMPLE_RATE)
+            wf.writeframes(pcm)
+        return buf.getvalue()
 
 
 def _session_secret(store: ApplianceStore) -> str:
@@ -103,6 +152,37 @@ class _RateLimiter:
     def reset(self) -> None:
         self.failures = 0
         self.locked_until = 0.0
+
+
+def _offline_transcribe(asr, wav_bytes: bytes) -> str:
+    """wav 字节 -> 离线喂独立 AsrStream -> 识别文本（CPU 密集，调用方 to_thread）。"""
+    import io
+    import wave
+
+    import numpy as np
+
+    with wave.open(io.BytesIO(wav_bytes), "rb") as wf:
+        raw = wf.readframes(wf.getnframes())
+    samples = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
+    stream = asr.create_stream()
+    stream.feed(samples)
+    return stream.text().strip()
+
+
+def _classify_text(runtime, text: str) -> dict | None:
+    """本地规则意图分类展示（不执行；与 Router 同源的 intents 规则）。"""
+    from lira.dialog.intents import match_local
+
+    appliances = tuple(a.to_dialog() for a in runtime.store.get_all_appliances())
+    intent = match_local(text, appliances)
+    if intent is None:
+        return None
+    result: dict = {"kind": intent.kind.value}
+    if intent.action is not None:
+        result["action"] = intent.action
+    if intent.appliance is not None:
+        result["appliance"] = intent.appliance.name
+    return result
 
 
 def mount_dev(app: FastAPI, handle: DevHandle) -> None:
@@ -213,7 +293,101 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         logger.info("dev event=loglevel level=%s", level)
         return JSONResponse({"ok": True, "level": level})
 
-    # ---------- U3+/U4+/U5+/U6+ 的端点在后续单元追加 ----------
+    # ---------- 语音链路测试（U3） ----------
+
+    @app.post("/dev/api/tts")
+    async def dev_tts(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        body = await request.json()
+        text = str(body.get("text", "")).strip()
+        if not text:
+            return JSONResponse({"error": "缺少播报文本"}, status_code=400)
+        if len(text) > 200:
+            return JSONResponse({"error": "播报文本过长（<=200 字符）"}, status_code=400)
+        tts = handle.runtime.tts
+        if tts is None:
+            return JSONResponse({"error": "语音栈未就绪"}, status_code=503)
+        started = time.monotonic()
+        done = tts.speak(text, volume=handle.runtime.settings.volume,
+                         speed=handle.runtime.settings.tts_speed)
+        try:
+            await asyncio.wait_for(done.wait(), timeout=10.0)
+            result = "spoken"
+        except TimeoutError:
+            result = "timeout"
+        elapsed_ms = int((time.monotonic() - started) * 1000)
+        # 日志纪律：只记事件与耗时，播报文本不落日志
+        logger.info("dev event=tts_test result=%s elapsed_ms=%d", result, elapsed_ms)
+        return JSONResponse({"result": result, "elapsed_ms": elapsed_ms})
+
+    @app.post("/dev/api/record")
+    async def dev_record(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
+        if handle.dev_mutex.locked():
+            return JSONResponse({"error": "测试进行中，请稍后再试"}, status_code=409)
+        async with handle.dev_mutex:
+            try:
+                wav = await handle.record_clip(10.0)
+            except Exception as exc:  # noqa: BLE001 - 设备错误折叠为友好响应
+                logger.warning("dev event=record error=%s", type(exc).__name__)
+                return JSONResponse({"error": f"录音失败: {exc}"}, status_code=503)
+        clip_state["wav"] = wav
+        clip_state["ts"] = time.time()
+        logger.info("dev event=record seconds=10 bytes=%d", len(wav))
+        return JSONResponse({"ok": True, "seconds": 10, "bytes": len(wav)})
+
+    @app.get("/dev/api/clip")
+    async def dev_clip(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        wav = clip_state.get("wav")
+        if not wav:
+            return JSONResponse({"error": "尚未录音（先点击录音）"}, status_code=404)
+        from fastapi.responses import Response
+
+        return Response(content=wav, media_type="audio/wav")
+
+    @app.post("/dev/api/asr")
+    async def dev_asr(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
+        form = await request.form()
+        upload = form.get("file")
+        if upload is not None and hasattr(upload, "read"):
+            data = await upload.read()
+            if len(data) > _MAX_UPLOAD_BYTES:
+                return JSONResponse({"error": "上传文件过大（<=5MB）"}, status_code=413)
+            wav_bytes = data
+        else:
+            wav_bytes = clip_state.get("wav")
+        if not wav_bytes:
+            return JSONResponse({"error": "尚无录音（先录音或上传 wav）"}, status_code=400)
+        asr = getattr(handle.runtime, "asr", None)
+        if asr is None:
+            return JSONResponse({"error": "ASR 引擎未就绪"}, status_code=503)
+        try:
+            text = await asyncio.to_thread(_offline_transcribe, asr, wav_bytes)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("dev event=asr error=%s", type(exc).__name__)
+            return JSONResponse({"error": f"识别失败: {exc}"}, status_code=503)
+        intent = _classify_text(handle.runtime, text)
+        # 日志纪律：识别文本只在响应往返，不落日志
+        logger.info("dev event=asr chars=%d matched=%s", len(text), intent is not None)
+        return JSONResponse({"text": text, "intent": intent})
+
+    # ---------- U4+/U5+/U6+ 的端点在后续单元追加 ----------
 
 
 def _dev_page_html() -> str:

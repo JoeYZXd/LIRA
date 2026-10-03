@@ -442,6 +442,8 @@ class DeviceRuntime:
         self.route = AudioRoute.WAKE
         self.tts = audio.tts
         self.speaker = speaker or TtsBlockSpeaker(audio.tts)
+        #: ASR 引擎引用（dev 控制台识别测试用；离线喂流自建独立流）
+        self.asr = audio.asr
         self.wake_stream = audio.wake_kws.create_stream()
         self.asr_stream = audio.asr.create_stream()
         self.playback_stream = audio.playback_kws.create_stream()

@@ -18,9 +18,18 @@ llm:
   colloquial_threshold_chars: 150
 
 hal:
-  backend: mock            # mock (x86 开发) | board (板上, U10)
+  backend: mock            # mock (x86 开发) | board (板上, U10/M7)
   mock_images_dir: assets/mock_images   # 相对路径按仓库根解析
   mock_audio_dir: assets/mock_audio
+  # M7：板上设备号固化（空串 = 系统默认；数值串 = sounddevice 序号）
+  mic_device: ""           # 板上: FY-SP003U（M4 实测 card 3），如 "3" 或设备名子串
+  speaker_device: ""       # 板上: 板载 ES8388 线路输出（M6 实测 card 2），如 "2"
+  camera_device: ""        # 板上: OV13855@CAM1 → /dev/video0（M3 实测）
+
+# U7：设备 Web UI（局域网浏览器访问；M7 起随主循环 in-process 挂载）
+ui:
+  host: 0.0.0.0
+  port: 8080
 
 # U6：本地家电配置库（R13 本地持久化；运行期产物，gitignore *.db）
 db_path: data/device.db

@@ -62,6 +62,30 @@ class TestHappyPath:
         assert cfg.hal.mock_images_dir == REPO_ROOT / "assets" / "mock_images"
         assert cfg.hal.mock_audio_dir == REPO_ROOT / "assets" / "mock_audio"
 
+    def test_board_devices_and_ui_defaults(self, tmp_path):
+        """M7 新增字段：板上设备号默认空串（系统默认设备），UI 默认 0.0.0.0:8080。"""
+        cfg = load_config(write_cfg(tmp_path, FULL_YAML), env={})
+        assert cfg.hal.mic_device == ""
+        assert cfg.hal.speaker_device == ""
+        assert cfg.hal.camera_device == ""
+        assert cfg.ui.host == "0.0.0.0"
+        assert cfg.ui.port == 8080
+
+    def test_board_devices_and_ui_from_yaml(self, tmp_path):
+        yaml_text = (
+            "llm:\n  api_key: k\n"
+            "hal:\n  backend: board\n"
+            "  mic_device: '3'\n  speaker_device: '2'\n  camera_device: /dev/video1\n"
+            "ui:\n  host: 192.168.1.5\n  port: 9090\n"
+        )
+        cfg = load_config(write_cfg(tmp_path, yaml_text), env={})
+        assert cfg.hal.backend == "board"
+        assert cfg.hal.mic_device == "3"
+        assert cfg.hal.speaker_device == "2"
+        assert cfg.hal.camera_device == "/dev/video1"
+        assert cfg.ui.host == "192.168.1.5"
+        assert cfg.ui.port == 9090
+
 
 class TestEnvOverride:
     def test_env_overrides_yaml_values(self, tmp_path):
@@ -101,6 +125,19 @@ class TestEnvOverride:
         with pytest.raises(ConfigError, match="LIRA_LLM_TIMEOUT_SECONDS"):
             load_config(write_cfg(tmp_path, FULL_YAML), env={"LIRA_LLM_TIMEOUT_SECONDS": "abc"})
 
+    def test_env_overrides_board_devices_and_ui(self, tmp_path):
+        env = {
+            "LIRA_HAL_MIC_DEVICE": "FY-SP003U",
+            "LIRA_HAL_SPEAKER_DEVICE": "2",
+            "LIRA_HAL_CAMERA_DEVICE": "/dev/video0",
+            "LIRA_UI_PORT": "8123",
+        }
+        cfg = load_config(write_cfg(tmp_path, FULL_YAML), env=env)
+        assert cfg.hal.mic_device == "FY-SP003U"
+        assert cfg.hal.speaker_device == "2"
+        assert cfg.hal.camera_device == "/dev/video0"
+        assert cfg.ui.port == 8123
+
 
 class TestErrorPaths:
     def test_missing_api_key_raises_with_hint(self, tmp_path):
@@ -129,12 +166,28 @@ class TestErrorPaths:
         with pytest.raises(ConfigError, match="hal.backend"):
             load_config(write_cfg(tmp_path, yaml_text), env={})
 
+    def test_invalid_ui_port_raises(self, tmp_path):
+        yaml_text = "llm:\n  api_key: k\nui:\n  port: 70000\n"
+        with pytest.raises(ConfigError, match="ui.port"):
+            load_config(write_cfg(tmp_path, yaml_text), env={})
+
     def test_non_mapping_yaml_raises(self, tmp_path):
         with pytest.raises(ConfigError, match="映射"):
             load_config(write_cfg(tmp_path, "- a\n- b\n"), env={})
 
     def test_missing_config_file_is_defaults_plus_env(self, tmp_path):
         """文件不存在时不报错：仅内置默认值 + 环境变量。"""
-        cfg = load_config(tmp_path / "nope.yaml", env={"LIRA_LLM_API_KEY": "sk-e"})
+        cfg = load_config(env={"LIRA_LLM_API_KEY": "sk-e"})
         assert cfg.llm.base_url == DEFAULT_GLM_BASE_URL
         assert cfg.llm.api_key == "sk-e"
+
+    def test_env_override_does_not_pollute_defaults(self, tmp_path):
+        """回归（M7 接线时发现）：env 覆盖不得写入模块级 DEFAULTS——
+        同进程第二次 load_config 不得继承上一次的 env 值。"""
+        cfg1 = load_config(env={"LIRA_LLM_API_KEY": "sk-leak"})
+        assert cfg1.llm.api_key == "sk-leak"
+        from lira.config import DEFAULTS
+
+        assert DEFAULTS["llm"]["api_key"] == "", "DEFAULTS 被 env 覆盖污染"
+        cfg2 = load_config(env={}, require_api_key=False)
+        assert cfg2.llm.api_key == "", "env 覆盖跨 load_config 调用泄漏"

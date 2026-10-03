@@ -1,12 +1,22 @@
-"""LIRA 设备端 asyncio 入口：装配各模块。
+"""LIRA 设备端 asyncio 入口：装配各模块并驱动主循环（M7 接线）。
 
-Verification（U1）::
+主循环 = e2e ``DeviceHarness``（U9 已验证装配图）的生产形态：
 
-    cd device && .venv/bin/python -m lira.main --dry-run
+    HAL 音频编排（16kHz mono int16 -> float32）
+      -> PrivacyGatedSink（隐私门，R12 fail-closed）
+        -> 路由分发（状态机统一切换，R21 三选二）:
+            WAKE     -> 主唤醒 KWS -> engine.on_wake()
+            LISTEN   -> 流式 ASR -> endpoint 切句 -> engine.on_asr_text()
+            PLAYBACK -> 白名单 KWS -> engine.on_asr_text()
+    DialogEngine.tick（单调时钟：LISTENING 8s / CONFIRMING 10s 超时）
+    speak            -> TtsEngine（音量/语速读 DeviceSettings，R28 等待反馈挂 LLM）
+    start_capture    -> 任务句柄返回状态机（F1 取消依据）
+    send_ir          -> IRService.send_ir(confirmed=True)（第二道安全闸）
+    播放控制六方法    -> ReadingPipeline 播放控制入口
 
-以全 mock HAL 装配，打印模块装配图后退出。不带 --dry-run 时进入主循环
-（当前 U1 阶段主循环仅保持 HAL 上下文存活，等待 Ctrl-C；后续单元在此
-挂载音频管线与对话状态机）。
+伴随任务：同步监督循环（断线指数退避重连）与设备 Web UI（uvicorn in-process，
+UiServices 注入同一批状态对象）。--dry-run 仅读配置与模型文件探测，不构造任何
+引擎（README 承诺：仅 PyYAML 的环境可跑装配校验）。
 """
 
 from __future__ import annotations
@@ -15,28 +25,94 @@ import argparse
 import asyncio
 import logging
 import signal
+import socket
 import sys
+import time
+from dataclasses import dataclass
 
+from lira.appliances import IRService, LearningManager
+from lira.audio._paths import (
+    ASR_MODEL_DIR,
+    KWS_MODEL_DIR,
+    MODELS_DIR,
+    TTS_MODEL_DIR,
+    VOCODER_ONNX,
+    WAKEWORD_KEYWORDS_FILE,
+)
 from lira.config import AppConfig, ConfigError, load_config
-from lira.hal.mock import IMAGE_SUFFIXES, MockAudioIO, MockCamera, MockDisplay, MockIrController
-from lira.privacy import PrivacyState
+from lira.dialog import phrasebook as pb
+from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
+from lira.dialog.router import Router
+from lira.dialog.state_machine import AudioRoute, DialogEngine
+from lira.hal.base import HalError
+from lira.hal.mock import (
+    IMAGE_SUFFIXES,
+    MockAudioIO,
+    MockCamera,
+    MockDisplay,
+    MockIrController,
+)
+from lira.privacy import (
+    PassphraseVault,
+    PrivacyGatedSink,
+    PrivacyState,
+    attach_announcer,
+)
+from lira.sync import SyncClient
+from lira.sync_ws import WsSyncTransport
+from lira.vision.reading import ReadingPipeline, TtsBlockSpeaker
+
+__all__ = [
+    "AudioStack",
+    "DeviceRuntime",
+    "build_audio_stack",
+    "build_board_hal",
+    "build_mock_hal",
+    "main",
+]
+
+#: 主循环分发块长：0.1s = 1600 帧 = 3200 字节（与 MicDistributor 同粒度）
+CHUNK_FRAMES = 1600
+
+#: 唤醒词回退值（词表读取失败时；正常路径从拼音表首行解析）
+WAKEWORD_FALLBACK = "小丽拉"
+
+#: 同步重连退避 (秒)：指数退避边界，成功会话后重置
+SYNC_RECONNECT_MIN_SECONDS = 2.0
+SYNC_RECONNECT_MAX_SECONDS = 60.0
 
 
-def _count_mock_images(cfg: AppConfig) -> int:
-    """dry-run 不打开 HAL，这里直接数目录里的图片文件。"""
-    d = cfg.hal.mock_images_dir
-    if not d.is_dir():
-        return 0
-    return sum(1 for p in d.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+def _hal_device(value: str) -> int | str | None:
+    """配置设备号 -> sounddevice device 参数：空串=None（系统默认），纯数字=序号，其余=名称子串。"""
+    if not value:
+        return None
+    return int(value) if value.isdigit() else value
+
+
+def _wakeword_text() -> str:
+    """唤醒词原文（KWS 命中结果含关键词原文，比对用）：读拼音表首行，失败回退默认词。
+
+    唤醒词由拼音表驱动（改词零成本），主循环不硬编码；解析失败回退并告警
+    （词表与比对逻辑漂移时唤醒会失效，宁可保守提示）。
+    """
+    try:
+        first = WAKEWORD_KEYWORDS_FILE.read_text(encoding="utf-8").splitlines()[0]
+        word = first.split("@")[-1].strip()  # 词表格式: 拼音 @中文词（KWS 结果含中文词）
+    except (OSError, IndexError):
+        word = None
+    if not word:
+        logging.warning("唤醒词表读取失败，回退默认唤醒词 %r", WAKEWORD_FALLBACK)
+        return WAKEWORD_FALLBACK
+    return word
+
+
+# ---------- HAL 装配（按 hal.backend 选择） ----------
 
 
 def build_mock_hal(cfg: AppConfig) -> dict[str, object]:
-    """按配置实例化全 mock HAL（x86 开发路径）。板上路径在 U10 接入 hal.board。"""
+    """按配置实例化全 mock HAL（x86 开发路径：文件相机/文件音频/日志 IR）。"""
     if cfg.hal.backend != "mock":
-        raise ConfigError(
-            f"hal.backend={cfg.hal.backend!r} 的板上实现尚未实现（U10）。"
-            "x86 开发请使用 hal.backend=mock。"
-        )
+        raise ConfigError(f"hal.backend={cfg.hal.backend!r} 应走 build_board_hal（board）。")
     camera = MockCamera(cfg.hal.mock_images_dir)
     audio = MockAudioIO(cfg.hal.mock_audio_dir / "sample_16k.wav")
     ir = MockIrController()
@@ -44,53 +120,606 @@ def build_mock_hal(cfg: AppConfig) -> dict[str, object]:
     return {"camera": camera, "audio": audio, "ir": ir, "display": display}
 
 
-def print_assembly(cfg: AppConfig, hal: dict[str, object], privacy: PrivacyState) -> None:
-    """打印模块装配图（dry-run 的核心产出）。"""
-    print("=" * 62)
+def build_board_hal(cfg: AppConfig) -> dict[str, object]:
+    """板上真实 HAL（U10/M7）。
+
+    - Mic = SoundDeviceMic（M4：FY-SP003U），Speaker = TTS 播放器（M6：ES8388，见
+      build_audio_stack）。
+    - Camera = V4l2RawCamera（M3：OV13855@CAM1 裸 Bayer 路径）。
+    - Display 无触摸屏 -> MockDisplay（no-op 语义一致）。
+    - IR 待 M5（BroadLink RM4 Mini 到货接 ``ir_broadlink``，传输层替换，链路不变），
+      当前以 MockIrController 装配并明确告警：发射只记录、不生效。
+    """
+    from lira.audio.mic import SoundDeviceMic
+    from lira.hal.board import V4l2RawCamera
+    from lira.hal.board.camera_raw import DEFAULT_DEVICE
+
+    mic = SoundDeviceMic(device=_hal_device(cfg.hal.mic_device))
+    camera = V4l2RawCamera(device=cfg.hal.camera_device or DEFAULT_DEVICE)
+    ir = MockIrController()
+    logging.warning(
+        "IR 板上实现待 M5（BroadLink RM4 Mini）：当前装配 MockIrController，"
+        "红外发射只记录不生效（家电控制不可用）"
+    )
+    return {"camera": camera, "audio": mic, "ir": ir, "display": MockDisplay()}
+
+
+# ---------- 引擎装配（依赖/模型缺失 -> None + 日志指引；dry-run 不构造） ----------
+
+
+@dataclass
+class AudioStack:
+    """sherpa 语音栈：双 KWS + 流式 ASR + TTS（+ 板上播放器）。"""
+
+    wake_kws: object  # WakeWordKws
+    asr: object  # StreamingAsr
+    playback_kws: object  # WakeWordKws（白名单）
+    tts: object  # TtsEngine
+    player: object | None = None  # SoundDevicePlayer（board 后端）
+
+
+def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
+    """sherpa 语音栈装配。依赖/模型缺失返回 None（带日志指引），不抛异常。"""
+    try:
+        from lira.audio.asr import StreamingAsr
+        from lira.audio.kws import WakeWordKws
+        from lira.audio.tts import TtsEngine
+
+        _ = PLAYBACK_WHITELIST_KEYWORDS_FILE  # intents 模块可用性一并确认
+    except ImportError as exc:
+        logging.warning("音频依赖未安装: %s（pip install -e '.[audio]'）", exc)
+        return None
+    try:
+        # 播放器先建（board 后端），采样率在 TTS 引擎加载后回填（模型采样率权威）
+        player = None
+        if cfg.hal.backend == "board":
+            from lira.hal.board.audio import SoundDevicePlayer
+
+            player = SoundDevicePlayer(device=_hal_device(cfg.hal.speaker_device))
+        tts = TtsEngine(player=player)
+        if player is not None:
+            player.samplerate = tts.sample_rate
+        return AudioStack(
+            wake_kws=WakeWordKws(),
+            asr=StreamingAsr(),
+            playback_kws=WakeWordKws(keywords_file=PLAYBACK_WHITELIST_KEYWORDS_FILE),
+            tts=tts,
+            player=player,
+        )
+    except FileNotFoundError as exc:
+        logging.warning("语音栈模型未就绪: %s", exc)
+        return None
+
+
+def build_ocr(cfg: AppConfig):
+    """OCR 引擎按后端选择：board -> RKNNLite（det core0/rec core1）；
+    mock -> onnxruntime（x86 开发）。缺模型/依赖抛 ConfigError（含修复指引）。"""
+    if cfg.hal.backend == "board":
+        from lira.vision.ocr_rknn import RknnOcrEngine
+
+        factory = RknnOcrEngine
+        missing = "OCR .rknn 模型缺失。请确认 models/ 下 ppocrv4_det.rknn 与 ppocrv4_rec.rknn（x86 转换产物已拷入）。"
+    else:
+        from lira.vision.ocr_x86 import OnnxOcrEngine
+
+        factory = OnnxOcrEngine
+        missing = "OCR ONNX 模型缺失。请运行: python3 models/download_models.py"
+    try:
+        return factory()
+    except (FileNotFoundError, ImportError) as exc:
+        raise ConfigError(f"{missing}（原因: {exc}）") from exc
+
+
+def _make_network_probe(base_url: str, interval_seconds: float = 10.0):
+    """R10 基础联网检测：TCP 连通 base_url 主机（结果缓存 10s，避免高频探测）。"""
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    host = parsed.hostname
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    state = {"ok": False, "at": -1e9}
+
+    def probe() -> bool:
+        now = time.monotonic()
+        if now - state["at"] < interval_seconds:
+            return state["ok"]
+        try:
+            with socket.create_connection((host, port), timeout=2.0):
+                result = True
+        except OSError:
+            result = False
+        state["ok"] = result
+        state["at"] = now
+        return result
+
+    return probe
+
+
+def build_llm(cfg: AppConfig, *, privacy: PrivacyState, network_ok, on_wait_feedback):
+    """LlmClient 装配：隐私谓词注入（fail-closed）+ R10 单一远程可用性信号。
+    依赖缺失抛 ConfigError（含修复指引）。"""
+    try:
+        from lira.llm.client import LlmClient
+    except ImportError as exc:
+        raise ConfigError(f"LLM 依赖未安装（pip install -e '.[llm]'）: {exc}") from exc
+    return LlmClient(
+        cfg.llm,
+        privacy=lambda: privacy.is_on,
+        network_ok=network_ok,
+        on_wait_feedback=on_wait_feedback,
+    )
+
+
+# ---------- 音频路由分发（状态机路由 -> 三选二识别流） ----------
+
+
+class RouteDispatch:
+    """AudioSink：按当前 AudioRoute 把样本喂给 KWS/ASR，命中即驱动状态机。
+
+    WAKE -> 唤醒 KWS；LISTEN -> 流式 ASR（endpoint 切句）；PLAYBACK -> 白名单
+    KWS（R11 朗读内容结构性隔离：非白名单词永远不会进入意图通道）。
+    与 e2e harness 同构；识别文本一律不落日志（计划日志纪律）。
+    """
+
+    def __init__(self, runtime: "DeviceRuntime") -> None:
+        self._rt = runtime
+
+    def feed(self, samples) -> None:  # np.ndarray（numpy 在 runtime 初始化时惰性导入）
+        rt = self._rt
+        route = rt.route
+        if route is AudioRoute.WAKE and rt.wake_stream is not None:
+            hit = rt.wake_stream.feed_and_poll(samples)
+            if hit and rt.wakeword in hit:
+                rt.spawn(rt.engine.on_wake())
+        elif route is AudioRoute.LISTEN and rt.asr_stream is not None:
+            rt.asr_stream.feed(samples)
+            # 先解码就绪帧再判 endpoint：sherpa 的 endpoint 检测在解码后评估
+            rt.asr_stream.text()
+            if rt.asr_stream.is_endpoint():
+                text = rt.asr_stream.text().strip()
+                rt.asr_stream.reset()
+                if text:
+                    rt.spawn(rt.engine.on_asr_text(text))
+        elif route is AudioRoute.PLAYBACK and rt.playback_stream is not None:
+            hit = rt.playback_stream.feed_and_poll(samples)
+            if hit:
+                rt.spawn(rt.engine.on_asr_text(hit.split("@")[-1].strip()))
+
+
+# ---------- 状态机回调装配（DialogCallbacks 实现） ----------
+
+
+class DeviceCallbacks:
+    """同步回调面：播报走 TTS，拍摄/红外/播放控制委托真实组件。
+
+    与 e2e harness 的 _Callbacks 同构；差异点：
+    - speak: TtsEngine（音量/语速读 DeviceSettings；无语音栈时降级日志）。
+    - start_capture: 返回任务句柄给状态机（F1 取消依据，harness 未做）。
+    """
+
+    def __init__(self, runtime: "DeviceRuntime") -> None:
+        self._rt = runtime
+
+    def speak(self, text: str) -> None:
+        tts = self._rt.tts
+        if tts is None:
+            logging.info("[播报/无语音栈] %s", text)
+            return
+        tts.speak(
+            text,
+            speed=self._rt.settings.tts_speed,
+            volume=self._rt.settings.volume,
+        )
+
+    def start_listening(self) -> None:
+        if self._rt.asr_stream is not None:
+            self._rt.asr_stream.reset()
+
+    def set_audio_route(self, route: AudioRoute) -> None:
+        self._rt.route = route
+
+    def start_capture(self):
+        # 新阅读会话以全局音量/语速起步（会话内"大声点/小声点"再由 R21 调整）
+        speaker = self._rt.speaker
+        speaker.volume = self._rt.settings.volume
+        speaker.speed = self._rt.settings.tts_speed
+        return self._rt.spawn(self._rt.pipeline.run_capture())
+
+    def send_ir(self, device: str, action: str) -> None:
+        # 状态机已完成高危确认 -> 装配层以 confirmed=True 过第二道闸
+        # （第二道闸仍独立校验 enabled/动作/码值，防御直调）
+        self._rt.spawn(self._send_ir(device, action))
+
+    async def _send_ir(self, device: str, action: str) -> None:
+        try:
+            await self._rt.ir_service.send_ir(device, action, confirmed=True)
+            logging.info("IR 已发射 device=%s action=%s", device, action)
+        except Exception as exc:  # noqa: BLE001 - IR 故障不拖垮主循环
+            logging.warning("IR 发送失败 device=%s action=%s kind=%s", device, action,
+                            getattr(exc, "kind", type(exc).__name__))
+
+    def playback_pause(self) -> None:
+        self._rt.pipeline.playback_pause()
+
+    def playback_resume(self) -> None:
+        self._rt.pipeline.playback_resume()
+
+    def playback_stop(self) -> None:
+        self._rt.pipeline.playback_stop()
+
+    def playback_read_again(self) -> None:
+        self._rt.pipeline.playback_read_again()
+
+    def playback_volume_up(self) -> None:
+        self._rt.pipeline.playback_volume_up()
+
+    def playback_volume_down(self) -> None:
+        self._rt.pipeline.playback_volume_down()
+
+
+# ---------- 无语音栈降级播放器 ----------
+
+
+class _LogSpeaker:
+    """无语音栈降级播放器（测试/装配路径）：不发声，只记事件不记内容（日志纪律）。"""
+
+    volume: float = 1.0
+    speed: float = 1.0
+
+    async def play(self, text: str) -> None:
+        logging.info("朗读块未发声（无语音栈，%d 字符）", len(text))
+
+
+# ---------- 整机运行时 ----------
+
+
+class DeviceRuntime:
+    """生产主循环：组件装配 + 编排器 + 伴随任务（sync/UI）+ 优雅停机。
+
+    Args 与 e2e DeviceHarness 同构，但组件为生产实现；audio/ocr/llm 均可注入
+    替身供单测（None 语义见各字段）。
+    """
+
+    def __init__(
+        self,
+        *,
+        cfg: AppConfig,
+        hal: dict[str, object],
+        store,
+        settings,
+        audio: AudioStack | None = None,
+        ocr=None,
+        llm=None,
+        privacy: PrivacyState | None = None,
+        speaker=None,
+        sync_transport_factory=WsSyncTransport,
+        clock=time.monotonic,
+    ) -> None:
+        import numpy as np  # 惰性导入：仅真实主循环需要（dry-run 不触发）
+
+        self._np = np
+        self._cfg = cfg
+        self._hal = hal
+        self._clock = clock
+        self._sync_transport_factory = sync_transport_factory
+        self._network_ok = _make_network_probe(cfg.llm.base_url)
+        self._stop = asyncio.Event()
+        self._pending: set[asyncio.Task] = set()
+        self._companions: set[asyncio.Task] = set()
+        self._ui_server = None
+        self._vault = PassphraseVault(store)
+
+        self.privacy = privacy or PrivacyState()
+        self.store = store
+        self.settings = settings
+        self.wakeword = _wakeword_text()
+        self.route = AudioRoute.WAKE
+        self.tts = audio.tts if audio else None
+        self.speaker = speaker or (TtsBlockSpeaker(audio.tts) if audio else _LogSpeaker())
+        self.wake_stream = audio.wake_kws.create_stream() if audio else None
+        self.asr_stream = audio.asr.create_stream() if audio else None
+        self.playback_stream = audio.playback_kws.create_stream() if audio else None
+
+        self.ir_service = IRService(store, hal["ir"])
+        self.learning = LearningManager(self.ir_service)
+        self.callbacks = DeviceCallbacks(self)
+        self.engine = self._build_engine(llm)
+        self.pipeline = ReadingPipeline(
+            hal["camera"],
+            ocr,
+            self.speaker,
+            on_capture_done=lambda ok: self.spawn(self.engine.on_capture_done(ok)),
+            on_reading_finished=lambda: self.spawn(self.engine.on_reading_finished()),
+            text_polisher=make_text_polisher(self._llm),
+        )
+        self._gate = PrivacyGatedSink(RouteDispatch(self), self.privacy)
+        # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
+        attach_announcer(self.privacy, self.callbacks.speak)
+
+    def _build_engine(self, llm):
+        """状态机 + 三级路由装配；LLM 未注入时按配置构建（R28 等待反馈挂播报）。"""
+        if llm is None:
+            llm = build_llm(
+                self._cfg,
+                privacy=self.privacy,
+                network_ok=self._network_ok,
+                on_wait_feedback=lambda: self.callbacks.speak(pb.WAIT_REMOTE),
+            )
+        self._llm = llm
+        self._snapshot_announcer = make_snapshot_announcer(self.store, self.callbacks.speak)
+        from lira.llm.client import make_remote_handler
+
+        router = Router(
+            appliances=lambda: tuple(a.to_dialog() for a in self.store.get_all_appliances()),
+            remote_llm=make_remote_handler(llm),
+            remote_available=llm.is_available,
+        )
+        return DialogEngine(
+            router,
+            self.callbacks,
+            wake_allowed=lambda: not self.privacy.is_on,
+        )
+
+    # ---------- 生命周期 ----------
+
+    def spawn(self, coro) -> asyncio.Task:
+        """跟踪状态机/管线在途任务（停机统一取消；异常记日志不静默）。
+
+        与 spawn_companion 的区分：长驻伴随任务（UI/同步）不在 _pending
+        ——消费方（e2e 同款 drain 语义、单测 settle）只关心引擎在途工作收敛。
+        """
+        task = asyncio.ensure_future(coro)
+        self._pending.add(task)
+
+        def _done(task: asyncio.Task) -> None:
+            self._pending.discard(task)
+            if not task.cancelled() and task.exception() is not None:
+                logging.error("主循环任务异常", exc_info=task.exception())
+
+        task.add_done_callback(_done)
+        return task
+
+    def spawn_companion(self, coro) -> asyncio.Task:
+        """长驻伴随任务（UI serve / 同步监督）：停机统一取消，不进 _pending。"""
+        task = asyncio.ensure_future(coro)
+        self._companions.add(task)
+        task.add_done_callback(self._companions.discard)
+        return task
+
+    def _install_signal_handlers(self) -> None:
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            try:
+                loop.add_signal_handler(sig, self._stop.set)
+            except NotImplementedError:
+                pass  # 非 POSIX（如 Windows）退化：Ctrl-C 走 KeyboardInterrupt
+
+    async def run(self) -> None:
+        """进入主循环直至停机信号或音频源 EOF（mock 源语义）。"""
+        self._install_signal_handlers()
+        from contextlib import AsyncExitStack
+
+        stack = AsyncExitStack()
+        try:
+            for name, resource in self._hal.items():
+                await stack.enter_async_context(resource)
+                logging.info("HAL 资源已就绪: %s", name)
+            if self._cfg.sync.ws_url:
+                self.spawn_companion(self._run_sync())
+            else:
+                logging.info("同步未配置（sync.ws_url 为空）：离线纯本地运行")
+            self.spawn_companion(self._run_ui())
+            print("LIRA 运行中（Ctrl-C 退出）...")
+            await self._orchestrate()
+        finally:
+            await self._shutdown(stack)
+
+    async def _orchestrate(self) -> None:
+        """编排主循环：音频读取 -> 隐私门 -> 路由分发 -> 状态机 tick。"""
+        source = self._hal["audio"]
+        while not self._stop.is_set():
+            chunk = await source.read_chunk(CHUNK_FRAMES * 2)
+            if not chunk:
+                logging.info("音频源结束（EOF），主循环退出")
+                break
+            samples = self._np.frombuffer(chunk, dtype=self._np.int16)
+            samples = samples.astype(self._np.float32) / 32768.0
+            self._gate.feed(samples)
+            self.engine.tick(self._clock())
+
+    # ---------- 伴随任务：同步 / UI ----------
+
+    async def _run_sync(self) -> None:
+        """同步伴随任务：断线指数退避重连（transport 工厂可注入，测试用替身）。"""
+        sync_cfg = self._cfg.sync
+        backoff = SYNC_RECONNECT_MIN_SECONDS
+        while not self._stop.is_set():
+            transport = self._sync_transport_factory(sync_cfg.ws_url)
+            client = SyncClient(
+                store=self.store,
+                transport=transport,
+                token=sync_cfg.device_token,
+                learn_handler=lambda d, a: self.learning.begin(d, a),
+                privacy=self.privacy,
+                tts_settings=self.settings,
+                on_snapshot_applied=self._snapshot_announcer,
+            )
+            try:
+                await client.connect()
+                logging.info("后台同步已连接")
+                backoff = SYNC_RECONNECT_MIN_SECONDS
+                await client.run_forever(heartbeat_seconds=sync_cfg.heartbeat_seconds)
+                logging.info("同步会话结束（后台关闭连接）")
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:  # noqa: BLE001
+                logging.warning("同步会话中断: %s（%.0fs 后重连）", exc, backoff)
+            finally:
+                await transport.close()
+            if self._stop.is_set():
+                return
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=backoff)
+            except (asyncio.TimeoutError, TimeoutError):
+                pass
+            backoff = min(backoff * 2, SYNC_RECONNECT_MAX_SECONDS)
+
+    async def _run_ui(self) -> None:
+        """设备 Web UI 伴随任务（uvicorn in-process）。依赖缺失 -> 告警返回。"""
+        try:
+            import uvicorn
+
+            from lira.ui.app import UiServices, create_app
+        except ImportError as exc:
+            logging.warning("UI 依赖未安装（pip install -e '.[ui]'）: %s", exc)
+            return
+        services = UiServices(
+            privacy=self.privacy,
+            vault=self._vault,
+            store=self.store,
+            settings=self.settings,
+            remote_available=self._llm_is_available(),
+            network_ok=self._network_ok,
+        )
+        app = create_app(services)
+        server = uvicorn.Server(
+            uvicorn.Config(
+                app,
+                host=self._cfg.ui.host,
+                port=self._cfg.ui.port,
+                log_level="warning",
+                access_log=False,
+            )
+        )
+        self._ui_server = server
+        try:
+            await server.serve()
+        finally:
+            # Ctrl-C 由 uvicorn 捕获时（capture_signals 替换信号处理）：serve 返回
+            # 即驱动整机停机，保证停机路径单一
+            self._stop.set()
+
+    def _llm_is_available(self):
+        """UI 状态卡的 R10 单一远程可用性信号。"""
+        llm = getattr(self, "_llm", None)
+        return llm.is_available if llm is not None else (lambda: False)
+
+    async def _shutdown(self, stack) -> None:
+        """优雅停机：UI 先退（should_exit -> serve 自然返回，无取消噪声）->
+        取消引擎在途任务与伴随任务 -> 释放 HAL。幂等。"""
+        if self._ui_server is not None:
+            self._ui_server.should_exit = True
+        for task in list(self._pending) + list(self._companions):
+            task.cancel()
+        tasks = list(self._pending) + list(self._companions)
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        await stack.aclose()
+        logging.info("LIRA 已退出，HAL 资源已释放。")
+
+
+# ---------- 模块级装配辅助 ----------
+
+
+def make_snapshot_announcer(store, speak):
+    """快照应用钩子（AE7）：对比应用前后 enabled，新禁用家电口语播报。
+
+    speak 为同步播报入口（生产 = DeviceCallbacks.speak，测试 = 录制器）。
+    """
+
+    def announce(snapshot, prev_enabled: dict[str, bool]) -> None:
+        now = {a.name: a.enabled for a in store.get_all_appliances()}
+        newly_disabled = [n for n, on in prev_enabled.items() if on and not now.get(n, False)]
+        text = pb.disabled_announce_text(newly_disabled)
+        if text:
+            speak(text)
+
+    return announce
+
+
+def make_text_polisher(llm):
+    """R3/R27/AE2 阅读白话钩子：简单文本本地直读；复杂文本远程转白话；
+    隐私/断网/失败 -> 原文 + 免责提示（不静默、不拒读）。"""
+    from lira.llm.client import LlmError, PrivacyBlocked
+    from lira.llm.prompts import is_medical_text
+
+    async def polish(text: str) -> str:
+        if not llm.needs_colloquial(text):
+            return text  # 简单信件：本地 OCR 直读，不经 LLM（AE2 第三段）
+        try:
+            return await llm.colloquial(text)
+        except (PrivacyBlocked, LlmError):
+            # 降级：读原文。医疗内容仍附"以原说明书为准"（同样的免责提示），
+            # 非医疗附离线说明（R27）
+            suffix = pb.DISCLAIMER_MEDICAL if is_medical_text(text) else pb.DISCLAIMER_OFFLINE
+            return f"{text}\n{suffix}"
+
+    return polish
+
+
+# ---------- dry-run 装配图（仅 cfg + 模型文件探测，不构造引擎） ----------
+
+
+def _count_mock_images(cfg: AppConfig) -> int:
+    """dry-run 不打开 HAL，直接数目录里的图片文件。"""
+    d = cfg.hal.mock_images_dir
+    if not d.is_dir():
+        return 0
+    return sum(1 for p in d.iterdir() if p.suffix.lower() in IMAGE_SUFFIXES)
+
+
+def _audio_models_ready() -> bool:
+    return bool(
+        KWS_MODEL_DIR.is_dir()
+        and ASR_MODEL_DIR.is_dir()
+        and TTS_MODEL_DIR.is_dir()
+        and VOCODER_ONNX.is_file()
+        and WAKEWORD_KEYWORDS_FILE.is_file()
+    )
+
+
+def _ocr_models_ready(cfg: AppConfig) -> bool:
+    suffix = "rknn" if cfg.hal.backend == "board" else "onnx"
+    return all(
+        (MODELS_DIR / name).is_file()
+        for name in (f"ppocrv4_det.{suffix}", f"ppocrv4_rec.{suffix}", "ppocr_keys_v1.txt")
+    )
+
+
+def print_assembly(cfg: AppConfig, privacy: PrivacyState) -> None:
+    """打印模块装配图（dry-run 的核心产出）。不构造引擎，README 兼容仅 PyYAML。"""
+    bar = "=" * 62
+    print(bar)
     print("LIRA 模块装配图 (dry-run)")
-    print("=" * 62)
+    print(bar)
     print(f"  HAL backend : {cfg.hal.backend}")
-    print(f"    camera    : {type(hal['camera']).__name__}"
-          f" <- {cfg.hal.mock_images_dir}"
-          f" ({_count_mock_images(cfg)} 张样张)")
-    print(f"    audio     : {type(hal['audio']).__name__}"
-          f" <- {hal['audio'].wav_path}")  # type: ignore[attr-defined]
-    print(f"    ir        : {type(hal['ir']).__name__} (内存记录 sent_codes)")
-    print(f"    display   : {type(hal['display']).__name__} (内存记录 shown)")
-    print(f"  LLM         : {cfg.llm.base_url}  model={cfg.llm.model}"
-          f"  timeout={cfg.llm.timeout_seconds}s")
-    api_key_state = "已配置" if cfg.llm.api_key else "<未设置（dry-run 允许）>"
-    print(f"    api_key   : {api_key_state}")
+    if cfg.hal.backend == "board":
+        print(f"    mic       : SoundDeviceMic <- {cfg.hal.mic_device or '<系统默认设备>'}")
+        print(f"    speaker   : SoundDevicePlayer <- {cfg.hal.speaker_device or '<PipeWire 默认>'}")
+        print(f"    camera    : V4l2RawCamera <- {cfg.hal.camera_device or '/dev/video0'}")
+        print("    ir        : MockIrController（M5 BroadLink 到货前：只记录不发射）")
+        print("    display   : MockDisplay（无触摸屏）")
+    else:
+        print(f"    camera    : MockCamera <- {cfg.hal.mock_images_dir}"
+              f" ({_count_mock_images(cfg)} 张样张)")
+        print(f"    audio     : MockAudioIO <- {cfg.hal.mock_audio_dir / 'sample_16k.wav'}")
+        print("    ir        : MockIrController (内存记录 sent_codes)")
+        print("    display   : MockDisplay (内存记录 shown)")
+    audio_state = "就绪" if _audio_models_ready() else "<未就绪> python3 models/download_models.py"
+    print(f"  语音栈      : sherpa KWS/ASR/TTS  {audio_state}")
+    ocr_backend = "RKNNLite（det@core0 + rec@core1）" if cfg.hal.backend == "board" else "onnxruntime"
+    ocr_state = "就绪" if _ocr_models_ready(cfg) else "<未就绪>"
+    print(f"  OCR         : {ocr_backend}  {ocr_state}")
+    api_key_state = "已配置" if cfg.llm.api_key else "<未设置>"
+    print(f"  LLM         : {cfg.llm.base_url}  model={cfg.llm.model}  api_key={api_key_state}")
     print(f"  store       : {cfg.db_path} (SQLite WAL, synchronous=FULL)")
     sync_state = cfg.sync.ws_url if cfg.sync.ws_url else "<未配置（离线纯本地）>"
     print(f"  sync        : {sync_state}  heartbeat={cfg.sync.heartbeat_seconds}s")
-    print(f"  privacy     : {'开启' if privacy.is_on else '关闭'}"
-          f"  (UI 隐私开关需本地口令，U7)")
+    print(f"  ui          : http://{cfg.ui.host}:{cfg.ui.port}")
+    print(f"  privacy     : {'开启' if privacy.is_on else '关闭'}（初始态）")
     print(f"  log level   : {cfg.log_level}")
-    print("  dialog/vision/audio 管线: 后续单元挂载 (U2-U6)")
-    print("=" * 62)
-
-
-async def _run_forever(cfg: AppConfig, hal: dict[str, object]) -> None:
-    """进入全部 HAL 上下文并保持运行，直到收到退出信号。"""
-    stop = asyncio.Event()
-    loop = asyncio.get_running_loop()
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        try:
-            loop.add_signal_handler(sig, stop.set)
-        except NotImplementedError:  # 非 POSIX（如 Windows）退化处理
-            pass
-
-    stack = asyncio.AsyncExitStack()
-    try:
-        for name, resource in hal.items():
-            await stack.enter_async_context(resource)  # type: ignore[arg-type]
-            logging.info("HAL 资源已就绪: %s", name)
-        print("LIRA 运行中（Ctrl-C 退出）...")
-        await stop.wait()
-    finally:
-        await stack.aclose()
-        print("LIRA 已退出，HAL 资源已释放。")
+    print("  主循环      : 编排器 + 同步监督 + Web UI 伴随任务（M7 接线）")
+    print(bar)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,32 +732,61 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--dry-run",
         action="store_true",
-        help="装配全部模块（mock HAL），打印装配图后退出；不要求 api_key",
+        help="装配校验：读配置 + 模型探测，打印装配图后退出；不要求 api_key",
     )
     args = parser.parse_args(argv)
 
     try:
         cfg = load_config(args.config, require_api_key=not args.dry_run)
-        hal = build_mock_hal(cfg)
     except ConfigError as exc:
         print(f"[配置错误] {exc}", file=sys.stderr)
         return 2
 
-    # U7：隐私模式状态对象。音频/LLM/状态机的订阅装配在 U9 e2e 与真实
-    # 主循环中完成。
     privacy = PrivacyState()
-
-    logging.basicConfig(level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s")
-    print_assembly(cfg, hal, privacy)
+    logging.basicConfig(
+        level=cfg.log_level, format="%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
 
     if args.dry_run:
+        print_assembly(cfg, privacy)
         print("dry-run 完成：装配校验通过，未进入主循环。")
         return 0
 
+    # 真实运行：引擎装配（缺失 -> 明确报错退出，绝不静默残缺运行）
     try:
-        asyncio.run(_run_forever(cfg, hal))
+        hal = build_mock_hal(cfg) if cfg.hal.backend == "mock" else build_board_hal(cfg)
+        audio = build_audio_stack(cfg)
+        ocr = build_ocr(cfg)
+    except ConfigError as exc:
+        print(f"[装配失败] {exc}", file=sys.stderr)
+        return 2
+    if audio is None:
+        print(
+            "[装配失败] 语音栈未就绪（模型或依赖缺失，详见日志）。"
+            "运行 python3 models/download_models.py，并安装 extras（pip install -e '.[audio]'）。",
+            file=sys.stderr,
+        )
+        return 2
+
+    from lira.appliances.store import ApplianceStore
+    from lira.ui.app import DeviceSettings
+
+    store = ApplianceStore(cfg.db_path)
+    settings = DeviceSettings()
+    runtime = DeviceRuntime(
+        cfg=cfg, hal=hal, store=store, settings=settings,
+        audio=audio, ocr=ocr, privacy=privacy,
+    )
+    try:
+        asyncio.run(runtime.run())
     except KeyboardInterrupt:
         pass
+    except (HalError, OSError) as exc:
+        # 板上设备不可用（麦克风/摄像头/播放器 PortAudio 与 v4l2 错误族）
+        print(f"[硬件错误] {exc}", file=sys.stderr)
+        return 3
+    finally:
+        store.close()
     return 0
 
 

@@ -30,7 +30,9 @@
   按开发期预置约定存放于 `device/config.yaml`）权限继承进程 umask；
   板上单用户环境下影响有限。
 - **sync 循环无重连边界**：`SyncClient.run_forever` 内处理器抛非协议异常会终止
-  同步会话直至进程重启（仅受信任后台连接可触发）。
+  同步会话直至进程重启（仅受信任后台连接可触发）。**M7 缓解**：设备主循环以监督
+  循环挂载同步（断线/会话异常 → 指数退避重连，2s 起步封顶 60s），单次会话故障
+  不再永久停同步；sync.py 内部语义未动。
 - **学习请求可滞留 sent 态**：WS 在"领取学习请求→下发"之间断开时，该请求无超时重发
   路径，后台轮询显示 sent 直至人工处理。
 - **登录锁定过期后计数器在过期瞬间才复位**：锁定过期后的首次失败从 1 重新计数
@@ -263,23 +265,50 @@ gpio-ir/ir-ctl 路线，改用 **BroadLink RM4 Mini**（约 40~90 元）：USB �
 
 ### 2.8 M7：软件上板与 provisioning
 
+> **软件接线已完成（2026-10-03）**：`lira/main.py` 主循环（隐私门 → 路由分发 →
+> 状态机 → TTS/IR/阅读管线）、`lira/sync_ws.py` 真实 WS 同步传输（断线指数退避重连）、
+> UI in-process 挂载、`--dry-run` 装配图（含板上设备号与模型就绪探测）。x86 单元 + e2e
+> 全绿；**板上执行下述步骤属 M7 实机验证，尚未进行**。
+
+**① 依赖与安装**（extras 名以 `device/pyproject.toml` 为准）：
+
 ```bash
-# 依赖与安装（具体 extras 名以 device/pyproject.toml 为准）
 sudo apt install python3-venv portaudio19-dev libsndfile1
 cd ~/lira/device && python3 -m venv .venv
-.venv/bin/pip install -e .
-
-# 真实 HAL 切换（device/config.yaml）
-hal:
-  backend: board        # mock | board
-
-# provisioning（开发期预置，无配对流程）
-# 后台「注册设备」→ 一次性 token → 写入 device/config.yaml：
-sync:
-  ws_url: ws://<后台机IP>:8000/ws/device
-  device_token: <一次性 token>     # 或环境变量 LIRA_SYNC_DEVICE_TOKEN
+.venv/bin/pip install -e ".[audio,llm,ui,sync]"
+.venv/bin/pip install opencv-python-headless   # camera_raw/reading 的 cv2 依赖
 ```
 
+**② 配置**（`device/config.yaml`）：
+
+```yaml
+hal:
+  backend: board          # mock | board
+  mic_device: "3"         # FY-SP003U（M4 实测 card 3）；设备名子串或序号
+  speaker_device: "2"     # 板载 ES8388 线路输出（M6 实测 card 2）
+  camera_device: ""       # /dev/video0（OV13855@CAM1，M3）
+ui:
+  host: 0.0.0.0
+  port: 8080
+sync:
+  ws_url: ws://<后台机IP>:8000/ws/device
+  device_token: <一次性 token>   # 或环境变量 LIRA_SYNC_DEVICE_TOKEN
+```
+
+**③ 冒烟顺序**（对照 2.9 清单）：
+
+```bash
+# 1) 装配校验（模型/设备号就绪性一目了然）
+.venv/bin/python -m lira.main --dry-run
+
+# 2) 带硬件主循环（前台跑通再 systemd 化）
+.venv/bin/python -m lira.main
+```
+
+- 预期：打印装配图 → HAL 逐个就绪日志 → "LIRA 运行中"；说唤醒词 → "我在听" →
+  "读一下" → 拍摄引导 + 朗读；后台下发配置 → 设备播报（新禁用家电）。
+- IR 板上实现待 M5（BroadLink 到货）：当前装配 `MockIrController`，主循环启动时
+  有明确告警日志，家电控制不可用（语音会答"指令已发出"但**不发射**——冒烟时跳过 2.9 第 2/3 项）。
 - 后台库重建/epoch 迁移：`python -m lira.sync reset-sync data/device.db`（SETUP.md 1.4）。
 - systemd 化 + 存量纪律：`deploy/system/`（log2ram、journald `Storage=volatile`、
   fstab `noatime`、无 swap、thermal governor——R18 介质寿命）；`ExecStart` 以
@@ -311,7 +340,7 @@ sync:
 | KWS | 唤醒词误触/漏触（实机 10 分钟） | 白名单@pause.wav 命中"暂停"✓；wake@非唤醒语 None ✓（夹具验证）；真麦 10 分钟误触/漏触待冒烟 | 2026-10-03 |
 | ASR | 流式 RTF | confirm.wav → "确认" ✓（夹具）；流式 RTF 与真麦切句待冒烟 | 2026-10-03 |
 | TTS | RTF / 首包延迟 | **RTF 0.27**（0.48s 合成 1.8s 语音），load 3.3s，matcha+vocos @CPU | 2026-10-03 |
-| OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；全链路（含拍摄/TTS）待 M7 接线后测 | 2026-10-03 |
+| OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；软件接线已完成（2026-10-03），板上全链路实测待执行 | 2026-10-03 |
 | 资源 | 内存峰值 / NPU 占用 / 温度（含散热壳） | 待填 | — |
 
 > **M0 实测附注**（2026-10-02）：镜像自带 zram0 swap（3.9G，RAM 介质，不磨损 eMMC——

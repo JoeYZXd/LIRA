@@ -13,6 +13,7 @@
 
 from __future__ import annotations
 
+import copy
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -52,11 +53,25 @@ class LlmConfig:
 
 @dataclass(frozen=True)
 class HalConfig:
-    """HAL 实现选择。板上实现（board）在 U10 填充。"""
+    """HAL 实现选择。板上是真实硬件（U10/M7 接线后）；音频/摄像头设备号固化入配置。"""
 
     backend: str
     mock_images_dir: Path
     mock_audio_dir: Path
+    #: 板上采集设备（M4：FY-SP003U）。空串 = 系统默认；数值串 = sounddevice 序号
+    mic_device: str = ""
+    #: 板上播放设备（M6：板载 ES8388 线路输出）。空串 = PipeWire 默认 sink
+    speaker_device: str = ""
+    #: 板上摄像头设备（M3：OV13855@CAM1 → /dev/video0）
+    camera_device: str = ""
+
+
+@dataclass(frozen=True)
+class UiConfig:
+    """设备端 Web UI 监听地址（U7；局域网浏览器访问，无触摸屏）。"""
+
+    host: str = "0.0.0.0"
+    port: int = 8080
 
 
 @dataclass(frozen=True)
@@ -77,6 +92,7 @@ class AppConfig:
     llm: LlmConfig
     hal: HalConfig
     sync: SyncConfig
+    ui: UiConfig
     db_path: Path
     log_level: str
 
@@ -97,6 +113,15 @@ DEFAULTS: dict[str, Any] = {
         "backend": "mock",
         "mock_images_dir": "assets/mock_images",
         "mock_audio_dir": "assets/mock_audio",
+        # M7：板上音频/摄像头设备号固化（M3/M4/M6 实测；空串 = 系统默认设备）
+        "mic_device": "",
+        "speaker_device": "",
+        "camera_device": "",
+    },
+    # U7：设备 Web UI 监听地址（局域网浏览器访问；M7 起 in-process 挂载主循环）
+    "ui": {
+        "host": "0.0.0.0",
+        "port": 8080,
     },
     # U6：本地家电配置库（R13，安全规则本地持久化；gitignore *.db）
     "db_path": "data/device.db",
@@ -121,10 +146,15 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_LLM_WAIT_FEEDBACK_SECONDS": ("llm", "wait_feedback_seconds", float),
     "LIRA_LLM_COLLOQUIAL_THRESHOLD_CHARS": ("llm", "colloquial_threshold_chars", int),
     "LIRA_HAL_BACKEND": ("hal", "backend", str),
+    "LIRA_HAL_MIC_DEVICE": ("hal", "mic_device", str),
+    "LIRA_HAL_SPEAKER_DEVICE": ("hal", "speaker_device", str),
+    "LIRA_HAL_CAMERA_DEVICE": ("hal", "camera_device", str),
     "LIRA_DB_PATH": (None, "db_path", str),
     "LIRA_SYNC_WS_URL": ("sync", "ws_url", str),
     "LIRA_SYNC_HEARTBEAT_SECONDS": ("sync", "heartbeat_seconds", float),
     "LIRA_SYNC_DEVICE_TOKEN": ("sync", "device_token", str),
+    "LIRA_UI_HOST": ("ui", "host", str),
+    "LIRA_UI_PORT": ("ui", "port", int),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
 
@@ -136,7 +166,9 @@ def _resolve_path(value: str) -> Path:
 
 
 def _deep_merge(base: dict[str, Any], override: Mapping[str, Any]) -> dict[str, Any]:
-    merged = dict(base)
+    # deepcopy：merged 不得与 DEFAULTS 共享嵌套 dict——否则后续 _apply_env 的
+    # env 覆盖会把值永久写进模块级 DEFAULTS，跨 load_config 调用泄漏
+    merged = copy.deepcopy(base)
     for key, value in override.items():
         if key not in base:
             raise ConfigError(
@@ -212,6 +244,13 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
             "（后台「注册设备」页面一次性展示的 token）。"
         )
 
+    ui = config["ui"]
+    if not 0 <= int(ui["port"]) <= 65535:
+        # 0 = 临时端口（测试用）；生产配置应为固定端口
+        raise ConfigError("ui.port 必须在 0~65535 之间（0 = 临时端口）。")
+    if not ui["host"]:
+        raise ConfigError("ui.host 为空（局域网监听地址，如 0.0.0.0）。")
+
     log_level = str(config["log_level"]).upper()
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ConfigError(f"log_level={config['log_level']!r} 非法。")
@@ -268,11 +307,18 @@ def load_config(
             backend=str(hal["backend"]),
             mock_images_dir=_resolve_path(str(hal["mock_images_dir"])),
             mock_audio_dir=_resolve_path(str(hal["mock_audio_dir"])),
+            mic_device=str(hal["mic_device"]),
+            speaker_device=str(hal["speaker_device"]),
+            camera_device=str(hal["camera_device"]),
         ),
         sync=SyncConfig(
             ws_url=str(config["sync"]["ws_url"]),
             heartbeat_seconds=float(config["sync"]["heartbeat_seconds"]),
             device_token=str(config["sync"]["device_token"]),
+        ),
+        ui=UiConfig(
+            host=str(config["ui"]["host"]),
+            port=int(config["ui"]["port"]),
         ),
         db_path=_resolve_path(str(config["db_path"])),
         log_level=str(config["log_level"]),

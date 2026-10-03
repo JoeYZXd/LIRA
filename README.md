@@ -29,6 +29,18 @@ python3 -m venv .venv
 .venv/bin/python -m pytest
 ```
 
+## x86 主循环冒烟（mock HAL + 真实语音栈）
+
+装配 `.[audio,ocr-x86,llm,ui,sync]` extras 并下载模型后，可在开发机上以 mock
+外设跑通真实主循环（隐私门 → 路由分发 → 状态机 → TTS/阅读管线；mock 麦音 wav
+播放完毕后自动退出）：
+
+```bash
+cd device
+.venv/bin/pip install -e ".[audio,ocr-x86,llm,ui,sync]"
+LIRA_LLM_API_KEY=sk-xxx .venv/bin/python -m lira.main   # 设备面板挂 0.0.0.0:8080
+```
+
 配置：`device/config.yaml`（默认值）+ 环境变量覆盖（`LIRA_LLM_BASE_URL` /
 `LIRA_LLM_API_KEY` / `LIRA_LLM_MODEL` / `LIRA_HAL_BACKEND` / `LIRA_LOG_LEVEL`）。
 真实运行必须提供 `LIRA_LLM_API_KEY`；`--dry-run` 豁免。

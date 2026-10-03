@@ -78,14 +78,19 @@ class BlockSpeaker(Protocol):
 
 
 class TtsBlockSpeaker:
-    """TtsEngine 适配器：块播报经 TtsEngine.speak（合成+播放，完成事件等待）。"""
+    """TtsEngine 适配器：块播报经 TtsEngine.speak（合成+播放，完成事件等待）。
 
-    def __init__(self, tts: object) -> None:  # TtsEngine（避免循环依赖用鸭子类型）
+    volume：块播放音量（R21 朗读中"大声点/小声点"由 ReadingSession 直接改写）。
+    speed：合成语速（M7 接线：装配层在会话边界从 DeviceSettings.tts_speed 同步）。
+    """
+
+    def __init__(self, tts: object, speed: float = 1.0) -> None:
         self._tts = tts
         self.volume: float = 1.0
+        self.speed: float = speed
 
     async def play(self, text: str) -> None:
-        done = self._tts.speak(text, volume=self.volume)  # type: ignore[attr-defined]
+        done = self._tts.speak(text, volume=self.volume, speed=self.speed)  # type: ignore[attr-defined]
         await done.wait()
 
 

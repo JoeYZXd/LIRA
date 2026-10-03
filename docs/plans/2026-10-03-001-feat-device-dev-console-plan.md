@@ -1,7 +1,7 @@
 ---
 title: "feat: 设备开发者控制台（远程状态监控 / 配置 / 独立测试）"
 type: feat
-status: active
+status: completed
 date: 2026-10-03
 origin: docs/brainstorms/2026-10-03-dev-console-requirements.md
 deepened: 2026-10-03

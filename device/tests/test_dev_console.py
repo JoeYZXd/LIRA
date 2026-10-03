@@ -8,16 +8,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PassphraseVault, PrivacyState
 from lira.settings import DeviceSettings
 from lira.ui.app import UiServices, create_app
-from lira.ui.dev import DevHandle, SESSION_COOKIE, reset_dev_session_secret
+from lira.ui.dev import SESSION_COOKIE, DevHandle
 
 PASSPHRASE = "test-passphrase"
 
@@ -336,10 +334,6 @@ class FakeAsr:
         return FakeAsrStream(self._text)
 
 
-class FakeStreamError:
-    """录音失败注入：record_clip 抛错。"""
-
-
 def make_wav_bytes(pcm_int16: bytes) -> bytes:
     import io
     import wave
@@ -411,8 +405,6 @@ class TestVoiceEndpoints:
         assert r.status_code == 403
         assert "隐私" in r.json()["error"]
 
-
-class TestVoiceEndpoints:
     def test_record_then_clip_roundtrip_in_memory(self):
         """录音 → 内存缓冲 → 回放端点返回 wav（零落盘，无临时文件语义）。"""
         _app, client, rt = make_voice_client()
@@ -469,10 +461,6 @@ class TestVoiceEndpoints:
             ApplianceModel(name="台灯", aliases=("台灯",),
                            actions={"打开": ("打开",)}, codes={"打开": "C1"})
         )
-        rt.dev_handle.record_clip = make_wav_bytes  # type: ignore[assignment]
-        # record_clip(seconds) 调用签名不匹配——改用 lambda 忽略参数
-        rt.dev_handle.record_clip = lambda seconds: make_wav_bytes(b"\x00\x01" * 1600)
-        # 上面是同步赋值会被 await —— 正确做法：async 包装
         async def _fake_record(seconds):
             return make_wav_bytes(b"\x00\x01" * 1600)
 
@@ -672,7 +660,6 @@ class TestReplay:
         _app, client, rt = make_vision_client()
         login(client)
         rt.recent_speaks.append("回放前的旧播报")
-        task = asyncio.ensure_future  # noqa: F841
         r = client.post("/dev/api/replay", json={"text": "打开台灯", "confirm": True})
         assert r.status_code == 200, r.text
         body = r.json()

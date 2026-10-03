@@ -211,9 +211,9 @@ media-ctl -p -d /dev/media0 # ov13855 7-0036 → csi2-dphy0 → mipi-csi2 → st
 **③ 抓帧（CIF 裸 RAW；Bayer 未经 ISP，偏绿/偏暗属正常）**：
 
 ```bash
-v4l2-ctl -d /dev/video0 --set-fmt-video=width=4224,height=3136,pixelformat=BG10 \
+v4l2-ctl -d /dev/video0 --set-fmt-video=width=2688,height=3136,pixelformat=BG10 \
   --stream-mmap --stream-count=1 --stream-to=/tmp/frame.raw
-ls -lh /tmp/frame.raw       # ≈16MB 即成功
+ls -lh /tmp/frame.raw       # ≈16MB 即成功（注意：请求 4224 宽会被驱动静默钳到 2688）
 ```
 
 ISP 处理路径（media1 → NV12，rkcif→sditf→rkisp）留给真实 HAL `camera_rkisp.py` 实现时打通。
@@ -304,13 +304,13 @@ sync:
 | M0 | 镜像文件名 / 内核（`uname -a`） | debian_bookworm_server_linux6.1.99；6.1.99-rockchip-rk3588 #1.1.0（2026-08-20 构建）；根分区在 eMMC（mmcblk0p1，57G 已扩容） | 2026-10-02 |
 | M1 | NPU 驱动 / librknnrt / rknn-toolkit2 版本 | 驱动 v0.9.8 ✓；librknnrt 2.3.0（c949ad889d@2024-11-07）✓；toolkit2 2.3.0 ✓（WSL2 Ubuntu，cp310 manylinux） | 2026-10-02 |
 | M2 | 蓝牙音频链路延迟（主观） | A2DP 通（智能音箱 Pro-2639，MAC 50:FE:39:F8:83:8B，trust 已设）；aplay 全链路出声；延迟主观可接受（TTS 场景） | 2026-10-02 |
-| M3 | 摄像头节点 / 抓帧格式与分辨率 | OV13855@CAM1（overlay `ov13855-c1`，sensor 7-0036）；CIF 裸 RAW `/dev/video0`，4224×3136 BG10，单帧 17M ✓；ISP 路径（media1）待真实 HAL 打通 | 2026-10-02 |
+| M3 | 摄像头节点 / 抓帧格式与分辨率 | OV13855@CAM1（overlay `ov13855-c1`，sensor 7-0036）；CIF 裸 RAW `/dev/video0`，**2688×3136** BG10（4224 请求被驱动钳宽），单帧 17M ✓；无 SDITF 实体 → ISP 内联不可用，HAL 走裸 Bayer+灰世界 WB（`hal/board/camera_raw.py`） | 2026-10-02/03 |
 | M4 | 麦阵 / 采集验证 | FY-SP003U 双麦（USB，card 3），`plughw:3,0` 16k/S16LE/stereo 录音 ✓；回放经蓝牙音箱 ✓。板载 ES8388 = card 2（3.5mm 口，M6 本地喇叭用） | 2026-10-02 |
 | M5 | 红外学习/回放 | 待 BroadLink RM4 Mini 到货（2026-10-03 改道，见 2.6） | — |
 | M6 | 本地喇叭出声 | USB 有源音箱（3.5mm AUX）← 板载 ES8388 card 2 ✓；软音量经 PipeWire；PAM8403 方案取消 | 2026-10-03 |
-| KWS | 唤醒词误触/漏触（实机 10 分钟） | 待填 | — |
-| ASR | 流式 RTF | 待填 | — |
-| TTS | RTF / 首包延迟 | 待填 | — |
+| KWS | 唤醒词误触/漏触（实机 10 分钟） | 白名单@pause.wav 命中"暂停"✓；wake@非唤醒语 None ✓（夹具验证）；真麦 10 分钟误触/漏触待冒烟 | 2026-10-03 |
+| ASR | 流式 RTF | confirm.wav → "确认" ✓（夹具）；流式 RTF 与真麦切句待冒烟 | 2026-10-03 |
+| TTS | RTF / 首包延迟 | **RTF 0.27**（0.48s 合成 1.8s 语音），load 3.3s，matcha+vocos @CPU | 2026-10-03 |
 | OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；全链路（含拍摄/TTS）待 M7 接线后测 | 2026-10-03 |
 | 资源 | 内存峰值 / NPU 占用 / 温度（含散热壳） | 待填 | — |
 

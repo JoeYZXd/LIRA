@@ -214,3 +214,25 @@ def make_remote_handler(client: LlmClient) -> Callable[[str], Awaitable[str | No
             return None
 
     return handler
+
+def make_text_polisher(llm: "LlmClient"):
+    """R3/R27/AE2 阅读白话钩子：简单文本本地直读；复杂文本远程转白话；
+    隐私/断网/失败 -> 原文 + 免责提示（不静默、不拒读）。
+
+    M7 起为生产与 e2e harness 共用（原两处各持一份，降级话术漂移风险）。
+    """
+    from lira.dialog import phrasebook as pb
+    from lira.llm.prompts import is_medical_text
+
+    async def polish(text: str) -> str:
+        if not llm.needs_colloquial(text):
+            return text  # 简单信件：本地 OCR 直读，不经 LLM（AE2 第三段）
+        try:
+            return await llm.colloquial(text)
+        except (PrivacyBlocked, LlmError):
+            # 降级：读原文。医疗内容仍附"以原说明书为准"（同样的免责提示），
+            # 非医疗附离线说明（R27）
+            suffix = pb.DISCLAIMER_MEDICAL if is_medical_text(text) else pb.DISCLAIMER_OFFLINE
+            return f"{text}\n{suffix}"
+
+    return polish

@@ -80,7 +80,7 @@ class WsSyncTransport:
             await self._queue.put(None)  # 哨兵：receive() 转为 SyncError
 
     async def send(self, frame: dict) -> None:
-        """发送一帧 JSON dict（序列化失败/连接已断抛 SyncError）。"""
+        """发送一帧 JSON dict（未建连/已断抛 SyncError）。"""
         if self._ws is None:
             raise SyncError("同步连接未建立（先调用 open()）")
         try:
@@ -90,7 +90,7 @@ class WsSyncTransport:
 
     async def receive(self) -> dict:
         """取下一帧（连接关闭时抛 SyncError；取消安全，不撕裂半收帧）。"""
-        if self._queue is None:
+        if self._ws is None:
             raise SyncError("同步连接未建立（先调用 open()）")
         frame = await self._queue.get()
         if frame is None:
@@ -102,7 +102,7 @@ class WsSyncTransport:
 
     async def close(self) -> None:
         """关闭连接并停泵。幂等；close 后 transport 不可复用（监督循环新建实例）。"""
-        if self._ws is None and self._pump is None:
+        if self._ws is None:
             return
         pump, self._pump = self._pump, None
         if pump is not None:
@@ -111,11 +111,10 @@ class WsSyncTransport:
                 await pump
             except asyncio.CancelledError:
                 pass
-        if self._ws is not None:
-            try:
-                await self._ws.close()
-            except Exception:  # noqa: BLE001 - 关闭失败不阻断善后
-                pass
-            self._ws = None
-            self._queue = None
+        try:
+            await self._ws.close()
+        except Exception:  # noqa: BLE001 - 关闭失败不阻断善后
+            pass
+        self._ws = None
+        self._queue = None
         logging.info("同步 WS 已关闭: %s", self._url)

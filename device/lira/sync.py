@@ -26,6 +26,7 @@ import logging
 from typing import Awaitable, Callable, Protocol
 
 from lira.appliances.ir import ApplianceError
+from lira.dialog import phrasebook as pb
 from lira.appliances.models import ApplianceModel, SceneModel
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PrivacyState
@@ -322,3 +323,19 @@ def _cli(argv: list[str] | None = None) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(_cli())
+
+def make_snapshot_announcer(store, speak):
+    """快照应用钩子（AE7）：对比应用前后 enabled，本次新禁用的家电口语播报。
+
+    M7 起为生产主循环与 e2e harness 共用（原两处各持一份）。speak 为同步播报
+    入口（生产 = TTS 回调，测试 = 录制器/断言面）。
+    """
+
+    def announce(snapshot, prev_enabled: dict[str, bool]) -> None:
+        now = {a.name: a.enabled for a in store.get_all_appliances()}
+        newly_disabled = [n for n, on in prev_enabled.items() if on and not now.get(n, False)]
+        text = pb.disabled_announce_text(newly_disabled)
+        if text:
+            speak(text)
+
+    return announce

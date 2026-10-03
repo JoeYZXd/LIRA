@@ -42,6 +42,7 @@ from lira.audio._paths import (
 from lira.config import AppConfig, ConfigError, load_config
 from lira.dialog import phrasebook as pb
 from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
+from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine
 from lira.hal.base import HalError
@@ -58,7 +59,8 @@ from lira.privacy import (
     PrivacyState,
     attach_announcer,
 )
-from lira.sync import SyncClient
+from lira.llm.client import make_text_polisher
+from lira.sync import SyncClient, make_snapshot_announcer
 from lira.sync_ws import WsSyncTransport
 from lira.vision.reading import ReadingPipeline, TtsBlockSpeaker
 
@@ -154,8 +156,7 @@ class AudioStack:
     wake_kws: object  # WakeWordKws
     asr: object  # StreamingAsr
     playback_kws: object  # WakeWordKws（白名单）
-    tts: object  # TtsEngine
-    player: object | None = None  # SoundDevicePlayer（board 后端）
+    tts: object  # TtsEngine（board 后端时其内部持有 SoundDevicePlayer）
 
 
 def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
@@ -184,7 +185,6 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
             asr=StreamingAsr(),
             playback_kws=WakeWordKws(keywords_file=PLAYBACK_WHITELIST_KEYWORDS_FILE),
             tts=tts,
-            player=player,
         )
     except FileNotFoundError as exc:
         logging.warning("语音栈模型未就绪: %s", exc)
@@ -248,42 +248,6 @@ def build_llm(cfg: AppConfig, *, privacy: PrivacyState, network_ok, on_wait_feed
         network_ok=network_ok,
         on_wait_feedback=on_wait_feedback,
     )
-
-
-# ---------- 音频路由分发（状态机路由 -> 三选二识别流） ----------
-
-
-class RouteDispatch:
-    """AudioSink：按当前 AudioRoute 把样本喂给 KWS/ASR，命中即驱动状态机。
-
-    WAKE -> 唤醒 KWS；LISTEN -> 流式 ASR（endpoint 切句）；PLAYBACK -> 白名单
-    KWS（R11 朗读内容结构性隔离：非白名单词永远不会进入意图通道）。
-    与 e2e harness 同构；识别文本一律不落日志（计划日志纪律）。
-    """
-
-    def __init__(self, runtime: "DeviceRuntime") -> None:
-        self._rt = runtime
-
-    def feed(self, samples) -> None:  # np.ndarray（numpy 在 runtime 初始化时惰性导入）
-        rt = self._rt
-        route = rt.route
-        if route is AudioRoute.WAKE and rt.wake_stream is not None:
-            hit = rt.wake_stream.feed_and_poll(samples)
-            if hit and rt.wakeword in hit:
-                rt.spawn(rt.engine.on_wake())
-        elif route is AudioRoute.LISTEN and rt.asr_stream is not None:
-            rt.asr_stream.feed(samples)
-            # 先解码就绪帧再判 endpoint：sherpa 的 endpoint 检测在解码后评估
-            rt.asr_stream.text()
-            if rt.asr_stream.is_endpoint():
-                text = rt.asr_stream.text().strip()
-                rt.asr_stream.reset()
-                if text:
-                    rt.spawn(rt.engine.on_asr_text(text))
-        elif route is AudioRoute.PLAYBACK and rt.playback_stream is not None:
-            hit = rt.playback_stream.feed_and_poll(samples)
-            if hit:
-                rt.spawn(rt.engine.on_asr_text(hit.split("@")[-1].strip()))
 
 
 # ---------- 状态机回调装配（DialogCallbacks 实现） ----------
@@ -357,19 +321,6 @@ class DeviceCallbacks:
         self._rt.pipeline.playback_volume_down()
 
 
-# ---------- 无语音栈降级播放器 ----------
-
-
-class _LogSpeaker:
-    """无语音栈降级播放器（测试/装配路径）：不发声，只记事件不记内容（日志纪律）。"""
-
-    volume: float = 1.0
-    speed: float = 1.0
-
-    async def play(self, text: str) -> None:
-        logging.info("朗读块未发声（无语音栈，%d 字符）", len(text))
-
-
 # ---------- 整机运行时 ----------
 
 
@@ -387,7 +338,7 @@ class DeviceRuntime:
         hal: dict[str, object],
         store,
         settings,
-        audio: AudioStack | None = None,
+        audio: AudioStack,
         ocr=None,
         llm=None,
         privacy: PrivacyState | None = None,
@@ -395,9 +346,6 @@ class DeviceRuntime:
         sync_transport_factory=WsSyncTransport,
         clock=time.monotonic,
     ) -> None:
-        import numpy as np  # 惰性导入：仅真实主循环需要（dry-run 不触发）
-
-        self._np = np
         self._cfg = cfg
         self._hal = hal
         self._clock = clock
@@ -414,11 +362,11 @@ class DeviceRuntime:
         self.settings = settings
         self.wakeword = _wakeword_text()
         self.route = AudioRoute.WAKE
-        self.tts = audio.tts if audio else None
-        self.speaker = speaker or (TtsBlockSpeaker(audio.tts) if audio else _LogSpeaker())
-        self.wake_stream = audio.wake_kws.create_stream() if audio else None
-        self.asr_stream = audio.asr.create_stream() if audio else None
-        self.playback_stream = audio.playback_kws.create_stream() if audio else None
+        self.tts = audio.tts
+        self.speaker = speaker or TtsBlockSpeaker(audio.tts)
+        self.wake_stream = audio.wake_kws.create_stream()
+        self.asr_stream = audio.asr.create_stream()
+        self.playback_stream = audio.playback_kws.create_stream()
 
         self.ir_service = IRService(store, hal["ir"])
         self.learning = LearningManager(self.ir_service)
@@ -432,7 +380,10 @@ class DeviceRuntime:
             on_reading_finished=lambda: self.spawn(self.engine.on_reading_finished()),
             text_polisher=make_text_polisher(self._llm),
         )
-        self._gate = PrivacyGatedSink(RouteDispatch(self), self.privacy)
+        self._gate = PrivacyGatedSink(
+            RouteDispatch(streams=self, wakeword=self.wakeword, spawn=self.spawn),
+            self.privacy,
+        )
         # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
         attach_announcer(self.privacy, self.callbacks.speak)
 
@@ -462,29 +413,26 @@ class DeviceRuntime:
 
     # ---------- 生命周期 ----------
 
-    def spawn(self, coro) -> asyncio.Task:
-        """跟踪状态机/管线在途任务（停机统一取消；异常记日志不静默）。
-
-        与 spawn_companion 的区分：长驻伴随任务（UI/同步）不在 _pending
-        ——消费方（e2e 同款 drain 语义、单测 settle）只关心引擎在途工作收敛。
-        """
+    def _spawn(self, coro, tasks: set, *, log_errors: bool = False) -> asyncio.Task:
+        """任务跟踪骨架：tasks 集合归属区分长驻伴随与引擎在途工作。"""
         task = asyncio.ensure_future(coro)
-        self._pending.add(task)
+        tasks.add(task)
 
         def _done(task: asyncio.Task) -> None:
-            self._pending.discard(task)
-            if not task.cancelled() and task.exception() is not None:
+            tasks.discard(task)
+            if log_errors and not task.cancelled() and task.exception() is not None:
                 logging.error("主循环任务异常", exc_info=task.exception())
 
         task.add_done_callback(_done)
         return task
 
+    def spawn(self, coro) -> asyncio.Task:
+        """状态机/管线在途任务：停机取消 + 异常记日志（settle/drain 的收敛面）。"""
+        return self._spawn(coro, self._pending, log_errors=True)
+
     def spawn_companion(self, coro) -> asyncio.Task:
         """长驻伴随任务（UI serve / 同步监督）：停机统一取消，不进 _pending。"""
-        task = asyncio.ensure_future(coro)
-        self._companions.add(task)
-        task.add_done_callback(self._companions.discard)
-        return task
+        return self._spawn(coro, self._companions)
 
     def _install_signal_handlers(self) -> None:
         loop = asyncio.get_running_loop()
@@ -516,14 +464,16 @@ class DeviceRuntime:
 
     async def _orchestrate(self) -> None:
         """编排主循环：音频读取 -> 隐私门 -> 路由分发 -> 状态机 tick。"""
+        import numpy as np  # 惰性导入：仅真实主循环需要（dry-run 不触发）
+
         source = self._hal["audio"]
         while not self._stop.is_set():
             chunk = await source.read_chunk(CHUNK_FRAMES * 2)
             if not chunk:
                 logging.info("音频源结束（EOF），主循环退出")
                 break
-            samples = self._np.frombuffer(chunk, dtype=self._np.int16)
-            samples = samples.astype(self._np.float32) / 32768.0
+            samples = np.frombuffer(chunk, dtype=np.int16)
+            samples = samples.astype(np.float32) / 32768.0
             self._gate.feed(samples)
             self.engine.tick(self._clock())
 
@@ -578,7 +528,7 @@ class DeviceRuntime:
             vault=self._vault,
             store=self.store,
             settings=self.settings,
-            remote_available=self._llm_is_available(),
+            remote_available=self._llm.is_available,
             network_ok=self._network_ok,
         )
         app = create_app(services)
@@ -599,19 +549,14 @@ class DeviceRuntime:
             # 即驱动整机停机，保证停机路径单一
             self._stop.set()
 
-    def _llm_is_available(self):
-        """UI 状态卡的 R10 单一远程可用性信号。"""
-        llm = getattr(self, "_llm", None)
-        return llm.is_available if llm is not None else (lambda: False)
-
     async def _shutdown(self, stack) -> None:
         """优雅停机：UI 先退（should_exit -> serve 自然返回，无取消噪声）->
         取消引擎在途任务与伴随任务 -> 释放 HAL。幂等。"""
         if self._ui_server is not None:
             self._ui_server.should_exit = True
-        for task in list(self._pending) + list(self._companions):
-            task.cancel()
         tasks = list(self._pending) + list(self._companions)
+        for task in tasks:
+            task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
         await stack.aclose()
@@ -621,40 +566,7 @@ class DeviceRuntime:
 # ---------- 模块级装配辅助 ----------
 
 
-def make_snapshot_announcer(store, speak):
-    """快照应用钩子（AE7）：对比应用前后 enabled，新禁用家电口语播报。
 
-    speak 为同步播报入口（生产 = DeviceCallbacks.speak，测试 = 录制器）。
-    """
-
-    def announce(snapshot, prev_enabled: dict[str, bool]) -> None:
-        now = {a.name: a.enabled for a in store.get_all_appliances()}
-        newly_disabled = [n for n, on in prev_enabled.items() if on and not now.get(n, False)]
-        text = pb.disabled_announce_text(newly_disabled)
-        if text:
-            speak(text)
-
-    return announce
-
-
-def make_text_polisher(llm):
-    """R3/R27/AE2 阅读白话钩子：简单文本本地直读；复杂文本远程转白话；
-    隐私/断网/失败 -> 原文 + 免责提示（不静默、不拒读）。"""
-    from lira.llm.client import LlmError, PrivacyBlocked
-    from lira.llm.prompts import is_medical_text
-
-    async def polish(text: str) -> str:
-        if not llm.needs_colloquial(text):
-            return text  # 简单信件：本地 OCR 直读，不经 LLM（AE2 第三段）
-        try:
-            return await llm.colloquial(text)
-        except (PrivacyBlocked, LlmError):
-            # 降级：读原文。医疗内容仍附"以原说明书为准"（同样的免责提示），
-            # 非医疗附离线说明（R27）
-            suffix = pb.DISCLAIMER_MEDICAL if is_medical_text(text) else pb.DISCLAIMER_OFFLINE
-            return f"{text}\n{suffix}"
-
-    return polish
 
 
 # ---------- dry-run 装配图（仅 cfg + 模型文件探测，不构造引擎） ----------

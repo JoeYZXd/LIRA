@@ -13,22 +13,20 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
-import pytest
 
-from lira.audio._paths import SAMPLE_RATE
 from lira.hal.base import AudioIO
 from lira.hal.mock import MockDisplay, MockIrController
 from lira.config import load_config
 from lira.main import (
-    SYNC_RECONNECT_MIN_SECONDS,
     AudioStack,
     DeviceRuntime,
     build_board_hal,
     make_snapshot_announcer,
 )
+from lira.sync import SyncError
 
 # ---------- 替身 ----------
 
@@ -38,15 +36,14 @@ class FakeStream:
 
     def __init__(self, hits: list[str] | None = None) -> None:
         self.hits = list(hits or [])
-        self.frames_fed = 0
 
     def feed(self, samples) -> None:
-        self.frames_fed += len(samples)
+        pass
 
     def feed_and_poll(self, samples) -> str | None:
-        self.feed(samples)
         if self.hits:
             return self.hits.pop(0)
+        return None
         return None
 
     def text(self) -> str:
@@ -64,12 +61,9 @@ class FakeKws:
 
     def __init__(self, hits: list[str] | None = None) -> None:
         self._hits = list(hits or [])
-        self.streams: list[FakeStream] = []
 
     def create_stream(self) -> FakeStream:
-        s = FakeStream(self._hits)
-        self.streams.append(s)
-        return s
+        return FakeStream(self._hits)
 
 
 class FakeAsr:
@@ -82,7 +76,6 @@ class FakeTts:
 
     def __init__(self) -> None:
         self.spoken: list[tuple[str, float, float]] = []
-        self.sample_rate = 22050
 
     def speak(self, text: str, speed: float = 1.0, volume: float = 1.0) -> asyncio.Event:
         self.spoken.append((text, speed, volume))
@@ -168,13 +161,6 @@ class SilenceSource(AudioIO):
     async def play(self, data: bytes) -> None:
         raise NotImplementedError
 
-    def push_silence(self, seconds: float) -> None:
-        samples = np.zeros(int(SAMPLE_RATE * seconds), dtype=np.float32)
-        for start in range(0, len(samples), 1600):
-            self._queue.put_nowait(
-                (samples[start : start + 1600] * 32767.0).astype(np.int16).tobytes()
-            )
-
     def push_eof(self) -> None:
         """投递 EOF 哨兵（不覆盖 HAL 的 async close）。"""
         self._queue.put_nowait(b"")
@@ -203,25 +189,12 @@ def make_cfg(tmp_path, *, ws_url: str = "", ui_port: int = 0):
 
 @dataclass
 class Rig:
-    """测试台架：runtime + 可控源 + 断言面。"""
+    """测试台架：runtime + 可控源 + 断言面（engine 请走 rig.runtime.engine）。"""
 
     runtime: DeviceRuntime
     source: SilenceSource
     tts: FakeTts
     ir: MockIrController
-    engine = None  # runtime.engine 的快捷访问（__post_init__ 填充）
-
-    def __post_init__(self) -> None:
-        self.engine = self.runtime.engine
-
-
-@dataclass
-class _StoreBox:
-    """存 store/settings/tts/ir 引用（Rig field 默认值构造顺序问题）。"""
-    store: object = None
-    settings: object = None
-    tts: object = None
-    ir: object = None
 
 
 def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int = 0):
@@ -292,15 +265,15 @@ class TestDialogWiring:
         task = asyncio.ensure_future(rig.runtime.run())
         try:
             await asyncio.sleep(0.05)
-            await rig.engine.on_wake()
-            assert rig.engine.state.value == "listening"
-            await rig.engine.on_asr_text("打开台灯")
+            await rig.runtime.engine.on_wake()
+            assert rig.runtime.engine.state.value == "listening"
+            await rig.runtime.engine.on_asr_text("打开台灯")
             await settle(rig.runtime)
             spoken = [t for t, _, _ in rig.tts.spoken]
             assert any("我在听" in t for t in spoken)
             assert any("台灯" in t for t in spoken)
             assert rig.ir.sent_codes == ["CODE_LAMP_ON"]
-            assert rig.engine.state.value == "standby"
+            assert rig.runtime.engine.state.value == "standby"
         finally:
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)
@@ -315,7 +288,7 @@ class TestDialogWiring:
             samples = np.zeros(1600, dtype=np.float32)
             rig.runtime._gate.feed(samples)
             await asyncio.sleep(0.1)
-            assert rig.engine.state.value == "listening"
+            assert rig.runtime.engine.state.value == "listening"
         finally:
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)
@@ -326,10 +299,10 @@ class TestDialogWiring:
         task = asyncio.ensure_future(rig.runtime.run())
         try:
             await asyncio.sleep(0.05)
-            await rig.engine.on_wake()
-            await rig.engine.on_asr_text("读一下")
+            await rig.runtime.engine.on_wake()
+            await rig.runtime.engine.on_asr_text("读一下")
             await asyncio.sleep(0.3)
-            assert rig.engine.state.value in ("capturing", "reading", "standby")
+            assert rig.runtime.engine.state.value in ("capturing", "reading", "standby")
             camera = rig.runtime._hal["camera"]
             assert camera.capture_calls >= 1
         finally:
@@ -362,7 +335,6 @@ class ScriptedTransport:
     async def send(self, frame) -> None:
         if self.fail_connect:
             raise SyncError("connect failed (scripted)")
-        self.sent = frame
 
     async def receive(self):
         if self.fail_connect:

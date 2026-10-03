@@ -39,15 +39,15 @@ from lira.audio._paths import SAMPLE_RATE
 from lira.audio.asr import AsrStream, StreamingAsr
 from lira.audio.kws import KwsStream, WakeWordKws
 from lira.config import LlmConfig
-from lira.dialog import phrasebook as pb
 from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
+from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
 from lira.dialog.router import Router
 from lira.dialog.state_machine import DialogCallbacks
 from lira.hal.mock import MockIrController
-from lira.llm.client import LlmClient, LlmError, PrivacyBlocked, make_remote_handler
-from lira.llm.prompts import is_medical_text
+from lira.llm.client import LlmClient, make_remote_handler, make_text_polisher
 from lira.privacy import PrivacyGatedSink, PrivacyState
+from lira.sync import make_snapshot_announcer
 from lira.vision.engine import OcrEngine, OcrLine
 from lira.vision.reading import ReadingPipeline
 
@@ -214,56 +214,6 @@ def make_e2e_llm(fake: FakeRemoteLlm) -> LlmClient:
     return LlmClient(cfg, openai_client=oai)
 
 
-def make_text_polisher(llm: LlmClient):
-    """R3/R27/AE2 阅读白话钩子：简单文本本地直读；复杂文本远程转白话；
-    隐私/断网/失败 → 原文 + 免责提示（不静默、不拒读）。"""
-
-    async def polish(text: str) -> str:
-        if not llm.needs_colloquial(text):
-            return text  # 简单信件：本地 OCR 直读，不经 LLM（AE2 第三段）
-        try:
-            return await llm.colloquial(text)
-        except (PrivacyBlocked, LlmError):
-            # 降级：读原文。医疗内容仍附"以原说明书为准"（同样的免责提示），
-            # 非医疗附离线说明（R27）。
-            suffix = pb.DISCLAIMER_MEDICAL if is_medical_text(text) else pb.DISCLAIMER_OFFLINE
-            return f"{text}\n{suffix}"
-
-    return polish
-
-
-# ---------- 路由分发 sink（状态机路由 → 三选二识别流） ----------
-
-class RouteDispatch:
-    """AudioSink：按当前 AudioRoute 把样本喂给 KWS/ASR，命中即驱动状态机。
-
-    WAKE → 唤醒 KWS；LISTEN → 流式 ASR（endpoint 切句）；PLAYBACK → 白名单
-    KWS（R11 朗读内容结构性隔离：非白名单词永远不会进入意图通道）。
-    """
-
-    def __init__(self, harness: "DeviceHarness") -> None:
-        self._h = harness
-
-    def feed(self, samples: np.ndarray) -> None:
-        h = self._h
-        route = h.route
-        if route is AudioRoute.WAKE and h.wake_stream is not None:
-            hit = h.wake_stream.feed_and_poll(samples)
-            if hit and WAKEWORD in hit:
-                asyncio.ensure_future(h.engine.on_wake())
-        elif route is AudioRoute.LISTEN and h.asr_stream is not None:
-            h.asr_stream.feed(samples)
-            # 先解码就绪帧再判 endpoint：sherpa 的 endpoint 检测在解码后评估
-            h.asr_stream.text()
-            if h.asr_stream.is_endpoint():
-                text = h.asr_stream.text().strip()
-                h.asr_stream.reset()
-                if text:
-                    asyncio.ensure_future(h.engine.on_asr_text(text))
-        elif route is AudioRoute.PLAYBACK and h.playback_stream is not None:
-            hit = h.playback_stream.feed_and_poll(samples)
-            if hit:
-                asyncio.ensure_future(h.engine.on_asr_text(hit.split("@")[-1].strip()))
 
 
 # ---------- 状态机回调装配（DialogCallbacks 实现） ----------
@@ -372,7 +322,10 @@ class DeviceHarness:
             wake_allowed=lambda: not self.privacy.is_on,
         )
         self.source = WavQueueSource()
-        self._gate = PrivacyGatedSink(RouteDispatch(self), self.privacy)
+        self._gate = PrivacyGatedSink(
+            RouteDispatch(streams=self, wakeword=WAKEWORD, spawn=asyncio.ensure_future),
+            self.privacy,
+        )
         self._task: asyncio.Task | None = None
         self._pending: set[asyncio.Task] = set()
 
@@ -507,11 +460,4 @@ class DeviceHarness:
         """SyncClient(on_snapshot_applied=...) 钩子：应用后播报"新禁用名单"
         （AE7 话术），幂等快照不重复播报（只在 enabled→disabled 变化时）。"""
 
-        def announce_disabled(snap, prev_enabled: dict[str, bool]) -> None:
-            now = {a.name: a.enabled for a in self.store.get_all_appliances()}
-            newly_disabled = [n for n, on in prev_enabled.items() if on and not now.get(n, False)]
-            text = pb.disabled_announce_text(newly_disabled)
-            if text:
-                self.speak_log.append(text)
-
-        return announce_disabled
+        return make_snapshot_announcer(self.store, self.speak_log.append)

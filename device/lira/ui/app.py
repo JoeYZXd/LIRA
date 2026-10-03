@@ -52,6 +52,10 @@ class UiServices:
     remote_available: Callable[[], bool] = lambda: False
     #: 基础联网检测（状态卡区分"无网"与"远程服务不可用"）
     network_ok: Callable[[], bool] = lambda: False
+    #: 开发者控制台句柄（dev_console.enabled 时由装配层注入；None = 不挂载）
+    dev: object | None = None
+    #: 整机状态提供者（R1 状态面；/status JSON 合并其返回的枚举/布尔/数值字段）
+    status_provider: Callable[[], dict] = lambda: {}
 
 
 def _appliance_rows(services: UiServices) -> list[dict[str, object]]:
@@ -80,6 +84,7 @@ def _index_context(services: UiServices, **extra: object) -> dict[str, object]:
         "volume": services.settings.volume,
         "tts_speed": services.settings.tts_speed,
         "appliances": _appliance_rows(services),
+        "dev_console": services.dev is not None,
         **extra,
     }
 
@@ -87,6 +92,11 @@ def _index_context(services: UiServices, **extra: object) -> dict[str, object]:
 def create_app(services: UiServices) -> FastAPI:
     """构建设备 UI 应用。全部状态经注入的 services 访问（可全面测试）。"""
     app = FastAPI(title="LIRA 设备面板", docs_url=None, redoc_url=None)
+
+    if services.dev is not None:
+        from lira.ui.dev import mount_dev
+
+        mount_dev(app, services.dev)
 
     @app.get("/")
     async def index(request: Request):
@@ -96,18 +106,18 @@ def create_app(services: UiServices) -> FastAPI:
 
     @app.get("/status")
     async def status():
-        """只读状态 JSON（状态卡轮询源，不鉴权）。"""
-        return JSONResponse(
-            {
-                "privacy_on": services.privacy.is_on,
-                "remote_available": services.remote_available(),
-                "network_ok": services.network_ok(),
-                "passphrase_set": services.vault.is_set(),
-                "volume": services.settings.volume,
-                "tts_speed": services.settings.tts_speed,
-                "appliance_count": len(services.store.get_all_appliances()),
-            }
-        )
+        """只读状态 JSON（状态卡轮询源，不鉴权）。仅枚举/布尔/数值字段。"""
+        payload = {
+            "privacy_on": services.privacy.is_on,
+            "remote_available": services.remote_available(),
+            "network_ok": services.network_ok(),
+            "passphrase_set": services.vault.is_set(),
+            "volume": services.settings.volume,
+            "tts_speed": services.settings.tts_speed,
+            "appliance_count": len(services.store.get_all_appliances()),
+        }
+        payload.update(services.status_provider())
+        return JSONResponse(payload)
 
     # ---------- 口令首启设置（无默认值；模拟屏上操作） ----------
 
@@ -152,6 +162,11 @@ def create_app(services: UiServices) -> FastAPI:
                 {"already_set": already_set, "error": str(exc)},
                 status_code=400,
             )
+        if services.dev is not None:
+            # dev 会话签名密钥随口令轮换：既有 dev 会话 cookie 全部失效
+            from lira.ui.dev import reset_dev_session_secret
+
+            reset_dev_session_secret(services.dev.store)
         logger.info("ui event=passphrase_set")
         return RedirectResponse("/", status_code=303)
 

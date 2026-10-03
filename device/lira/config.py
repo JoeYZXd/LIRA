@@ -75,6 +75,13 @@ class UiConfig:
 
 
 @dataclass(frozen=True)
+class DevConsoleConfig:
+    """开发者控制台开关（默认关，启动时判定；产线不暴露调试面）。"""
+
+    enabled: bool = False
+
+
+@dataclass(frozen=True)
 class SyncConfig:
     """设备↔后台同步（U6/R30 设备侧）。
 
@@ -93,6 +100,7 @@ class AppConfig:
     hal: HalConfig
     sync: SyncConfig
     ui: UiConfig
+    dev_console: DevConsoleConfig
     db_path: Path
     log_level: str
 
@@ -122,6 +130,10 @@ DEFAULTS: dict[str, Any] = {
     "ui": {
         "host": "0.0.0.0",
         "port": 8080,
+    },
+    # M8 计划：开发者控制台（默认关；口令 vault 鉴权 + 采集类测试隐私联锁）
+    "dev_console": {
+        "enabled": False,
     },
     # U6：本地家电配置库（R13，安全规则本地持久化；gitignore *.db）
     "db_path": "data/device.db",
@@ -155,6 +167,7 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_SYNC_DEVICE_TOKEN": ("sync", "device_token", str),
     "LIRA_UI_HOST": ("ui", "host", str),
     "LIRA_UI_PORT": ("ui", "port", int),
+    "LIRA_DEV_CONSOLE": ("dev_console", "enabled", "bool"),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
 
@@ -199,6 +212,10 @@ def _apply_env(config: dict[str, Any], env: Mapping[str, str]) -> None:
                 value = int(raw)
             except ValueError as exc:
                 raise ConfigError(f"环境变量 {env_name}={raw!r} 不是合法整数。") from exc
+        elif value_type == "bool":
+            # 专用分支：bool(raw) 通用转换会 fail-open（bool("false")==True）——
+            # "1/true/yes/on"（不区分大小写）为开，其余一律为关
+            value = raw.strip().lower() in ("1", "true", "yes", "on")
         else:
             value = raw
         if section is None:
@@ -250,6 +267,9 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
         raise ConfigError("ui.port 必须在 0~65535 之间（0 = 临时端口）。")
     if not ui["host"]:
         raise ConfigError("ui.host 为空（局域网监听地址，如 0.0.0.0）。")
+
+    if not isinstance(config["dev_console"]["enabled"], bool):
+        raise ConfigError("dev_console.enabled 必须为布尔值。")
 
     log_level = str(config["log_level"]).upper()
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -319,6 +339,9 @@ def load_config(
         ui=UiConfig(
             host=str(config["ui"]["host"]),
             port=int(config["ui"]["port"]),
+        ),
+        dev_console=DevConsoleConfig(
+            enabled=bool(config["dev_console"]["enabled"]),
         ),
         db_path=_resolve_path(str(config["db_path"])),
         log_level=str(config["log_level"]),

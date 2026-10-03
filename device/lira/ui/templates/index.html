@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>LIRA 设备面板</h1>
+{% if dev_console %}
+  <p><a href="/dev">开发者控制台</a></p>
+{% endif %}
 
 <section class="card">
   <h2>设备状态</h2>

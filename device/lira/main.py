@@ -28,6 +28,7 @@ import signal
 import socket
 import sys
 import time
+from collections import deque
 from dataclasses import dataclass
 
 from lira.appliances import IRService, LearningManager
@@ -75,6 +76,45 @@ __all__ = [
 
 #: 唤醒词回退值（词表读取失败时；正常路径从拼音表首行解析）
 WAKEWORD_FALLBACK = "小丽拉"
+
+
+class RingBufferHandler(logging.Handler):
+    """进程内环形日志缓冲（M8 计划 R2）：dev 控制台日志视图的数据源。
+
+    挂根 logger 收集全量；内容纪律由各模块的日志纪律保证（只记事件与耗时，
+    识别文本/播报内容不落日志——本 handler 不做二次过滤）。
+    """
+
+    def __init__(self, capacity: int = 500) -> None:
+        super().__init__()
+        self._records: deque[str] = deque(maxlen=capacity)
+        self.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s %(message)s"))
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            self._records.append(self.format(record))
+        except Exception:  # noqa: BLE001 - 日志格式化失败不拖垮业务
+            pass
+
+    def snapshot(self) -> list[str]:
+        return list(self._records)
+
+
+#: 进程级单例（runtime 初始化时幂等挂载；dev 控制台读取）
+RING_LOG_HANDLER = RingBufferHandler()
+
+
+def ensure_ring_handler() -> None:
+    """把环形日志 handler 幂等挂到根 logger（runtime 初始化与测试共用）。
+
+    同时把根级别下探到 INFO（否则默认 WARNING 会让事件类 INFO 记录进不了
+    缓冲；生产 main() 本就 basicConfig(INFO)，此下探对齐 dev/测试环境）。
+    """
+    root = logging.getLogger()
+    if RING_LOG_HANDLER not in root.handlers:
+        root.addHandler(RING_LOG_HANDLER)
+    if root.level > logging.INFO or root.level == logging.NOTSET:
+        root.setLevel(logging.INFO)
 
 #: 同步重连退避 (秒)：指数退避边界；健康会话时长阈值（短命会话不重置退避）
 SYNC_RECONNECT_MIN_SECONDS = 2.0
@@ -385,6 +425,15 @@ class DeviceRuntime:
         self._ui_server = None
         self._ui_task = None
         self._vault = PassphraseVault(store)
+        #: 公开别名（dev 控制台等装配面使用）
+        self.vault = self._vault
+        #: 同步会话状态（_run_sync 维护；R1 状态面 + dev 状态区数据源）
+        self.sync_status: dict[str, object] = {"session": "not_configured"}
+        #: 当前同步客户端句柄（会话存活期非 None；U5 手动拉取用）
+        self._sync_client = None
+
+        # 环形日志缓冲幂等挂载（dev 控制台数据源；进程级单例）
+        ensure_ring_handler()
 
         self.privacy = privacy or PrivacyState()
         self.store = store
@@ -447,6 +496,32 @@ class DeviceRuntime:
         )
 
     # ---------- 生命周期 ----------
+
+    def status(self) -> dict[str, object]:
+        """整机状态面（R1）：/status 与 dev 状态区共用。仅枚举/布尔/数值。"""
+        breaker = getattr(self._llm, "breaker", None)
+        breaker_state = getattr(breaker, "state", None)
+        try:
+            epoch = self.store.current_epoch()
+            version = self.store.current_version()
+        except Exception:  # noqa: BLE001 - store 异常不拖垮状态面
+            epoch = version = None
+        return {
+            "engine": self.engine.state.value,
+            "route": self.route.value,
+            "privacy_on": self.privacy.is_on,
+            "sync": {
+                "session": self.sync_status.get("session", "unknown"),
+                "epoch": epoch,
+                "version": version,
+            },
+            "network": bool(self._network_ok()),
+            "breaker": breaker_state.name if breaker_state is not None else "unknown",
+            "models": {
+                "audio": _audio_models_ready(),
+                "ocr": _ocr_models_ready(self._cfg),
+            },
+        }
 
     def _spawn(self, coro, tasks: set, *, log_errors: bool = False) -> asyncio.Task:
         """任务跟踪骨架：tasks 集合归属区分长驻伴随与引擎在途工作。"""
@@ -525,6 +600,9 @@ class DeviceRuntime:
         """
         sync_cfg = self._cfg.sync
         backoff = SYNC_RECONNECT_MIN_SECONDS
+        if not sync_cfg.ws_url:
+            self.sync_status = {"session": "not_configured"}
+            return
         while not self._stop.is_set():
             transport = self._sync_transport_factory(sync_cfg.ws_url)
             client = SyncClient(
@@ -544,15 +622,28 @@ class DeviceRuntime:
                     await opener()
                 started = time.monotonic()
                 await client.connect()
+                self._sync_client = client
+                self.sync_status = {
+                    "session": "connected",
+                    "epoch": self.store.current_epoch(),
+                    "version": self.store.current_version(),
+                }
                 logging.info("后台同步已连接")
                 await client.run_forever(heartbeat_seconds=sync_cfg.heartbeat_seconds)
                 session_ok = True
+                self.sync_status = {"session": "disconnected", "reason": "后台关闭连接"}
                 logging.info("同步会话结束（后台关闭连接）")
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - 中断由监督循环退避重连，不拖垮主循环
+                self.sync_status = {
+                    "session": "interrupted",
+                    "reason": str(exc)[:80],
+                    "backoff": backoff,
+                }
                 logging.warning("同步会话中断: %s（%.0fs 后重连）", exc, backoff)
             finally:
+                self._sync_client = None
                 await transport.close()
             # 健康会话才重置退避（短命会话继续指数退避，防固定节奏重连风暴）
             if session_ok and (time.monotonic() - started) >= SYNC_HEALTHY_SESSION_SECONDS:
@@ -564,6 +655,14 @@ class DeviceRuntime:
             except TimeoutError:
                 pass
             backoff = min(backoff * 2, SYNC_RECONNECT_MAX_SECONDS)
+
+    def _dev_handle(self):
+        """dev 控制台句柄（enabled 时返回 DevHandle，否则 None = 不挂载）。"""
+        if not self._cfg.dev_console.enabled:
+            return None
+        from lira.ui.dev import DevHandle
+
+        return DevHandle(self)
 
     async def _run_ui(self) -> None:
         """设备 Web UI 伴随任务（uvicorn in-process）。依赖缺失 -> 告警返回。"""
@@ -581,6 +680,8 @@ class DeviceRuntime:
             settings=self.settings,
             remote_available=self._llm.is_available,
             network_ok=self._network_ok,
+            status_provider=self.status,
+            dev=self._dev_handle(),
         )
         app = create_app(services)
         server = uvicorn.Server(

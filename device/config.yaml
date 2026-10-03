@@ -31,6 +31,10 @@ ui:
   host: 0.0.0.0
   port: 8080
 
+# 开发者控制台（默认关；开启后经设备口令进入，采集类测试受隐私联锁）
+dev_console:
+  enabled: false
+
 # U6：本地家电配置库（R13 本地持久化；运行期产物，gitignore *.db）
 db_path: data/device.db
 

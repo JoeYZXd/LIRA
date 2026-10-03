@@ -17,7 +17,7 @@ ocr-x86 = ["onnxruntime>=1.17", "pillow>=10.0", "opencv-python-headless>=4.9", "
 # U2：音频（sherpa-onnx 支持跨平台 x86 开发）
 audio = ["sherpa-onnx>=1.10", "sounddevice>=0.4"]
 # U7：设备本地触摸屏 Web UI（python-multipart：starlette 表单解析依赖）
-ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9"]
+ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9", "itsdangerous>=2.1"]
 # M7：设备↔后台真实 WS 同步传输（lira/sync_ws.py；python-broadlink 待 M5 另装）
 sync = ["websockets>=13"]
 

@@ -352,3 +352,71 @@ def test_read_cli_preserves_extra_text_and_engine_release(production_engine, tmp
     assert report["samples"][0]["score"]["insertions"] == 1
     assert report["samples"][0]["expected_physical_lines"] == 2
     assert production_engine._det.released and production_engine._rec.released
+
+
+@pytest.mark.parametrize(
+    "failure", ["invalid-rois", "region-inference", "region-export"]
+)
+def test_auxiliary_failure_preserves_full_page_score(
+    production_engine, tmp_path, monkeypatch, failure
+):
+    ref, image, rois = [
+        tmp_path / name for name in ("ref.txt", "image.png", "rois.json")
+    ]
+    ref.write_text("甲", encoding="utf-8")
+    cv2.imwrite(str(image), np.zeros((960, 960, 3), np.uint8))
+    names = ("center", "top_left", "top_right", "bottom_left", "bottom_right")
+    rois.write_text(json.dumps({name: [0, 0, 960, 960] for name in names}))
+    if failure == "invalid-rois":
+        rois.write_text("{}")
+    elif failure == "region-inference":
+        runtime = production_engine._det
+        original_inference = runtime.inference
+
+        def fail_first_region(inputs):
+            runtime.fail = len(runtime.inputs) == 1
+            return original_inference(inputs)
+
+        monkeypatch.setattr(runtime, "inference", fail_first_region)
+    else:
+        original_mkdir = Path.mkdir
+
+        def fail_first_region_export(path, *args, **kwargs):
+            if path.name.endswith("-roi-center"):
+                raise OSError("injected region export failure")
+            return original_mkdir(path, *args, **kwargs)
+
+        monkeypatch.setattr(Path, "mkdir", fail_first_region_export)
+    args = build_parser().parse_args(
+        [
+            "read",
+            "--reference",
+            str(ref),
+            "--image",
+            str(image),
+            "--rois",
+            str(rois),
+            "--output",
+            str(tmp_path),
+        ]
+    )
+    assert (
+        execute(args, lambda _: (production_engine, {"backend": "production test"}))
+        == 1
+    )
+    report = json.loads(next(tmp_path.glob("ocr-*/report.json")).read_text())
+    sample = report["samples"][0]
+    assert sample["success"] and sample["score"]["cer"] == 1
+    assert "error" not in sample
+    assert report["groups"]["unattributed"]["denominator"] == 1
+    assert report["groups"]["unattributed"]["mean_cer"] == 1
+    assert report["primary_success"] and not report["success"]
+    assert not report["auxiliary_success"] and not sample["auxiliary_success"]
+    if failure == "invalid-rois":
+        assert "Exactly five" in sample["auxiliary_error"]
+    else:
+        regions = sample["auxiliary_roi_ocr"]
+        assert not regions["center"]["success"]
+        assert "injected" in regions["center"]["error"]
+        assert "score" not in regions["center"]
+        assert all(regions[name]["success"] for name in names[1:])

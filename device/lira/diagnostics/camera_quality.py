@@ -140,18 +140,24 @@ async def run_process(args, timeout=20):
             )
         return out.decode(errors="replace") + err.decode(errors="replace")
     finally:
-        # The HAL launches children. Kill the session even if its leader exited.
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGTERM)
-        if proc.returncode is None:
-            try:
-                await asyncio.wait_for(proc.wait(), 1)
-            except TimeoutError:
-                with contextlib.suppress(ProcessLookupError):
-                    os.killpg(proc.pid, signal.SIGKILL)
-                await proc.wait()
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(proc.pid, signal.SIGKILL)
+
+        async def teardown():
+            # The HAL launches children. Kill the session even if its leader exited.
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGTERM)
+            if proc.returncode is None:
+                try:
+                    await asyncio.wait_for(proc.wait(), 1)
+                except TimeoutError:
+                    with contextlib.suppress(ProcessLookupError):
+                        os.killpg(proc.pid, signal.SIGKILL)
+                    await proc.wait()
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(proc.pid, signal.SIGKILL)
+
+        # Shield TERM, escalation and reaping together. Restoration and lock
+        # release must not begin while a cancelled capture still owns a child.
+        await finish_restore(teardown())
 
 
 class DeviceLock:

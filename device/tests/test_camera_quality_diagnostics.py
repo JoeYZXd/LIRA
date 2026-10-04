@@ -209,6 +209,80 @@ def test_failed_runs_have_independent_invalid_manifests(tmp_path, monkeypatch):
     assert all(not json.loads(p.read_text())["valid"] for p in records)
 
 
+def test_repeated_cancel_reaps_resistant_process_before_restore_and_unlock(
+    tmp_path, monkeypatch
+):
+    import os
+    import signal
+
+    from lira.diagnostics.camera_quality import finish_restore
+
+    async def scenario():
+        ready = tmp_path / "resistant-pid"
+        lock = tmp_path / "resistant-lock"
+        term_sent = asyncio.Event()
+        real_killpg = os.killpg
+        restored = []
+
+        def killpg(pid, sig):
+            real_killpg(pid, sig)
+            if sig == signal.SIGTERM:
+                term_sent.set()
+
+        monkeypatch.setattr(os, "killpg", killpg)
+        script = (
+            "import os,signal,sys,time; "
+            "signal.signal(signal.SIGTERM, signal.SIG_IGN); "
+            "open(sys.argv[1],'w').write(str(os.getpid())); time.sleep(60)"
+        )
+
+        async def restore():
+            restored.append(not Path(f"/proc/{ready.read_text()}").exists())
+
+        async def owned_capture():
+            with DeviceLock(lock):
+                try:
+                    await run_process([sys.executable, "-c", script, str(ready)], 10)
+                finally:
+                    await finish_restore(restore())
+
+        task = asyncio.create_task(owned_capture())
+        try:
+            async with asyncio.timeout(5):
+                while not ready.exists():
+                    await asyncio.sleep(0.01)
+            task.cancel()
+            await asyncio.wait_for(term_sent.wait(), 2)
+            task.cancel()
+            await asyncio.sleep(0.05)
+            assert not task.done(), "Cancellation released ownership before reaping"
+            assert not restored
+            with pytest.raises(RuntimeError), DeviceLock(lock):
+                pass
+            with pytest.raises(asyncio.CancelledError):
+                await asyncio.wait_for(task, 3)
+            assert restored == [True]
+            assert not Path(f"/proc/{ready.read_text()}").exists()
+            with DeviceLock(lock):
+                pass
+        finally:
+            if ready.exists():
+                try:
+                    real_killpg(int(ready.read_text()), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            if ready.exists():
+                async with asyncio.timeout(3):
+                    while Path(f"/proc/{ready.read_text()}").exists():
+                        await asyncio.sleep(0.01)
+                await asyncio.sleep(0)
+
+    asyncio.run(scenario())
+
+
 def test_repeated_cancel_waits_for_restore_completion():
     from lira.diagnostics.camera_quality import finish_restore
 

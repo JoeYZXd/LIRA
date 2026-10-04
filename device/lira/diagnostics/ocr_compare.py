@@ -442,7 +442,16 @@ def execute(args, engine_factory=create_engine) -> int:
                         sample["score"] = score(reference, evidence["text"])
                         # Detected counts cannot prove physical lines were all found.
                         sample["expected_physical_lines"] = args.expected_lines
-                    if args.rois:
+                except Exception as exc:  # noqa: BLE001 - preserve arbitrary backend failures as evidence
+                    sample.update(success=False, error=f"{type(exc).__name__}: {exc}")
+                    continue
+                if args.rois:
+                    sample["auxiliary_success"] = False
+                    sample["auxiliary_roi_ocr"] = {}
+                    sample["auxiliary_warning"] = (
+                        "Original-image region OCR is auxiliary only; never included in full-page CER or acceptance"
+                    )
+                    try:
                         from lira.diagnostics.camera_quality import validate_rois
 
                         rois = validate_rois(
@@ -450,23 +459,33 @@ def execute(args, engine_factory=create_engine) -> int:
                             image.shape[1],
                             image.shape[0],
                         )
-                        auxiliary = {}
+                        auxiliary = sample["auxiliary_roi_ocr"]
                         for name, (x, y, width, height) in rois.items():
-                            auxiliary[name] = read_evidence(
-                                engine,
-                                image[y : y + height, x : x + width],
-                                output / f"sample-{index:04d}-roi-{name}",
-                            )
-                        sample["auxiliary_roi_ocr"] = auxiliary
-                        sample["auxiliary_warning"] = (
-                            "Original-image region OCR is auxiliary only; never included in full-page CER or acceptance"
+                            try:
+                                auxiliary[name] = read_evidence(
+                                    engine,
+                                    image[y : y + height, x : x + width],
+                                    output / f"sample-{index:04d}-roi-{name}",
+                                )
+                            except Exception as exc:  # noqa: BLE001 - retain region export failures separately
+                                auxiliary[name] = {
+                                    "success": False,
+                                    "error": f"{type(exc).__name__}: {exc}",
+                                }
+                        sample["auxiliary_success"] = all(
+                            region["success"] for region in auxiliary.values()
                         )
-                except Exception as exc:  # noqa: BLE001 - preserve arbitrary backend failures as evidence
-                    sample.update(success=False, error=f"{type(exc).__name__}: {exc}")
+                    except Exception as exc:  # noqa: BLE001 - retain ROI configuration failures separately
+                        sample["auxiliary_error"] = f"{type(exc).__name__}: {exc}"
         report["groups"] = summarize(report["samples"])
-        report["success"] = bool(report["samples"]) and all(
+        report["primary_success"] = bool(report["samples"]) and all(
             s.get("success") for s in report["samples"]
         )
+        report["auxiliary_success"] = all(
+            s.get("auxiliary_success", not getattr(args, "rois", None))
+            for s in report["samples"]
+        )
+        report["success"] = report["primary_success"] and report["auxiliary_success"]
     except Exception as exc:  # noqa: BLE001 - preserve arbitrary backend failures as evidence
         report["error"] = f"{type(exc).__name__}: {exc}"
     finally:

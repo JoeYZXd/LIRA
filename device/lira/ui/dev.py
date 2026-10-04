@@ -574,7 +574,15 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             return JSONResponse({"error": "相机不支持方向设置"}, status_code=501)
         body = await request.json()
         rotation = body.get("rotation")
+        rotate_by = body.get("rotate_by")
         hflip = body.get("hflip")
+        if rotate_by is not None:
+            # 相对旋转：每次点击在当前方向上累加（多次点击循环 0→90→180→270→0）
+            if rotate_by not in (90, 180, 270, -90):
+                return JSONResponse(
+                    {"error": "rotate_by 须为 90/180/270/-90"}, status_code=400
+                )
+            rotation = (getattr(camera, "rotation", 0) + rotate_by) % 360
         if rotation is not None:
             if rotation not in (0, 90, 180, 270):
                 return JSONResponse({"error": "rotation 须为 0/90/180/270"}, status_code=400)
@@ -746,8 +754,9 @@ def _dev_page_html() -> str:
     <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
   <img id="preview-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="preview">
   <div class="row" style="margin-top:8px">
-    <button onclick="orient(90)">旋转 90°</button>
-    <button onclick="orient(0)">复位</button>
+    <button onclick="orientBy(90)">旋转 90°</button>
+    <button onclick="orientBy(-90)">反向 90°</button>
+    <button onclick="orientBy(0)">复位</button>
     <button onclick="flip()">水平翻转</button>
     <span id="orient-out" class="muted"></span></div>
   <div class="row"><button onclick="visionTest()">拍摄 + OCR</button>
@@ -838,9 +847,9 @@ async function asrTest() {
   const r = await api('/dev/api/asr', {method: 'POST', body: '{}'});
   out('asr-out', r.status === 200 ? ('文本: ' + r.body.text + ' | 意图: ' + JSON.stringify(r.body.intent)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
 }
-async function orient(rotation) {
-  const body = rotation !== null ? {rotation} : {hflip: null};
-  const payload = rotation === null ? {hflip: !flipped} : {rotation};
+async function orientBy(delta) {
+  // delta=0 复位；90/-90 相对当前方向累加（可多次点击循环）
+  const payload = delta === 0 ? {rotation: 0} : {rotate_by: delta};
   const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify(payload)});
   if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
   flipped = !!r.body.hflip;

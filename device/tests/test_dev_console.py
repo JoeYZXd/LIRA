@@ -637,6 +637,17 @@ class TestVisionEndpoint:
         assert rt.camera.hflip is True
         assert rt.store.get_meta("camera_hflip") == "1"
 
+    def test_rotate_by_accumulates(self):
+        """相对旋转：多次点击累加循环（0->90->180->270->0）。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        for expected in (90, 180, 270, 0):
+            r = client.post("/dev/api/camera/orientation", json={"rotate_by": 90})
+            assert r.status_code == 200, r.text
+            assert rt.camera.rotation == expected
+        r = client.post("/dev/api/camera/orientation", json={"rotate_by": -90})
+        assert rt.camera.rotation == 270, "-90 = 顺时针退一步"
+
     def test_orientation_transform_math(self):
         """旋转/翻转纯函数：形状与内容方向正确。"""
         import numpy as np

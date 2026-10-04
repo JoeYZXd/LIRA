@@ -819,8 +819,21 @@ def _dev_page_html() -> str:
 
 <script>
 let recording = false, previewOn = false, previewTimer = null, fetching = false;
+let authRedirecting = false;
 async function api(path, opts) {
-  const r = await fetch(path, Object.assign({headers: {'Content-Type': 'application/json'}}, opts||{}));
+  let r;
+  try {
+    r = await fetch(path, Object.assign({headers: {'Content-Type': 'application/json'}}, opts||{}));
+  } catch (e) {
+    // 网络级失败（服务重启/断连）：不再静默，调用方面板直接显示错误
+    return {status: 0, body: {error: '无法连接设备服务（服务可能已重启，请刷新页面重新登录）'}};
+  }
+  if (r.status === 401 && !authRedirecting) {
+    // 会话缺失/过期/签名失效：统一回登录页，不停留在僵尸页面
+    authRedirecting = true;
+    location.href = '/dev';
+    return {status: 401, body: {error: '会话已失效，正在返回登录页…'}};
+  }
   const t = await r.text();
   let j; try { j = JSON.parse(t); } catch { j = {raw: t}; }
   return {status: r.status, body: j};
@@ -831,7 +844,11 @@ function out(id, msg, cls) {
 }
 async function loadStatus() {
   const r = await api('/dev/api/status');
-  if (r.status !== 200) return out('status-out', '加载失败: ' + r.status, 'err');
+  if (r.status !== 200) {
+    const msg = r.body.error || ('加载失败: ' + r.status);
+    document.getElementById('status-view').textContent = '（' + msg + '）';
+    return out('status-out', msg, 'err');
+  }
   const s = r.body;
   document.getElementById('status-view').textContent = JSON.stringify(s, null, 2);
   document.getElementById('vol').value = s.privacy_on ? undefined : (s.volume === undefined ? undefined : undefined);
@@ -847,8 +864,12 @@ async function loadLogs() {
 async function postForm(path, inputId) {
   const fd = new FormData();
   fd.append('value', document.getElementById(inputId).value);
-  const r = await fetch(path, {method: 'POST', body: fd});
-  out('set-out', r.ok ? '已提交' : '失败: ' + r.status, r.ok ? 'ok' : 'err');
+  try {
+    const r = await fetch(path, {method: 'POST', body: fd});
+    out('set-out', r.ok ? '已提交' : '失败: ' + r.status, r.ok ? 'ok' : 'err');
+  } catch (e) {
+    out('set-out', '无法连接设备服务（请刷新页面重新登录）', 'err');
+  }
 }
 async function setLevel() {
   const r = await api('/dev/api/loglevel', {method: 'POST', body: JSON.stringify({level: document.getElementById('lvl').value})});
@@ -915,7 +936,14 @@ async function previewToggle() {
   previewOn = true;
   btn.textContent = '停止预览';
   const frame = async () => {
-    const r = await fetch('/dev/api/vision/frame?ts=' + Date.now());
+    let r;
+    try {
+      r = await fetch('/dev/api/vision/frame?ts=' + Date.now());
+    } catch (e) {
+      previewOn = false; clearInterval(previewTimer);
+      btn.textContent = '开启实时预览（~0.5fps）';
+      return out('preview-out', '无法连接设备服务，预览已停止', 'err');
+    }
     if (r.status === 200) {
       const blob = await r.blob();
       const img = document.getElementById('preview-img');
@@ -954,7 +982,11 @@ function vlAuto(cb) {
 function vlEscape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
 async function loadVoiceLog() {
   const r = await api('/dev/api/voice-log');
-  if (r.status !== 200) return out('vl-out', '加载失败: ' + r.status, 'err');
+  if (r.status !== 200) {
+    const msg = r.body.error || ('加载失败: ' + r.status);
+    document.getElementById('vl-view').textContent = '（' + msg + '）';
+    return out('vl-out', msg, 'err');
+  }
   const es = r.body.entries || [];
   const view = document.getElementById('vl-view');
   if (es.length === 0) { view.innerHTML = '（暂无语音交互，说一句“小丽拉”试试）'; }

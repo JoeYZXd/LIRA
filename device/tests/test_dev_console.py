@@ -811,3 +811,33 @@ class TestBrowserLoginFlow:
         r = client.get("/dev", follow_redirects=False)
         assert r.status_code == 303
         assert "/passphrase/setup" in r.headers["location"]
+
+
+class TestConsoleErrorFeedback:
+    def test_console_js_surfaces_network_failure(self):
+        """僵尸页面防护（2026-10-04 实机问题）：网络级失败不再静默——
+        api() 捕获 fetch 异常返回 status=0 + 可见错误文案。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        assert "catch (e)" in page
+        assert "无法连接设备服务" in page
+        assert "status: 0" in page
+
+    def test_console_js_redirects_on_401(self):
+        """会话失效自愈：任一 API 401 -> 统一回 /dev 登录页（防僵尸页面停留）。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        assert "r.status === 401" in page
+        assert "location.href = '/dev'" in page
+        assert "authRedirecting" in page  # 并发轮询只跳一次
+
+    def test_console_panels_show_failure_in_place(self):
+        """整机状态/语音日志面板：加载失败时面板主体显示原因，不停留占位符。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        # loadStatus / loadVoiceLog 失败路径写入面板主体（status-view / vl-view）
+        assert "getElementById('status-view').textContent = '（' + msg + '）'" in page
+        assert "getElementById('vl-view').textContent = '（' + msg + '）'" in page

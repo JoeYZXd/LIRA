@@ -500,7 +500,7 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
                 return JSONResponse({"error": f"拍摄失败: {exc}"}, status_code=503)
             t_capture = time.monotonic() - started
             image = await asyncio.to_thread(_decode_jpeg, raw)
-            preview_b64 = await asyncio.to_thread(_downscale_jpeg_b64, raw)
+            preview_b64 = await asyncio.to_thread(_downscale_jpeg_b64, raw, 1280)
             t_decode = time.monotonic() - started - t_capture
             polygons = await asyncio.to_thread(ocr.detect, image)
             t_det = time.monotonic() - started - t_capture - t_decode
@@ -561,6 +561,31 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             media_type="image/jpeg",
             headers={"Cache-Control": "no-store"},
         )
+
+    # ---------- 相机方向控制 ----------
+
+    @app.post("/dev/api/camera/orientation")
+    async def dev_camera_orientation(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        camera = getattr(handle.runtime, "camera", None)
+        if camera is None or not hasattr(camera, "rotation"):
+            return JSONResponse({"error": "相机不支持方向设置"}, status_code=501)
+        body = await request.json()
+        rotation = body.get("rotation")
+        hflip = body.get("hflip")
+        if rotation is not None:
+            if rotation not in (0, 90, 180, 270):
+                return JSONResponse({"error": "rotation 须为 0/90/180/270"}, status_code=400)
+            camera.rotation = rotation
+            handle.store.set_meta("camera_rotation", str(rotation))
+        if hflip is not None:
+            camera.hflip = bool(hflip)
+            handle.store.set_meta("camera_hflip", "1" if camera.hflip else "0")
+        logger.info("dev event=camera_orientation rotation=%s hflip=%s",
+                    camera.rotation, camera.hflip)
+        return JSONResponse({"rotation": camera.rotation, "hflip": camera.hflip})
 
     # ---------- 同步测试（U5） ----------
 
@@ -720,7 +745,12 @@ def _dev_page_html() -> str:
     <button id="preview-btn" onclick="previewToggle()">开启实时预览（~0.5fps）</button>
     <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
   <img id="preview-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="preview">
-  <div class="row" style="margin-top:8px"><button onclick="visionTest()">拍摄 + OCR</button>
+  <div class="row" style="margin-top:8px">
+    <button onclick="orient(90)">旋转 90°</button>
+    <button onclick="orient(0)">复位</button>
+    <button onclick="flip()">水平翻转</button>
+    <span id="orient-out" class="muted"></span></div>
+  <div class="row"><button onclick="visionTest()">拍摄 + OCR</button>
     <span id="vis-out"></span></div>
   <img id="vis-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="capture">
   <pre id="vis-view"></pre>
@@ -808,6 +838,16 @@ async function asrTest() {
   const r = await api('/dev/api/asr', {method: 'POST', body: '{}'});
   out('asr-out', r.status === 200 ? ('文本: ' + r.body.text + ' | 意图: ' + JSON.stringify(r.body.intent)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
 }
+async function orient(rotation) {
+  const body = rotation !== null ? {rotation} : {hflip: null};
+  const payload = rotation === null ? {hflip: !flipped} : {rotation};
+  const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify(payload)});
+  if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
+  flipped = !!r.body.hflip;
+  out('orient-out', '方向: ' + r.body.rotation + '°' + (flipped ? '（已翻转）' : ''), 'ok');
+  if (previewOn) { await frame(); }
+}
+let flipped = false;
 async function visionTest() {
   out('vis-out', '拍摄识别中…（慢速单帧，约数秒）');
   const r = await api('/dev/api/vision', {method: 'POST', body: '{}'});

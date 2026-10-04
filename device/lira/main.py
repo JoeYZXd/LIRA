@@ -960,6 +960,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     store = ApplianceStore(cfg.db_path)
+    # 相机挂载方向持久化恢复（控制台调整 -> store meta -> 重启生效）
+    try:
+        hal["camera"].rotation = int(store.get_meta("camera_rotation") or 0)
+        hal["camera"].hflip = (store.get_meta("camera_hflip") or "0") == "1"
+    except AttributeError:
+        pass  # 非 ISP 相机（mock）无方向属性
     try:
         settings = DeviceSettings()
         runtime = DeviceRuntime(

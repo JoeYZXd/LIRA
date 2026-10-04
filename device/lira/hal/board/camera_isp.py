@@ -45,9 +45,13 @@ _LUMA_HIGH = 190.0
 class V4l2IspCamera(Camera):
     """`Camera.capture() -> JPEG bytes` 的 RKISP 管线实现。"""
 
-    def __init__(self, device: str = _ISP_DEVICE) -> None:
+    def __init__(self, device: str = _ISP_DEVICE, rotation: int = 0, hflip: bool = False) -> None:
         self.device = device
         self._tmp = _TMP_NV12
+        #: 画面旋转（0/90/180/270 度，顺时针）与水平翻转——装配/挂载方向
+        #: 各异，由控制台调整并持久化（store meta）
+        self.rotation = rotation
+        self.hflip = hflip
 
     async def open(self) -> None:
         """探测 ISP mainpath 节点，并把传感器曝光固定到上限。"""
@@ -119,7 +123,18 @@ class V4l2IspCamera(Camera):
         if buf.size != expected:
             raise HalError("ISP 帧大小不符: %d != %d" % (buf.size, expected))
         yuv = buf.reshape((h * 3) // 2, w)
-        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
+        bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
+        return _apply_orientation(bgr, self.rotation, self.hflip)
+
+
+def _apply_orientation(bgr: np.ndarray, rotation: int, hflip: bool) -> np.ndarray:
+    """按配置旋转/翻转画面（旋转为顺时针角度，限定 0/90/180/270）。"""
+    k = (rotation // 90) % 4
+    if k:
+        bgr = np.rot90(bgr, k=-k)  # np.rot90 逆时针；-k = 顺时针 k*90
+    if hflip:
+        bgr = np.ascontiguousarray(bgr[:, ::-1])
+    return np.ascontiguousarray(bgr)
 
 
 def _digital_exposure(bgr: np.ndarray) -> np.ndarray:

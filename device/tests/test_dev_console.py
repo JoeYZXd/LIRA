@@ -564,6 +564,8 @@ class FakeCamera:
     def __init__(self, fail: bool = False) -> None:
         self.fail = fail
         self.calls = 0
+        self.rotation = 0
+        self.hflip = False
 
     async def capture(self) -> bytes:
         self.calls += 1
@@ -619,6 +621,37 @@ class TestVisionEndpoint:
         rt.privacy._on = True
         r = client.post("/dev/api/vision", json={})
         assert r.status_code == 403
+
+    def test_orientation_endpoint_persists(self):
+        """方向控制：rotation 校验 + store meta 持久化 + hflip 开关。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        r = client.post("/dev/api/camera/orientation", json={"rotation": 90})
+        assert r.status_code == 200
+        assert rt.camera.rotation == 90
+        assert rt.store.get_meta("camera_rotation") == "90"
+        r = client.post("/dev/api/camera/orientation", json={"rotation": 45})
+        assert r.status_code == 400
+        r = client.post("/dev/api/camera/orientation", json={"hflip": True})
+        assert r.status_code == 200
+        assert rt.camera.hflip is True
+        assert rt.store.get_meta("camera_hflip") == "1"
+
+    def test_orientation_transform_math(self):
+        """旋转/翻转纯函数：形状与内容方向正确。"""
+        import numpy as np
+
+        from lira.hal.board.camera_isp import _apply_orientation
+
+        img = np.zeros((4, 6, 3), dtype=np.uint8)
+        img[0, 0] = (255, 0, 0)  # 左上角标记
+        r90 = _apply_orientation(img, 90, False)
+        assert r90.shape == (6, 4, 3)
+        assert tuple(r90[0, -1]) == (255, 0, 0), "顺时针 90°：左上角 -> 右上角"
+        r180 = _apply_orientation(img, 180, False)
+        assert tuple(r180[-1, -1]) == (255, 0, 0), "180°：左上角 -> 右下角"
+        flipped = _apply_orientation(img, 0, True)
+        assert tuple(flipped[0, -1]) == (255, 0, 0), "水平翻转：左上角 -> 右上角"
 
     def test_vision_camera_error_503(self):
         _app, client, _rt = make_vision_client(camera_fail=True)

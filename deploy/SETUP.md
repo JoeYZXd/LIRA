@@ -229,6 +229,38 @@ ISP 处理路径（media1 → NV12，rkcif→sditf→rkisp）留给真实 HAL `c
 但条纹仍可见。**根治路线 = 打通 ISP mainpath NV12（camera_rkisp.py）**，
 届时 capture() 接口不变直接切换。OCR 场景待实测全分辨率下可读性。
 
+**官方栈基准对照验证（阶段 A，2026-10-04）**：> 上文 ⚠ 段与"留给 camera_rkisp.py 打通"
+所述为**历史状态**——ISP mainpath 已于 2026-10-03 打通并成为现行主路径
+（`hal/board/camera_isp.py`，rkcif→sditf→rkisp0-vir2→mainpath/video11），
+HAL 现状以本子段及 2.10 刷新后的 M3 行为准。
+
+用法核对（只读查证，未安装任何东西）：
+
+```bash
+media-ctl -p -d /dev/media1  # 期望: driver rkisp0-vir2; rkisp-isp-subdev(v4l-subdev3)
+                             #       SBGGR10 4224x3136 ← rkcif-mipi-lvds2 [ENABLED]
+                             #       → mainpath(/dev/video11) + selfpath(/dev/video12) 均挂接 ✓
+media-ctl -p -d /dev/media0  # 期望: rkcif-mipi-lvds2; csi2 → stream_cif_mipi_id0(video0) ✓
+find /proc/device-tree -iname '*ov13855*'   # 期望: i2c@fec90000/ov13855-1@36 status=okay
+#   module/lens = CMK-OT2016-FV1 / default → IQ 文件名 ov13855_CMK-OT2016-FV1_default.json
+find / -name '*rkaiq*' -not -path '/proc/*' -not -path '/sys/*'  # 期望: 无命中
+ls /etc/iqfiles               # 期望: 镜像自带 3 个 json（imx219/ov13850_CMK-CT0116/ov5647）
+                              #       ——带 IQ 文件与目录，不带 rkaiq_3A_server/librkaiq.so
+```
+
+同场景参考帧对（驱动原生 = 传感器控制复位默认 exposure 2048 / gain 128 后 v4l2-ctl
+直抓 NV12，无任何软件 3A；现管线 = `camera_isp.py` 完整软件 3A 路径；样张留存板上
+`/home/orangepi/lira/u1-samples/`，md5：native `be513233...` / pipeline `04a35ba7...`）：
+
+| 臂 | 亮度均值 | 拉普拉斯方差 | 说明 |
+|----|---------|-------------|------|
+| 驱动原生 | **2.96** | 0.8 | 默认增益下室内近全黑——无 3A 时传感器进光量差两个数量级 |
+| 现管线（软件 3A） | **126.2** | 184.2 | 亮度锚定 120 生效；细节量正常 |
+
+**阶段 A 结论**：传输层（节点/格式/链路/设备树命名）全部核对无误，摄像头用法正确；
+画质差距的根源是**默认状态下无 3A**（原生帧近全黑），即 3A 才是决定性杠杆——
+支持进入阶段 B（安装官方 3A 栈拿画质上限）。
+
 ### 2.5 M4：USB 麦阵
 
 ```bash
@@ -350,7 +382,7 @@ dev_console:
 | M0 | 镜像文件名 / 内核（`uname -a`） | debian_bookworm_server_linux6.1.99；6.1.99-rockchip-rk3588 #1.1.0（2026-08-20 构建）；根分区在 eMMC（mmcblk0p1，57G 已扩容） | 2026-10-02 |
 | M1 | NPU 驱动 / librknnrt / rknn-toolkit2 版本 | 驱动 v0.9.8 ✓；librknnrt 2.3.0（c949ad889d@2024-11-07）✓；toolkit2 2.3.0 ✓（WSL2 Ubuntu，cp310 manylinux） | 2026-10-02 |
 | M2 | 蓝牙音频链路延迟（主观） | A2DP 通（智能音箱 Pro-2639，MAC 50:FE:39:F8:83:8B，trust 已设）；aplay 全链路出声；延迟主观可接受（TTS 场景） | 2026-10-02 |
-| M3 | 摄像头节点 / 抓帧格式与分辨率 | OV13855@CAM1（overlay `ov13855-c1`，sensor 7-0036）；CIF 裸 RAW `/dev/video0`，**2688×3136** BG10（4224 请求被驱动钳宽），单帧 17M ✓；无 SDITF 实体 → ISP 内联不可用，HAL 走裸 Bayer+灰世界 WB（`hal/board/camera_raw.py`） | 2026-10-02/03 |
+| M3 | 摄像头节点 / 抓帧格式与分辨率 | OV13855@CAM1（overlay `ov13855-c1`，sensor 7-0036）；ISP mainpath `/dev/video11` **2688×3136** NV12（4224 请求被 rkcif 驱动钳宽），HAL 走 ISP 管线+软件 3A（`hal/board/camera_isp.py`，2026-10-03 打通；CIF 裸 RAW 路径已退役）；链路 rkcif→sditf→rkisp0-vir2 经 media1 确认 ENABLED | 2026-10-02/04 |
 | M4 | 麦阵 / 采集验证 | FY-SP003U 双麦（USB，card 3），`plughw:3,0` 16k/S16LE/stereo 录音 ✓；回放经蓝牙音箱 ✓。板载 ES8388 = card 2（3.5mm 口，M6 本地喇叭用） | 2026-10-02 |
 | M5 | 红外学习/回放 | 待 BroadLink RM4 Mini 到货（2026-10-03 改道，见 2.6） | — |
 | M6 | 本地喇叭出声 | USB 有源音箱（3.5mm AUX）← 板载 ES8388 card 2 ✓；软音量经 PipeWire；PAM8403 方案取消 | 2026-10-03 |
@@ -358,6 +390,7 @@ dev_console:
 | ASR | 流式 RTF | confirm.wav → "确认" ✓（夹具）；流式 RTF 与真麦切句待冒烟 | 2026-10-03 |
 | TTS | RTF / 首包延迟 | **RTF 0.27**（0.48s 合成 1.8s 语音），load 3.3s，matcha+vocos @CPU | 2026-10-03 |
 | OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；软件接线已完成（2026-10-03），板上全链路实测待执行 | 2026-10-03 |
+| 阶段A | 官方栈基准对照验证 | 传输层全部核对无误（media1 拓扑/传感器能力/DT 命名 CMK-OT2016-FV1→IQ 名吻合）；镜像**带 /etc/iqfiles（3 json）但不带 rkaiq 守护进程**；同场景对照：原生帧均值 2.96（近全黑）vs 现管线 126.2——用法正确，画质差距根源=无 3A，支持进阶段 B | 2026-10-04 |
 | 资源 | 内存峰值 / NPU 占用 / 温度（含散热壳） | 待填 | — |
 
 > **M0 实测附注**（2026-10-02）：镜像自带 zram0 swap（3.9G，RAM 介质，不磨损 eMMC——

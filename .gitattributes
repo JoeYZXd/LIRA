@@ -1,0 +1,5 @@
+# 板上部署文件必须 LF：CRLF 会导致 systemd unit 解析失败、bash 脚本报错
+# （deploy/ 下文件经 scp 直上板，检出端换行符不得随 autocrlf 漂移）
+*.sh text eol=lf
+*.service text eol=lf
+*.dts text eol=lf

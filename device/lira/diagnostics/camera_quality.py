@@ -366,8 +366,7 @@ async def capture(args):
         "scene": {
             "label": args.scene,
             "distance_cm": args.distance_cm,
-            "page": "A4",
-            "text": "ordinary body",
+            "page_description": getattr(args, "page_description", "A4 ordinary body"),
             "full_page_confirmed": args.full_page,
         },
         "requested": vars(args).copy(),
@@ -486,9 +485,264 @@ async def capture(args):
     return 0 if m["valid"] else 1
 
 
+ROI_NAMES = ("center", "top_left", "top_right", "bottom_left", "bottom_right")
+
+
+def validate_rois(rois, width, height):
+    """Coordinates refer to the oriented image, manually marked for this scene."""
+    if not isinstance(rois, dict) or set(rois) != set(ROI_NAMES):
+        raise ValueError("Exactly five named ROIs required: " + ", ".join(ROI_NAMES))
+    for name, rect in rois.items():
+        if (
+            not isinstance(rect, list)
+            or len(rect) != 4
+            or any(type(v) is not int for v in rect)
+        ):
+            raise ValueError(f"{name}: expected integer [x,y,width,height]")
+        x, y, w, h = rect
+        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+            raise ValueError(f"{name}: empty or out-of-bounds ROI")
+    return rois
+
+
+def image_metrics(image):
+    import cv2
+    from lira.hal.board.camera_isp import _sharpness
+
+    y = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)[..., 0]
+    return {
+        "mean_luma": float(y.mean()),
+        "dark_fraction_le_5": float((y <= 5).mean()),
+        "highlight_fraction_ge_250": float((y >= 250).mean()),
+        "laplacian_variance": _sharpness(image),
+    }
+
+
+def registration_evidence(frames, aligned):
+    import cv2
+    import numpy as np
+    from lira.hal.board.camera_isp import _ALIGN_MAX_SHIFT
+
+    shifts = []
+    scale = 512.0 / frames[0].shape[1]
+    if len(frames) > 1:
+        smalls = [
+            np.float32(
+                cv2.cvtColor(
+                    cv2.resize(f, None, fx=scale, fy=scale), cv2.COLOR_BGR2GRAY
+                )
+            )
+            for f in frames
+        ]
+        for image in smalls[1:]:
+            (dx, dy), response = cv2.phaseCorrelate(smalls[0], image)
+            shifts.append(
+                {
+                    "reported_shift_512": [dx, dy],
+                    "response": response,
+                    "production_applied_shift_pixels": [dx / scale, dy / scale],
+                }
+            )
+    return {
+        "frame_count": len(frames),
+        "aligned_mean": aligned,
+        "method": "single_frame"
+        if len(frames) == 1
+        else ("production_aligned_mean" if aligned else "sharpest_frame_fallback"),
+        "threshold_512_pixels": _ALIGN_MAX_SHIFT,
+        "shifts": shifts,
+        "characterization": "Synthetic +1px text displacement yields phaseCorrelate +1px; "
+        "production applies +shift, doubling displacement instead of correcting it. "
+        "Behavior preserved; scene-specific degradation requires inspecting crops.",
+    }
+
+
+def analyze(args):
+    """Offline replay from validated original NV12; never opens a camera."""
+    import cv2
+    import numpy as np
+    from lira.hal.board.camera_isp import (
+        _apply_orientation,
+        _merge_frames,
+        _digital_exposure,
+        _TARGET_LUMA,
+        _GAMMA,
+        _GAIN_CAP,
+        _ALIGN_MAX_SHIFT,
+    )
+
+    output = Path(args.output) / (
+        "stages-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:10]
+    )
+    output.mkdir(parents=True, exist_ok=False)
+    m = {
+        "schema": "lira.camera-quality-stages/v1",
+        "kind": "stages",
+        "valid": False,
+        "source_manifest": str(Path(args.manifest).resolve()),
+        "outputs": [],
+        "metric_scope": "Auxiliary only; no automatic recommendation or OCR claim",
+    }
+    try:
+        source_path = Path(args.manifest).resolve()
+        source_bytes = source_path.read_bytes()
+        source = json.loads(source_bytes)
+        if (
+            source.get("schema") != "lira.camera-quality/v1"
+            or source.get("kind") != "capture"
+            or source.get("valid") is not True
+            or source.get("capture_ok") is not True
+            or source.get("restore", {}).get("ok") is not True
+        ):
+            raise ValueError(
+                "A valid, restored controlled capture manifest is required"
+            )
+        m["source_manifest_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+        m["scene"] = source["scene"]
+        fmt = source["format"]
+        # Re-validate explicit layout, not only a payload's total size.
+        if parse_format(source["format_raw"]) != fmt:
+            raise ValueError("Source format metadata differs from format readback")
+        entries = source.get("frames")
+        if not isinstance(entries, list) or not entries:
+            raise ValueError("No source frames")
+        requested = source["requested"]
+        if (
+            type(requested.get("frames")) is not int
+            or len(entries) != requested["frames"]
+        ):
+            raise ValueError("Incomplete source frame count")
+        rotation = requested.get("rotation", 0)
+        hflip = requested.get("hflip", False)
+        if rotation not in (0, 90, 180, 270) or type(hflip) is not bool:
+            raise ValueError("Invalid source orientation")
+        m["config"] = {
+            "orientation": {"rotation": rotation, "hflip": hflip},
+            "merge_max_shift": _ALIGN_MAX_SHIFT,
+            "bilateral": {"diameter": 9, "sigma_color": 50, "sigma_space": 50},
+            "digital_exposure": {
+                "target_luma": _TARGET_LUMA,
+                "gamma": _GAMMA,
+                "gain_cap": _GAIN_CAP,
+                "white_balance_cap": 2.5,
+                "levels_percentiles": [0.5, 99.5],
+            },
+            "jpeg_quality": 88,
+        }
+        m["conversion"] = {
+            "method": "OpenCV COLOR_YUV2BGR_NV12, same as production",
+            "quantization": fmt.get("color", {}).get("Quantization", "unknown"),
+            "limitation": "OpenCV NV12 conversion assumes limited video range. "
+            "Full Range readback is a range mismatch; decoded PNG is not "
+            "an equivalent sensor luminance measurement. No range correction applied.",
+        }
+        m["sources"] = []
+        frames = []
+        used_paths = set()
+        for entry in entries:
+            paths = []
+            for key in ("raw", "png"):
+                path = (source_path.parent / entry[key]).resolve()
+                if path.parent != source_path.parent or path in used_paths:
+                    raise ValueError(
+                        "Source must be unique files within capture directory"
+                    )
+                used_paths.add(path)
+                paths.append(path)
+            rawpath, pngpath = paths
+            payload = rawpath.read_bytes()
+            digest = hashlib.sha256(payload).hexdigest()
+            if digest != entry["sha256"] or len(payload) != entry["bytesused"]:
+                raise ValueError("Source NV12 hash/size mismatch")
+            decoded = decode_nv12(payload, fmt)
+            pngbytes = pngpath.read_bytes()
+            png = cv2.imdecode(np.frombuffer(pngbytes, np.uint8), cv2.IMREAD_COLOR)
+            if png is None or not np.array_equal(png, decoded):
+                raise ValueError("Source PNG is corrupt or differs from NV12 decoding")
+            frames.append(_apply_orientation(decoded, rotation, hflip))
+            m["sources"].append(
+                {
+                    "raw": str(rawpath),
+                    "sha256": digest,
+                    "png": str(pngpath),
+                    "png_sha256": hashlib.sha256(pngbytes).hexdigest(),
+                }
+            )
+        height, width = frames[0].shape[:2]
+        rois = validate_rois(
+            json.loads(Path(args.rois).read_text(encoding="utf-8")), width, height
+        )
+        m["roi_coordinate_space"] = (
+            "oriented image; manually mark same paper text again after moving camera/page"
+        )
+        m["roi_rectangles"] = rois
+
+        def save(stage, image):
+            h, w = image.shape[:2]
+            validate_rois(rois, w, h)
+            filename = stage + ".png"
+            if not cv2.imwrite(str(output / filename), image):
+                raise RuntimeError("PNG write failed")
+            record = {
+                "stage": stage,
+                "file": filename,
+                "sha256": hashlib.sha256((output / filename).read_bytes()).hexdigest(),
+                "metrics": image_metrics(image),
+                "rois": {},
+            }
+            for name, (x, y, rw, rh) in rois.items():
+                crop = image[y : y + rh, x : x + rw]
+                cropname = stage + "-" + name + ".png"
+                if not cv2.imwrite(str(output / cropname), crop):
+                    raise RuntimeError("ROI PNG write failed")
+                record["rois"][name] = {
+                    "file": cropname,
+                    "metrics": image_metrics(crop),
+                }
+            m["outputs"].append(record)
+
+        for i, image in enumerate(frames):
+            save(f"single-{i:03d}", image)
+        merged, aligned = _merge_frames(frames)
+        m["registration"] = registration_evidence(frames, aligned)
+        save("merged", merged)
+        denoised = cv2.bilateralFilter(merged, 9, 50, 50)
+        save("bilateral", denoised)
+        digital = _digital_exposure(denoised)
+        save("digital", digital)
+        ok, jpeg = cv2.imencode(".jpg", digital, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        if not ok:
+            raise RuntimeError("JPEG encoding failed")
+        jpegpath = output / "jpeg88.jpg"
+        jpegpath.write_bytes(jpeg.tobytes())
+        m["jpeg"] = {
+            "file": jpegpath.name,
+            "sha256": hashlib.sha256(jpegpath.read_bytes()).hexdigest(),
+        }
+        decoded = cv2.imdecode(jpeg, cv2.IMREAD_COLOR)
+        if decoded is None:
+            raise ValueError("JPEG decode failed")
+        save("jpeg-decoded", decoded)
+        m["valid"] = True
+    except Exception as exc:
+        m["error"] = f"{type(exc).__name__}: {exc}"
+    finally:
+        write_json(output / "manifest.json", m)
+    print(str(output))
+    return 0 if m["valid"] else 1
+
+
 def build_parser():
     p = argparse.ArgumentParser(description=__doc__)
     sub = p.add_subparsers(dest="command", required=True)
+    q = sub.add_parser(
+        "analyze", help="Offline same-batch stage and manually marked ROI export"
+    )
+    q.add_argument("--manifest", required=True, help="Controlled capture manifest.json")
+    q.add_argument(
+        "--rois", required=True, help="JSON mapping five names to [x,y,width,height]"
+    )
+    q.add_argument("--output", default="camera-experiments")
     for name in ("capture", "baseline", "inspect"):
         q = sub.add_parser(name)
         q.add_argument("--device", default="/dev/video11")
@@ -500,6 +754,7 @@ def build_parser():
             continue
         q.add_argument("--output", default="camera-experiments")
         q.add_argument("--scene", required=True)
+        q.add_argument("--page-description", default="A4 ordinary body")
         q.add_argument("--distance-cm", type=float, required=True)
         q.add_argument(
             "--full-page",
@@ -519,6 +774,8 @@ def build_parser():
 
 
 async def dispatch(args):
+    if args.command == "analyze":
+        return analyze(args)
     if args.command == "inspect":
         with DeviceLock(args.lock):
             coverage = {}

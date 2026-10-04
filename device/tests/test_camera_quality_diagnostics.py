@@ -248,3 +248,205 @@ def test_ownership_permission_denied_reports_incomplete_coverage(tmp_path, monke
     assert external_owners(["/dev/video11"], root, coverage) == []
     assert not coverage["complete"]
     assert coverage["inaccessible"][0]["check"] == "command"
+
+
+def test_production_registration_shift_direction_characterization():
+    import cv2
+    from lira.hal.board.camera_isp import _merge_frames
+    from lira.diagnostics.camera_quality import registration_evidence
+
+    ref = np.full((160, 512, 3), 255, np.uint8)
+    cv2.putText(
+        ref, "Ordinary body 123", (20, 80), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 0), 2
+    )
+    shifted = cv2.warpAffine(
+        ref, np.float32([[1, 0, 1], [0, 1, 0]]), (512, 160), borderValue=(255, 255, 255)
+    )
+    merged, aligned = _merge_frames([ref, shifted])
+    evidence = registration_evidence([ref, shifted], aligned)
+    assert aligned
+    assert evidence["shifts"][0]["production_applied_shift_pixels"][0] == pytest.approx(
+        1, abs=0.01
+    )
+    # Correct inverse registration restores identical text, whereas current
+    # production adds displacement. This is characterization, not a HAL change.
+    corrected = cv2.warpAffine(shifted, np.float32([[1, 0, -1], [0, 1, 0]]), (512, 160))
+    interior = np.s_[10:-10, 10:-10]
+    assert np.array_equal(corrected[interior], ref[interior])
+    assert np.abs(merged[interior].astype(float) - ref[interior]).mean() > 2
+    far_shifted = cv2.warpAffine(
+        ref,
+        np.float32([[1, 0, 8], [0, 1, 0]]),
+        (512, 160),
+        borderValue=(255, 255, 255),
+    )
+    fallback, aligned = _merge_frames([ref, far_shifted])
+    evidence = registration_evidence([ref, far_shifted], aligned)
+    assert not aligned and evidence["method"] == "sharpest_frame_fallback"
+    assert any(np.array_equal(fallback, frame) for frame in (ref, far_shifted))
+
+
+def stage_fixture(tmp_path, count=3, rotation=0):
+    import cv2
+    import hashlib
+    from lira.diagnostics.camera_quality import ROI_NAMES
+
+    source = tmp_path / "capture"
+    source.mkdir()
+    rawfmt = (
+        FMT.replace("4/4", "32/24").replace(": 6", ": 36").replace(": 40", ": 1296")
+    )
+    fmt = parse_format(rawfmt)
+    entries = []
+    for i in range(count):
+        # Padded linear NV12; preserve input bytes including padding.
+        raw = np.full((36, 36), 173, np.uint8)
+        raw[:24, :32] = 90 + i * 7
+        raw[5:17, 5:11] = 35 + i
+        raw[24:, :32] = 128
+        payload = raw.tobytes()
+        rawname, pngname = f"frame-{i:03d}.nv12", f"frame-{i:03d}.png"
+        (source / rawname).write_bytes(payload)
+        cv2.imwrite(str(source / pngname), decode_nv12(payload, fmt))
+        entries.append(
+            {
+                "raw": rawname,
+                "png": pngname,
+                "bytesused": len(payload),
+                "sha256": hashlib.sha256(payload).hexdigest(),
+            }
+        )
+    manifest = {
+        "schema": "lira.camera-quality/v1",
+        "kind": "capture",
+        "valid": True,
+        "capture_ok": True,
+        "restore": {"ok": True},
+        "format": fmt,
+        "format_raw": rawfmt,
+        "scene": {"distance_cm": 30},
+        "requested": {"frames": count, "rotation": rotation, "hflip": True},
+        "frames": entries,
+    }
+    path = source / "manifest.json"
+    path.write_text(json.dumps(manifest))
+    roipath = tmp_path / "rois.json"
+    roipath.write_text(json.dumps({name: [2, 2, 6, 7] for name in ROI_NAMES}))
+    return SimpleNamespace(
+        manifest=str(path), rois=str(roipath), output=str(tmp_path / "outputs")
+    ), manifest
+
+
+def test_offline_stages_same_batch_and_inputs_untouched(tmp_path, monkeypatch):
+    import cv2
+    from lira.hal.board.camera_isp import (
+        _apply_orientation,
+        _merge_frames,
+        _digital_exposure,
+    )
+    import lira.diagnostics.camera_quality as mod
+
+    args, source = stage_fixture(tmp_path, rotation=90)
+    before = {p: p.read_bytes() for p in Path(args.manifest).parent.iterdir()}
+    monkeypatch.setattr(
+        mod, "external_owners", lambda *a, **kw: pytest.fail("camera access")
+    )
+    assert mod.analyze(args) == 0
+    out = next(Path(args.output).glob("stages-*"))
+    report = json.loads((out / "manifest.json").read_text())
+    assert report["valid"] and len(report["sources"]) == 3
+    assert len(report["outputs"]) == 7
+    assert before == {p: p.read_bytes() for p in before}
+    frames = [
+        _apply_orientation(
+            decode_nv12(
+                before[Path(args.manifest).parent / e["raw"]], source["format"]
+            ),
+            90,
+            True,
+        )
+        for e in source["frames"]
+    ]
+    merged, _ = _merge_frames(frames)
+    bilateral = cv2.bilateralFilter(merged, 9, 50, 50)
+    digital = _digital_exposure(bilateral)
+    for stage, expected in [
+        ("single-000", frames[0]),
+        ("merged", merged),
+        ("bilateral", bilateral),
+        ("digital", digital),
+    ]:
+        actual = cv2.imread(str(out / (stage + ".png")))
+        assert np.array_equal(actual, expected)
+        assert np.array_equal(
+            cv2.imread(str(out / (stage + "-center.png"))), expected[2:9, 2:8]
+        )
+    assert np.array_equal(
+        cv2.imread(str(out / "jpeg88.jpg")), cv2.imread(str(out / "jpeg-decoded.png"))
+    )
+    assert mod.analyze(args) == 0
+    assert len(list(Path(args.output).glob("stages-*"))) == 2
+
+
+def test_single_frame_stages_report_single_source(tmp_path):
+    from lira.diagnostics.camera_quality import analyze
+
+    args, _ = stage_fixture(tmp_path, count=1)
+    assert analyze(args) == 0
+    report = json.loads(next(Path(args.output).glob("*/manifest.json")).read_text())
+    assert report["registration"]["method"] == "single_frame"
+    assert not report["registration"]["aligned_mean"]
+    assert len(report["sources"]) == 1 and len(report["outputs"]) == 5
+
+
+@pytest.mark.parametrize(
+    "damage",
+    ["hash", "missing", "png", "invalid", "count", "rois_empty", "rois_bounds"],
+)
+def test_offline_damaged_sources_and_rois_retain_failed_manifest(tmp_path, damage):
+    from lira.diagnostics.camera_quality import analyze
+
+    args, source = stage_fixture(tmp_path)
+    root = Path(args.manifest).parent
+    if damage == "hash":
+        (root / source["frames"][0]["raw"]).write_bytes(b"wrong")
+    elif damage == "missing":
+        (root / source["frames"][1]["raw"]).unlink()
+    elif damage == "png":
+        (root / source["frames"][0]["png"]).write_bytes(b"corrupt")
+    elif damage == "invalid":
+        source["valid"] = False
+    elif damage == "count":
+        source["frames"].pop()
+    elif damage == "rois_empty":
+        Path(args.rois).write_text("{}")
+    elif damage == "rois_bounds":
+        rois = json.loads(Path(args.rois).read_text())
+        rois["center"] = [30, 2, 8, 8]
+        Path(args.rois).write_text(json.dumps(rois))
+    Path(args.manifest).write_text(json.dumps(source))
+    assert analyze(args) == 1
+    report = json.loads(next(Path(args.output).glob("*/manifest.json")).read_text())
+    assert not report["valid"] and report["error"] and report["outputs"] == []
+
+
+def test_capture_parser_records_page_description_and_offline_parser():
+    from lira.diagnostics.camera_quality import build_parser
+
+    parser = build_parser()
+    args = parser.parse_args(
+        [
+            "capture",
+            "--scene",
+            "book",
+            "--distance-cm",
+            "20",
+            "--page-description",
+            "open two-page book with pinyin",
+        ]
+    )
+    assert args.page_description == "open two-page book with pinyin"
+    offline = parser.parse_args(
+        ["analyze", "--manifest", "sample/manifest.json", "--rois", "rois.json"]
+    )
+    assert offline.command == "analyze"

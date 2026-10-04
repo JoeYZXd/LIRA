@@ -64,10 +64,13 @@ class V4l2IspCamera(Camera):
         self._tmp.unlink(missing_ok=True)
 
     async def capture(self) -> bytes:
-        """抓 NV12 → BGR → 简易软件 3A（模拟增益自适应）→ 数字补偿 → JPEG。"""
-        bgr = await self._capture_bgr_adaptive()
-        bgr = _digital_exposure(bgr)
-        ok, jpeg = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        """三帧择优（拉普拉斯方差最大 = 最锐利，抗手持抖动）→ 数字补偿 → JPEG。"""
+        candidates: list[np.ndarray] = []
+        for _ in range(3):
+            candidates.append(await self._capture_bgr_adaptive())
+        best = max(candidates, key=_sharpness)
+        best = _digital_exposure(best)
+        ok, jpeg = cv2.imencode(".jpg", best, [cv2.IMWRITE_JPEG_QUALITY, 88])
         if not ok:
             raise HalError("JPEG 编码失败")
         return jpeg.tobytes()
@@ -125,6 +128,12 @@ class V4l2IspCamera(Camera):
         yuv = buf.reshape((h * 3) // 2, w)
         bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
         return _apply_orientation(bgr, self.rotation, self.hflip)
+
+
+def _sharpness(bgr: np.ndarray) -> float:
+    """锐度度量：亮度图拉普拉斯方差（对焦/抖动的经典判据，越大越锐）。"""
+    y = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)[..., 0]
+    return float(cv2.Laplacian(y, cv2.CV_64F).var())
 
 
 def _apply_orientation(bgr: np.ndarray, rotation: int, hflip: bool) -> np.ndarray:

@@ -841,3 +841,17 @@ class TestConsoleErrorFeedback:
         # loadStatus / loadVoiceLog 失败路径写入面板主体（status-view / vl-view）
         assert "getElementById('status-view').textContent = '（' + msg + '）'" in page
         assert "getElementById('vl-view').textContent = '（' + msg + '）'" in page
+
+    def test_console_page_script_tags_balanced(self):
+        """回归防线（2026-10-05 实机问题）：19fb8b8 丢失 </script> 导致控制台
+        页 JS 整块不执行（两个面板永远"未加载"、1s 轮询不启动）。断言两个
+        页面的 <script> 与 </script> 成对，且 JS 主体可被闭合标签完整包裹。"""
+        import re
+
+        from lira.ui.dev import _dev_login_html, _dev_page_html
+
+        for html in (_dev_login_html(), _dev_page_html()):
+            assert html.count("<script>") == html.count("</script>") >= 1
+            assert re.search(r"<script>.*</script>", html, re.S), "script 块必须可完整提取"
+            # 结构顺序：闭合标签必须在 </body> 之前（吞掉 </body> 即语法错误）
+            assert html.index("</script>") < html.index("</body>")

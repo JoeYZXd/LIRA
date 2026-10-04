@@ -1006,5 +1006,5 @@ async function vlClear() {
   loadVoiceLog();
 }
 loadStatus();
-
+</script>
 </body></html>"""

@@ -168,17 +168,17 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
 
     - Mic = SoundDeviceMic（M4：FY-SP003U），Speaker = TTS 播放器（M6：ES8388，见
       build_audio_stack）。
-    - Camera = V4l2RawCamera（M3：OV13855@CAM1 裸 Bayer 路径）。
+    - Camera = V4l2IspCamera（RKISP NV12 管线；取代裸 Bayer 路径，见 camera_raw 模块注）。
     - Display 无触摸屏 -> MockDisplay（no-op 语义一致）。
     - IR 待 M5（BroadLink RM4 Mini 到货接 ``ir_broadlink``，传输层替换，链路不变），
       当前以 MockIrController 装配并明确告警：发射只记录、不生效。
     """
     from lira.audio.mic import SoundDeviceMic
-    from lira.hal.board import V4l2RawCamera
-    from lira.hal.board.camera_raw import DEFAULT_DEVICE
+    from lira.hal.board.camera_isp import V4l2IspCamera
 
     mic = SoundDeviceMic(device=_hal_device(cfg.hal.mic_device))
-    camera = V4l2RawCamera(device=cfg.hal.camera_device or DEFAULT_DEVICE)
+    # ISP 管线（NV12，干净帧）取代裸 Bayer 路径（板上实测条纹不可根治）
+    camera = V4l2IspCamera(device=cfg.hal.camera_device or "/dev/video11")
     ir = MockIrController()
     logging.warning(
         "IR 板上实现待 M5（BroadLink RM4 Mini）：当前装配 MockIrController，"
@@ -883,7 +883,7 @@ def print_assembly(cfg: AppConfig, privacy: PrivacyState) -> None:
     if cfg.hal.backend == "board":
         print(f"    mic       : SoundDeviceMic <- {cfg.hal.mic_device or '<系统默认设备>'}")
         print(f"    speaker   : SoundDevicePlayer <- {cfg.hal.speaker_device or '<PipeWire 默认>'}")
-        print(f"    camera    : V4l2RawCamera <- {cfg.hal.camera_device or '/dev/video0'}")
+        print(f"    camera    : V4l2IspCamera <- {cfg.hal.camera_device or '/dev/video11'}")
         print("    ir        : MockIrController（M5 BroadLink 到货前：只记录不发射）")
         print("    display   : MockDisplay（无触摸屏）")
     else:

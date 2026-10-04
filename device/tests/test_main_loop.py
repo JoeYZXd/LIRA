@@ -411,7 +411,7 @@ class TestAssemblyHelpers:
 
     def test_build_board_hal_constructs_and_warns(self, tmp_path, caplog):
         """board 后端装配不触硬件：构造成功 + IR 待 M5 告警可见。"""
-        from lira.hal.board import V4l2RawCamera
+        from lira.hal.board import V4l2IspCamera
         from lira.audio.mic import SoundDeviceMic
 
         yaml_text = (
@@ -424,7 +424,7 @@ class TestAssemblyHelpers:
         cfg = load_config(path, env={})
         with caplog.at_level(logging.WARNING):
             hal = build_board_hal(cfg)
-        assert isinstance(hal["camera"], V4l2RawCamera)
+        assert isinstance(hal["camera"], V4l2IspCamera)
         assert isinstance(hal["audio"], SoundDeviceMic)
         assert any("M5" in r.message for r in caplog.records)
 

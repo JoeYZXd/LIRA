@@ -221,6 +221,14 @@ ls -lh /tmp/frame.raw       # ≈16MB 即成功（注意：请求 4224 宽会被
 ISP 处理路径（media1 → NV12，rkcif→sditf→rkisp）留给真实 HAL `camera_rkisp.py` 实现时打通。
 `v4l-utils` 需 `apt install v4l-utils`。
 
+**⚠ 已知画质限制（2026-10-04 实测）**：裸 RAW 路径画面满幅细竖条纹 + 彩噪。
+证据链：条纹为固定图案（双帧列剖面相关 1.0、主周期 ~2.5px、幅度大、σ1.5
+模糊不可除）——疑似 MIPI 读出/打包层伪影，软件只能软化无法根治。已落地
+软件抑制组合（曝光固定上限 3210 + Bayer 域高通列校正 + 2D 低通/反锐化 +
+色度中值去噪 + 自动对比度 + gamma，`camera_raw.py`），色彩/对比度明显改善
+但条纹仍可见。**根治路线 = 打通 ISP mainpath NV12（camera_rkisp.py）**，
+届时 capture() 接口不变直接切换。OCR 场景待实测全分辨率下可读性。
+
 ### 2.5 M4：USB 麦阵
 
 ```bash

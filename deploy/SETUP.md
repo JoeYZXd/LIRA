@@ -49,10 +49,29 @@ python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
 # 首次启动（库文件 data/lira-backend.db 自动创建，权限 0600，WAL 模式）
-.venv/bin/python -m app          # 等价于 uvicorn app.main:create_app，0.0.0.0:8000
+.venv/bin/python -m app.main     # 入口 app/main.py:main -> uvicorn 0.0.0.0:8000
 ```
 
 后台启动后访问 `http://<后台机IP>:8000/`。
+
+**板上常驻（2026-10-04 起，推荐形态）**：后台与设备同机（Orange Pi 5B）常驻，
+systemd user unit `deploy/system/lira-backend.service` → 板上
+`~/.config/systemd/user/lira-backend.service`（Linger=yes 开机自启、
+`Restart=always` 崩溃自拉起、ExecStartPre 清 `__pycache__`，与设备主循环
+`lira.service` 同模式）：
+
+```bash
+# 板上：装依赖（一次）→ 装单元 → 自启
+cd ~/lira/backend && python3 -m venv .venv
+.venv/bin/pip install -e .   # 板上走 TUNA：加 -i https://pypi.tuna.tsinghua.edu.cn/simple
+cp ~/lira/deploy/system/lira-backend.service ~/.config/systemd/user/
+systemctl --user daemon-reload && systemctl --user enable --now lira-backend
+journalctl --user -u lira-backend -f
+```
+
+设备接入仍按 1.4：后台「注册设备」取一次性 token → 写入设备
+`device/config.yaml` 的 `sync.ws_url`（同机部署可用 `ws://127.0.0.1:8000/ws/device`）
+与 `sync.device_token` → 重启设备主循环。
 
 ### 1.3 管理员首启引导
 

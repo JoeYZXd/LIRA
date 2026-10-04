@@ -29,8 +29,9 @@ _CAPTURE_TIMEOUT_S = 15.0
 _TMP_NV12 = Path("/tmp/lira_isp_frame.raw")
 
 #: 数字曝光目标：帧均值亮度锚定（0-255）。干净帧上大力提亮的依据。
-_TARGET_LUMA = 115.0
-_GAMMA = 1.6
+_TARGET_LUMA = 120.0
+_GAMMA = 2.0
+_GAIN_CAP = 24.0
 
 
 class V4l2IspCamera(Camera):
@@ -88,15 +89,18 @@ class V4l2IspCamera(Camera):
 
 
 def _digital_exposure(bgr: np.ndarray) -> np.ndarray:
-    """数字曝光补偿：均值锚定 + 百分位 levels + gamma。
+    """数字曝光补偿：灰世界白平衡（去 LED 绿偏）+ 均值锚定 + levels + gamma。
 
     干净帧（ISP 去马赛克/降噪为硬件质量）上大幅提亮不会像裸帧那样放大
     条纹；过曝保护用 99.5 分位做白点钳制。
     """
+    from lira.hal.board.camera_raw import _gray_world_wb
+
+    bgr = _gray_world_wb(bgr, cap=2.5)
     ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
     y = ycrcb[..., 0].astype(np.float32)
     mean = float(y.mean())
-    gain = min(max(_TARGET_LUMA / max(mean, 1.0), 1.0), 12.0)
+    gain = min(max(_TARGET_LUMA / max(mean, 1.0), 1.0), _GAIN_CAP)
     y2 = y * gain
     lo, hi = np.percentile(y2, (0.5, 99.5))
     if hi - lo >= 10:

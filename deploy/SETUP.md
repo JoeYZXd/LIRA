@@ -261,6 +261,37 @@ ls /etc/iqfiles               # 期望: 镜像自带 3 个 json（imx219/ov13850
 画质差距的根源是**默认状态下无 3A**（原生帧近全黑），即 3A 才是决定性杠杆——
 支持进入阶段 B（安装官方 3A 栈拿画质上限）。
 
+**阶段 B 尝试记录（2026-10-04，结论：AE 反馈环不可适配，现状为终态）**：
+
+按计划（`docs/plans/2026-10-04-001-feat-camera-official-stack-plan.md`）完成：
+
+- 板上原生编译 rkaiq 两个版本：Firefly `rk3588/firefly`（**v5.0x4.1**，2023-10-23）与
+  JeffyCN `rkaiq-2024_04_08` tag（**v6.0x6.1**，2024-03-03）；编译补丁三处
+  （j2s 宿主工具 x86 flag、-Werror、j2s4b_dev 安装前缀）+ drm 头文件垫片
+  （`/usr/include/libdrm` 平铺布局适配）
+- IQ 文件 `ov13855_CMK-OT2016-FV1_default.json` 已装 `/etc/iqfiles/`（与设备树
+  module/lens 名实测吻合；镜像自带 /etc/iqfiles 但无 ov13855 项、无守护进程二进制）
+- 部署 `~/rkaiq-v6/{bin,lib}`（v5 在 `~/rkaiq/`）+ 手动启停脚本 `~/rkaiq-v6/start-daemon.sh`
+  （**无自启单元**）
+
+**失败定位（证据链）**：
+
+1. v5.0x4.1：拓扑识别失败（"can't find sensor"）+ IQ 新代际枚举不认识——5.10 时代产物，
+   预期排除
+2. v6.0x6.1：init/prepare/start 全通、params 正常下发（内核 `first params buf queue`）、
+   流启停联动正常、CPU 占用可忽略、与采集共存无冲突——但 **AE 冻结**（exposure 289/gain 128
+   恒定，画面近全黑 luma 0.75）。debug 日志钉死断点：`AEC:D:ae_stat == NULL`——
+   **守护进程打开了统计节点（video18）但从未 STREAMON**（内核无任何统计缓冲入队日志）；
+   算法侧零统计输入 → 不更新
+3. 内核统计路径**独立验证健康**：主链路流期间手动收 video18，3 个统计缓冲正常交付
+   （48KB）——问题锁定在 rkaiq 引擎统计线程与本机 vendor 内核（rk35xx 6.1 BSP）的适配深度，
+   非快速可修
+
+**终态**：守护进程已停止、无自启单元；采集主路径维持软件 3A（`camera_isp.py`）。
+板上产物保留（`~/rkaiq-v6/`、`~/build/rkaiq-v6-src/`），后续若要续查：断点是 rkaiq
+统计线程适配，建议对照 Radxa/FriendlyELEC 同内核的打包差异（其 6.1 BSP 的 rkisp
+驱动配置/补丁差异）——属于 follow-up,不在本计划范围。
+
 ### 2.5 M4：USB 麦阵
 
 ```bash
@@ -391,6 +422,7 @@ dev_console:
 | TTS | RTF / 首包延迟 | **RTF 0.27**（0.48s 合成 1.8s 语音），load 3.3s，matcha+vocos @CPU | 2026-10-03 |
 | OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；软件接线已完成（2026-10-03），板上全链路实测待执行 | 2026-10-03 |
 | 阶段A | 官方栈基准对照验证 | 传输层全部核对无误（media1 拓扑/传感器能力/DT 命名 CMK-OT2016-FV1→IQ 名吻合）；镜像**带 /etc/iqfiles（3 json）但不带 rkaiq 守护进程**；同场景对照：原生帧均值 2.96（近全黑）vs 现管线 126.2——用法正确，画质差距根源=无 3A，支持进阶段 B | 2026-10-04 |
+| 阶段B | rkaiq 官方 3A 栈引入 | 板上原生编译 v5.0x4.1（Firefly）与 v6.0x6.1（JeffyCN rkaiq-2024_04_08）；v6 守护进程 init/IQ/params/流联动全通、CPU 可忽略，但 **AE 反馈环断**（守护进程不 STREAMON 统计节点→`ae_stat==NULL`→曝光冻结 289/128 画面近黑）；内核统计路径独立验证健康。按 R8 落档收工：守护进程停止、无自启、主路径维持软件 3A；产物留板 `~/rkaiq-v6/`。详见 §2.4 阶段 B 记录 | 2026-10-04 |
 | 资源 | 内存峰值 / NPU 占用 / 温度（含散热壳） | 待填 | — |
 
 > **M0 实测附注**（2026-10-02）：镜像自带 zram0 swap（3.9G，RAM 介质，不磨损 eMMC——

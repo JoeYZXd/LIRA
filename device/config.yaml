@@ -22,8 +22,11 @@ hal:
   mock_images_dir: assets/mock_images   # 相对路径按仓库根解析
   mock_audio_dir: assets/mock_audio
   # M7：板上设备号固化（空串 = 系统默认；数值串 = sounddevice 序号）
-  mic_device: ""           # 板上: FY-SP003U（M4 实测 card 3），如 "3" 或设备名子串
-  speaker_device: ""       # 板上: 板载 ES8388 线路输出（M6 实测 card 2），如 "2"
+  mic_device: ""           # 板上: 一律 "pipewire"（经 PipeWire 默认源=USB麦阵 card3）。
+                           # 注意 PortAudio 序号≠ALSA 卡号（序号"3"是 sysdefault 无输入）；
+                           # 实测依据见 SETUP.md 2.8 / deploy/system/lira.service
+  speaker_device: ""       # 板上: 一律 "pipewire"（经 PipeWire 默认汇=ES8388 card2）。
+                           # ES8388 hw 直开 22050 被拒（ALSA -22），必须走插件做格式转换
   camera_device: ""        # 板上: OV13855@CAM1 → /dev/video0（M3 实测）
 
 # U7：设备 Web UI（局域网浏览器访问；M7 起随主循环 in-process 挂载）

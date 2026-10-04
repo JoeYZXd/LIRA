@@ -339,7 +339,10 @@ gpio-ir/ir-ctl 路线，改用 **BroadLink RM4 Mini**（约 40~90 元）：USB �
 > **软件接线已完成（2026-10-03）**：`lira/main.py` 主循环（隐私门 → 路由分发 →
 > 状态机 → TTS/IR/阅读管线）、`lira/sync_ws.py` 真实 WS 同步传输（断线指数退避重连）、
 > UI in-process 挂载、`--dry-run` 装配图（含板上设备号与模型就绪探测）。x86 单元 + e2e
-> 全绿；**板上执行下述步骤属 M7 实机验证，尚未进行**。
+> 全绿；**语音唤醒→ASR→LLM 对话链路已于 2026-10-04 实机验证通过**（真麦 KWS 命中
+> "小丽拉"→ 播"我在听"→ GLM 远程调用 200 OK/2.5s； systemd user unit 常驻 +
+> 开机自启，见 ④）；阅读/视觉链路经开发者控制台实机使用中（vision/OCR 事件正常）。
+> 同步（ws_url）与 IR（BroadLink 待到货）仍待接。
 
 **① 依赖与安装**（extras 名以 `device/pyproject.toml` 为准）：
 
@@ -355,8 +358,11 @@ cd ~/lira/device && python3 -m venv .venv
 ```yaml
 hal:
   backend: board          # mock | board
-  mic_device: "3"         # FY-SP003U（M4 实测 card 3）；设备名子串或序号
-  speaker_device: "2"     # 板载 ES8388 线路输出（M6 实测 card 2）
+  mic_device: "pipewire"    # 经 PipeWire 默认源=FY-SP003U（M4 实测 card 3）。
+                            # ⚠ 勿填数字序号：PortAudio 序号≠ALSA 卡号（序号"3"是
+                            # sysdefault，无输入通道）；USB 麦阵仅经插件可见（2026-10-04 实测）
+  speaker_device: "pipewire"  # 经 PipeWire 默认汇=板载 ES8388 线路输出（M6 实测 card 2）。
+                              # ES8388 hw 直开 22050 被拒（ALSA -22），必须走插件做格式转换
   camera_device: ""       # /dev/video0（OV13855@CAM1，M3）
 ui:
   host: 0.0.0.0
@@ -395,6 +401,22 @@ dev_console:
   `python -m lira.main` 为准，实机核对后固化 unit 文件。
 - 重启验证：开机自动进入待机，无人工干预。
 
+**④ systemd 常驻（2026-10-04 完成）**：
+
+- unit：`deploy/system/lira.service` → 板上 `~/.config/systemd/user/lira.service`
+  （**user unit**：主循环依赖 orangepi 用户的 PipeWire 会话；镜像 `Linger=yes` 已开，
+  开机自启无需桌面登录）。`ExecStartPre` 沿用 start-lira.sh 的清 `__pycache__` 纪律。
+- 已执行：`systemctl --user daemon-reload && systemctl --user enable --now lira`；
+  崩溃自拉起（`Restart=always`，3s）。手动重启入口 `deploy/start-lira.sh` 已改为
+  `systemctl --user restart lira` 薄封装（勿再直接 nohup——会与 unit 双开抢麦）。
+- 日志改走 journald：`journalctl --user -u lira -f`（原 /tmp/lira.log 不再更新）。
+- 实机验证（2026-10-04）：服务 active、`采集已启动 @ pipewire`（设备号钉死生效）、
+  KWS/ASR/TTS/摄像头加载、UI 200；10 分钟 soak 复核通过（待机唤醒 4/4、漏触 0、
+  误触 0，见 2.10 KWS 行）。
+- 仍属后续的存量纪律项：journald `Storage=volatile` / log2ram / fstab `noatime`
+  / thermal governor 核对（M0 附注：镜像自带 zram swap 与 /var/log zram1，
+  已部分覆盖 R18 意图）。
+
 ### 2.9 冒烟清单（全部里程碑后执行）
 
 1. 唤醒词唤醒（提示音 + "我在听"）→ 拍报纸 → 朗读；
@@ -417,8 +439,9 @@ dev_console:
 | M4 | 麦阵 / 采集验证 | FY-SP003U 双麦（USB，card 3），`plughw:3,0` 16k/S16LE/stereo 录音 ✓；回放经蓝牙音箱 ✓。板载 ES8388 = card 2（3.5mm 口，M6 本地喇叭用） | 2026-10-02 |
 | M5 | 红外学习/回放 | 待 BroadLink RM4 Mini 到货（2026-10-03 改道，见 2.6） | — |
 | M6 | 本地喇叭出声 | USB 有源音箱（3.5mm AUX）← 板载 ES8388 card 2 ✓；软音量经 PipeWire；PAM8403 方案取消 | 2026-10-03 |
-| KWS | 唤醒词误触/漏触（实机 10 分钟） | 白名单@pause.wav 命中"暂停"✓；wake@非唤醒语 None ✓（夹具验证）；真麦 10 分钟误触/漏触待冒烟 | 2026-10-03 |
-| ASR | 流式 RTF | confirm.wav → "确认" ✓（夹具）；流式 RTF 与真麦切句待冒烟 | 2026-10-03 |
+| M7 | 唤醒→对话链路实机 + 常驻 | systemd user unit 常驻（Linger 开机自启、Restart=always）、音频设备号钉死 `pipewire` 子串；真麦 唤醒→ASR→GLM（200 OK/1~3s）→TTS 全链路 ✓；UI 200；详见 2.8 ④ | 2026-10-04 |
+| KWS | 唤醒词误触/漏触（实机 10 分钟） | 夹具 0.1~0.25 四档阈值全命中、负样本零误触（2026-10-03）；**实机 soak：待机态唤醒 4/4 漏触 0、误触 0**——背景为持续大音量外来语视频语音（峰值削波），每次命中均完成唤醒→指令→GLM 回复全链路；另 2 次对话态重复唤醒被状态机按设计抑制（离线复核检出、实时正确不响应） | 2026-10-04 |
+| ASR | 流式 RTF | confirm.wav → "确认" ✓（夹具）；**真麦切句实机验证通过**（2026-10-04 soak：嘈杂背景下 4 条唤醒后指令全部正确切句并路由 LLM）；RTF 精确值未单独测量 | 2026-10-04 |
 | TTS | RTF / 首包延迟 | **RTF 0.27**（0.48s 合成 1.8s 语音），load 3.3s，matcha+vocos @CPU | 2026-10-03 |
 | OCR | 端到端时延（拍摄→TTS 首音） | 图→文本 0.40s（900×700 中文测试图，6/6 行检出，det i8@core0 + rec fp16@core1，2026-10-03 冒烟）；软件接线已完成（2026-10-03），板上全链路实测待执行 | 2026-10-03 |
 | 阶段A | 官方栈基准对照验证 | 传输层全部核对无误（media1 拓扑/传感器能力/DT 命名 CMK-OT2016-FV1→IQ 名吻合）；镜像**带 /etc/iqfiles（3 json）但不带 rkaiq 守护进程**；同场景对照：原生帧均值 2.96（近全黑）vs 现管线 126.2——用法正确，画质差距根源=无 3A，支持进阶段 B | 2026-10-04 |

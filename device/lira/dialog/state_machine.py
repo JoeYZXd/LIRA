@@ -37,6 +37,7 @@ from lira.dialog.intents import (
     is_playback_command,
 )
 from lira.dialog.router import Router, RouterTier
+from lira.voice_log import VOICE_LOG
 
 __all__ = ["State", "AudioRoute", "DialogCallbacks", "DialogEngine"]
 
@@ -393,6 +394,7 @@ class DialogEngine:
         if not initial:
             self.transitions.append(f"{old.value}->{new.value}")
         self._cb.set_audio_route(_ROUTE_BY_STATE[new])
+        _voice_log_state(new, initial=initial)
 
     def _enter_standby(self) -> None:
         self._abort_capture()
@@ -412,3 +414,26 @@ class DialogEngine:
         task, self._capture_task = self._capture_task, None
         if task is not None and hasattr(task, "cancel"):
             task.cancel()
+
+
+#: 状态 -> 语音交互日志文案（dev 展示面；STANDBY 文案按来源二分，见 _voice_log_state）
+_STATE_VOICE_LABELS = {
+    State.LISTENING: "聆听：等待语音指令",
+    State.EXECUTING: "指令执行中",
+    State.CONFIRMING: "高危设备：等待语音确认",
+    State.CAPTURING: "拍摄取书中",
+    State.READING: "朗读中",
+}
+
+
+def _voice_log_state(new: State, *, initial: bool) -> None:
+    """状态流转写入语音交互日志（lira.voice_log：内存展示区，不落盘）。"""
+    if new is State.STANDBY:
+        label = (
+            "待机：持续等待唤醒中"
+            if initial
+            else "退出唤醒状态，回到待机，等待下次唤醒"
+        )
+    else:
+        label = _STATE_VOICE_LABELS[new]
+    VOICE_LOG.log("state", label)

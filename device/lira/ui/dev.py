@@ -347,6 +347,30 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
 
         return JSONResponse({"lines": RING_LOG_HANDLER.snapshot()[-100:]})
 
+    @app.get("/dev/api/voice-log")
+    async def dev_voice_log(request: Request):
+        """语音交互日志（内存环形区；条目可含识别/回复文本——展示通道特例）。"""
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        from lira.voice_log import VOICE_LOG
+
+        return JSONResponse({
+            "entries": [e.to_json() for e in VOICE_LOG.snapshot()],
+            "state": handle.runtime.engine.state.value,
+        })
+
+    @app.post("/dev/api/voice-log/clear")
+    async def dev_voice_log_clear(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        from lira.voice_log import VOICE_LOG
+
+        VOICE_LOG.clear()
+        logger.info("dev event=voice_log_clear")
+        return JSONResponse({"ok": True})
+
     @app.post("/dev/api/loglevel")
     async def dev_loglevel(request: Request):
         denied = _require_session(request, api=True)
@@ -704,6 +728,11 @@ def _dev_page_html() -> str:
  pre{background:#f6f6f6;padding:8px;white-space:pre-wrap;max-height:280px;overflow:auto}
  input,select{margin:4px;padding:4px} .row{margin:6px 0}
  .muted{color:#666;font-size:13px} .ok{color:#0a0} .err{color:#c00}
+ .vl-view{max-height:320px;overflow:auto;background:#f6f6f6;padding:8px;font-size:13px}
+ .vl-row{padding:2px 0;border-bottom:1px dashed #e4e4e4}
+ .vl-ts{color:#888;font-family:monospace} .vl-kind{font-weight:600}
+ .vl-wake .vl-kind{color:#b60} .vl-llm .vl-kind{color:#06c}
+ .vl-speak .vl-kind{color:#090} .vl-bad{color:#c00}
 </style></head><body>
 <h1>LIRA 开发者控制台</h1>
 
@@ -733,6 +762,15 @@ def _dev_page_html() -> str:
   <h2>运行日志（最近 100 条）</h2>
   <div class="row"><button onclick="loadLogs()">刷新日志</button><span id="log-out"></span></div>
   <pre id="log-view">（未加载）</pre>
+</section>
+
+<section id="sec-voicelog">
+  <h2>语音交互日志（实时）</h2>
+  <div class="row">
+    <label><input type="checkbox" id="vl-auto" checked onchange="vlAuto(this)"> 自动刷新（1s）</label>
+    <button onclick="vlClear()">清空</button>
+    <span id="vl-out" class="muted"></span></div>
+  <div id="vl-view" class="vl-view">（未加载）</div>
 </section>
 
 <section id="sec-voice">
@@ -908,6 +946,33 @@ async function replay(confirm) {
     '迁移: ' + (r.body.transitions || []).join(' -> ') + '\\n播报: ' + (r.body.spoken || []).join(' | ');
   out('replay-out', '完成', 'ok');
 }
+let vlTimer = setInterval(loadVoiceLog, 1000);
+function vlAuto(cb) {
+  clearInterval(vlTimer);
+  if (cb.checked) vlTimer = setInterval(loadVoiceLog, 1000);
+}
+function vlEscape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+async function loadVoiceLog() {
+  const r = await api('/dev/api/voice-log');
+  if (r.status !== 200) return out('vl-out', '加载失败: ' + r.status, 'err');
+  const es = r.body.entries || [];
+  const view = document.getElementById('vl-view');
+  if (es.length === 0) { view.innerHTML = '（暂无语音交互，说一句“小丽拉”试试）'; }
+  else {
+    const tag = {state:'', wake:'唤醒', asr:'识别', playback:'播放控制', llm:'LLM', llm_reply:'LLM', llm_fail:'LLM', speak:'播报', privacy:'隐私'};
+    const cls = {wake:'vl-wake', llm:'vl-llm', llm_reply:'vl-llm', speak:'vl-speak', llm_fail:'vl-bad', privacy:'vl-bad'};
+    view.innerHTML = es.slice().reverse().map(e => {
+      const t = new Date(e.ts * 1000).toLocaleTimeString('zh-CN', {hour12: false});
+      return '<div class="vl-row ' + (cls[e.kind]||'') + '"><span class="vl-ts">' + t +
+        '</span> <span class="vl-kind">[' + (tag[e.kind]||e.kind) + ']</span> ' + vlEscape(e.text) + '</div>';
+    }).join('');
+  }
+  out('vl-out', es.length + ' 条 · 引擎=' + r.body.state, 'ok');
+}
+async function vlClear() {
+  await api('/dev/api/voice-log/clear', {method: 'POST', body: '{}'});
+  loadVoiceLog();
+}
 loadStatus();
-</script>
+
 </body></html>"""

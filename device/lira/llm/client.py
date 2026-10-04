@@ -35,6 +35,7 @@ from lira.llm.prompts import (
     is_complex_text,
     is_medical_text,
 )
+from lira.voice_log import VOICE_LOG
 
 __all__ = [
     "LlmClient",
@@ -109,6 +110,7 @@ class LlmClient:
         # 隐私拦截在入口：任何网络活动之前（R12 fail-closed，AE1）
         if self._privacy():
             logger.info("llm.chat blocked_by=privacy")
+            VOICE_LOG.log("privacy", "隐私模式开启，远程调用已拦截")
             raise PrivacyBlocked("隐私模式开启，已拦截远程调用")
 
         messages: list[dict[str, str]] = []
@@ -116,6 +118,9 @@ class LlmClient:
             messages.append({"role": "system", "content": system})
         messages.append({"role": "user", "content": prompt})
 
+        # 语音交互日志（lira.voice_log 内存展示区）可含回复片段；
+        # logging 行"prompt/回复内容不落日志"纪律不受影响
+        VOICE_LOG.log("llm", f"与大模型交互中（提示 {len(prompt)} 字）…")
         started = time.monotonic()
         try:
             text = await self._stream_chat(messages)
@@ -123,15 +128,19 @@ class LlmClient:
             # 含 APITimeoutError（其父类是 APIConnectionError），由熔断器计数
             self._breaker.record_failure()
             logger.info("llm.chat event=conn_error elapsed=%.3fs", time.monotonic() - started)
+            VOICE_LOG.log("llm_fail", "大模型连接失败，已降级")
             raise LlmError("远程服务连接失败") from exc
         except APIStatusError as exc:
             # 5xx 计入熔断（服务端持续故障应开断路）；4xx 属配置问题不计
             if exc.status_code >= 500:
                 self._breaker.record_failure()
             logger.info("llm.chat event=http_%d elapsed=%.3fs", exc.status_code, time.monotonic() - started)
+            VOICE_LOG.log("llm_fail", f"大模型返回错误（HTTP {exc.status_code}），已降级")
             raise LlmError("远程服务返回错误") from exc
         self._breaker.record_success()
         logger.info("llm.chat event=ok elapsed=%.3fs", time.monotonic() - started)
+        preview = text if len(text) <= 80 else text[:80] + "…"
+        VOICE_LOG.log("llm_reply", f"大模型返回结果（{len(text)} 字）：{preview}")
         return text
 
     async def _stream_chat(self, messages: list[dict[str, str]]) -> str:

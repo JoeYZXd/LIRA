@@ -63,6 +63,7 @@ from lira.privacy import (
 from lira.llm.client import make_text_polisher
 from lira.sync import SyncClient, make_snapshot_announcer
 from lira.sync_ws import WsSyncTransport
+from lira.voice_log import VOICE_LOG
 from lira.vision.reading import ReadingPipeline, TtsBlockSpeaker
 
 __all__ = [
@@ -332,6 +333,9 @@ class DeviceCallbacks:
     def speak(self, text: str) -> None:
         # 最近播报环形记录（内存，不落盘；dev 回放/状态区展示面）
         self._rt.recent_speaks.append(text)
+        # 语音交互日志（内存展示区，可含话术片段；logging 行纪律不变）
+        preview = text if len(text) <= 40 else text[:40] + "…"
+        VOICE_LOG.log("speak", f"语音输出中（{len(text)} 字）：{preview}")
         tts = self._rt.tts
         if tts is None:
             # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志

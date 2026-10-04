@@ -12,6 +12,7 @@ asr_stream / playback_stream / wakeword），分发器无自身状态。
 from __future__ import annotations
 
 from lira.dialog.state_machine import AudioRoute
+from lira.voice_log import VOICE_LOG
 
 __all__ = ["RouteDispatch"]
 
@@ -37,6 +38,9 @@ class RouteDispatch:
         if route is AudioRoute.WAKE and rt.wake_stream is not None:
             hit = rt.wake_stream.feed_and_poll(samples)
             if hit and self._wakeword in hit:
+                # 语音交互日志为内存展示区（lira.voice_log），可含词面；
+                # logging 行的"识别内容不落日志"纪律不受影响
+                VOICE_LOG.log("wake", f"收到语音唤醒（{self._wakeword}）")
                 self._spawn(rt.engine.on_wake())
         elif route is AudioRoute.LISTEN and rt.asr_stream is not None:
             rt.asr_stream.feed(samples)
@@ -46,8 +50,11 @@ class RouteDispatch:
                 text = rt.asr_stream.text().strip()
                 rt.asr_stream.reset()
                 if text:
+                    VOICE_LOG.log("asr", f"识别到指令：{text}")
                     self._spawn(rt.engine.on_asr_text(text))
         elif route is AudioRoute.PLAYBACK and rt.playback_stream is not None:
             hit = rt.playback_stream.feed_and_poll(samples)
             if hit:
-                self._spawn(rt.engine.on_asr_text(hit.split("@")[-1].strip()))
+                word = hit.split("@")[-1].strip()
+                VOICE_LOG.log("playback", f"播放控制语音：{word}")
+                self._spawn(rt.engine.on_asr_text(word))

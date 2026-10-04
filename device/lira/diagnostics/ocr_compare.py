@@ -20,7 +20,7 @@ from lira.vision.engine import OcrEngine
 
 def normalize(text: str) -> str:
     """NFC and remove Unicode whitespace on both sides; preserve punctuation."""
-    return "".join(c for c in unicodedata.normalize("NFC", text) if not c.isspace())
+    return "".join(unicodedata.normalize("NFC", text).split())
 
 
 def score(reference: str, recognized: str) -> dict:
@@ -44,9 +44,8 @@ def score(reference: str, recognized: str) -> dict:
             deletion = (d + 1, s, deleted + 1, inserted)
             d, s, deleted, inserted = current[j - 1]
             insertion = (d + 1, s, deleted, inserted + 1)
-            current.append(
-                min((diagonal, deletion, insertion), key=lambda cell: cell[0])
-            )
+            best = diagonal if diagonal[0] <= deletion[0] else deletion
+            current.append(best if best[0] <= insertion[0] else insertion)
         previous = current
     distance, substitutions, deletions, insertions = previous[-1]
     return {
@@ -66,7 +65,11 @@ def score(reference: str, recognized: str) -> dict:
 
 
 def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
+    hasher = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()
 
 
 def write_json(path: Path, value) -> None:

@@ -5,25 +5,26 @@ records define serialized frame boundaries; sizeimage is capacity, not payload.
 """
 
 from __future__ import annotations
+
 import argparse
 import asyncio
 import contextlib
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import signal
 import sys
 import time
 import uuid
+from pathlib import Path
 
 CONTROLS = ("vertical_blanking", "exposure", "analogue_gain")
 
 
 def parse_format(raw):
     def field(pattern):
-        m = re.search(pattern, raw, re.M)
+        m = re.search(pattern, raw, re.MULTILINE)
         if not m:
             raise ValueError("Missing/ambiguous format field: " + pattern)
         return m
@@ -54,20 +55,20 @@ def parse_format(raw):
         for k, v in re.findall(
             r"^\s*(Colorspace|Transfer Function|YCbCr/HSV Encoding|Quantization|Field)\s*:\s*(.+)$",
             raw,
-            re.M,
+            re.MULTILINE,
         )
     }
     if metadata.get("Field", "None").lower() not in ("none", "any"):
         raise ValueError("Interlaced NV12 unsupported")
-    return dict(
-        width=w,
-        height=h,
-        pixelformat=pixel,
-        planes=1,
-        bytesperline=stride,
-        sizeimage=capacity,
-        color=metadata,
-    )
+    return {
+        "width": w,
+        "height": h,
+        "pixelformat": pixel,
+        "planes": 1,
+        "bytesperline": stride,
+        "sizeimage": capacity,
+        "color": metadata,
+    }
 
 
 def decode_nv12(payload, fmt):
@@ -145,7 +146,7 @@ async def run_process(args, timeout=20):
         if proc.returncode is None:
             try:
                 await asyncio.wait_for(proc.wait(), 1)
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 with contextlib.suppress(ProcessLookupError):
                     os.killpg(proc.pid, signal.SIGKILL)
                 await proc.wait()
@@ -165,7 +166,7 @@ class DeviceLock:
         self.file = self.path.open("a+")
         try:
             fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BaseException:
+        except BaseException:  # noqa: BLE001 - close lock file on cancellation too
             self.file.close()
             raise RuntimeError("Another diagnostic capture owns the camera lock")
         return self
@@ -217,7 +218,9 @@ def external_owners(nodes, proc_root=Path("/proc"), coverage=None):
         except PermissionError:
             unavailable.append({"pid": int(pid.name), "check": "fd table"})
         if known or opened:
-            owners.append(dict(pid=int(pid.name), command=cmd or comm, nodes=opened))
+            owners.append(
+                {"pid": int(pid.name), "command": cmd or comm, "nodes": opened}
+            )
     if coverage is not None:
         coverage.update(
             {
@@ -325,7 +328,7 @@ class CameraSession:
                         actual[k]["value"] != old[k]["value"] for k in CONTROLS
                     ):
                         raise RuntimeError("Restore readback differs from snapshot")
-            except Exception as e:
+            except Exception as e:  # noqa: BLE001 - attempt every restoration action
                 errors.append(f"{action}: {e}")
         self.m["restore"] = {"ok": not errors, "errors": errors}
 
@@ -477,7 +480,7 @@ async def capture(args):
             finally:
                 await finish_restore(session.restore())
             m["valid"] = m["capture_ok"] and m["restore"]["ok"]
-    except BaseException as e:
+    except BaseException as e:  # noqa: BLE001 - retain interrupted capture manifest
         m["error"] = f"{type(e).__name__}: {e}"
     finally:
         write_json(output / "manifest.json", m)
@@ -507,6 +510,7 @@ def validate_rois(rois, width, height):
 
 def image_metrics(image):
     import cv2
+
     from lira.hal.board.camera_isp import _sharpness
 
     y = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)[..., 0]
@@ -521,6 +525,7 @@ def image_metrics(image):
 def registration_evidence(frames, aligned):
     import cv2
     import numpy as np
+
     from lira.hal.board.camera_isp import _ALIGN_MAX_SHIFT
 
     shifts = []
@@ -561,14 +566,15 @@ def analyze(args):
     """Offline replay from validated original NV12; never opens a camera."""
     import cv2
     import numpy as np
+
     from lira.hal.board.camera_isp import (
-        _apply_orientation,
-        _merge_frames,
-        _digital_exposure,
-        _TARGET_LUMA,
-        _GAMMA,
-        _GAIN_CAP,
         _ALIGN_MAX_SHIFT,
+        _GAIN_CAP,
+        _GAMMA,
+        _TARGET_LUMA,
+        _apply_orientation,
+        _digital_exposure,
+        _merge_frames,
     )
 
     output = Path(args.output) / (
@@ -724,7 +730,7 @@ def analyze(args):
             raise ValueError("JPEG decode failed")
         save("jpeg-decoded", decoded)
         m["valid"] = True
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001 - retain offline failure evidence
         m["error"] = f"{type(exc).__name__}: {exc}"
     finally:
         write_json(output / "manifest.json", m)
@@ -807,7 +813,7 @@ def main():
     args = build_parser().parse_args()
     try:
         return asyncio.run(dispatch(args))
-    except (Exception, KeyboardInterrupt) as e:
+    except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001 - CLI error exit
         print(f"{type(e).__name__}: {e}", file=sys.stderr)
         return 1
 

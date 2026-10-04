@@ -1,10 +1,11 @@
 import numpy as np
 import pytest
+
 from lira.diagnostics.camera_quality import (
-    parse_format,
     decode_nv12,
-    split_frames,
     parse_controls,
+    parse_format,
+    split_frames,
 )
 
 FMT = """Format Video Capture Multiplanar:
@@ -52,16 +53,16 @@ def test_controls_keep_range_and_current():
 
 import asyncio
 import json
-import os
 import sys
 from pathlib import Path
 from types import SimpleNamespace
+
 from lira.diagnostics.camera_quality import (
     CameraSession,
     DeviceLock,
+    capture,
     external_owners,
     run_process,
-    capture,
 )
 
 
@@ -141,10 +142,9 @@ def test_clamped_readback_and_restore_failure_are_recorded():
 
 
 def test_lock_and_external_owners(tmp_path):
-    with DeviceLock(tmp_path / "lock"):
-        with pytest.raises(RuntimeError):
-            with DeviceLock(tmp_path / "lock"):
-                pass
+    with DeviceLock(tmp_path / "lock"), pytest.raises(RuntimeError):  # noqa: SIM117 - first lock must succeed before expected second failure
+        with DeviceLock(tmp_path / "lock"):
+            pass
     proc = tmp_path / "proc"
     pid = proc / "99999"
     (pid / "fd").mkdir(parents=True)
@@ -252,8 +252,9 @@ def test_ownership_permission_denied_reports_incomplete_coverage(tmp_path, monke
 
 def test_production_registration_shift_direction_characterization():
     import cv2
-    from lira.hal.board.camera_isp import _merge_frames
+
     from lira.diagnostics.camera_quality import registration_evidence
+    from lira.hal.board.camera_isp import _merge_frames
 
     ref = np.full((160, 512, 3), 255, np.uint8)
     cv2.putText(
@@ -287,8 +288,10 @@ def test_production_registration_shift_direction_characterization():
 
 
 def stage_fixture(tmp_path, count=3, rotation=0):
-    import cv2
     import hashlib
+
+    import cv2
+
     from lira.diagnostics.camera_quality import ROI_NAMES
 
     source = tmp_path / "capture"
@@ -339,12 +342,13 @@ def stage_fixture(tmp_path, count=3, rotation=0):
 
 def test_offline_stages_same_batch_and_inputs_untouched(tmp_path, monkeypatch):
     import cv2
+
+    import lira.diagnostics.camera_quality as mod
     from lira.hal.board.camera_isp import (
         _apply_orientation,
-        _merge_frames,
         _digital_exposure,
+        _merge_frames,
     )
-    import lira.diagnostics.camera_quality as mod
 
     args, source = stage_fixture(tmp_path, rotation=90)
     before = {p: p.read_bytes() for p in Path(args.manifest).parent.iterdir()}

@@ -13,7 +13,6 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 from pathlib import Path
 
 import cv2
@@ -27,11 +26,20 @@ _ISP_DEVICE = "/dev/video11"
 _SUBDEV_GLOB = "/dev/v4l-subdev*"
 _CAPTURE_TIMEOUT_S = 15.0
 _TMP_NV12 = Path("/tmp/lira_isp_frame.raw")
+_SENSOR_SUBDEV = "/dev/v4l-subdev2"  # M3：OV13855@CAM1 的传感器子设备
 
-#: 数字曝光目标：帧均值亮度锚定（0-255）。干净帧上大力提亮的依据。
+#: 数字曝光目标：帧均值亮度锚定（0-255）。模拟增益打底后的轻量数字补偿。
 _TARGET_LUMA = 120.0
 _GAMMA = 2.0
-_GAIN_CAP = 24.0
+_GAIN_CAP = 3.0
+
+#: 传感器曝光/增益（板上实测）：曝光上限 3210 行 ≈ 1 帧时；增益 128-1984
+#: （128 时室内均值 ~5，1984 时 ~72——模拟增益是最有效的亮度杠杆）
+_EXP_MAX = 3210
+_GAIN_DARK = 1984
+_GAIN_BRIGHT = 384
+_LUMA_LOW = 70.0
+_LUMA_HIGH = 190.0
 
 
 class V4l2IspCamera(Camera):
@@ -42,25 +50,56 @@ class V4l2IspCamera(Camera):
         self._tmp = _TMP_NV12
 
     async def open(self) -> None:
-        """探测 ISP mainpath 节点，并把传感器曝光 best-effort 固定到上限。"""
+        """探测 ISP mainpath 节点，并把传感器曝光固定到上限。"""
         if not Path(self.device).exists():
             raise HalError(f"ISP mainpath 节点不存在: {self.device}（检查相机 overlay）")
-        for subdev in sorted(Path("/dev").glob("v4l-subdev*")):
-            proc = await asyncio.create_subprocess_exec(
-                "v4l2-ctl", "-d", str(subdev), "-c", "exposure=3210",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            rc = await proc.wait()
-            if rc == 0:
-                logging.info("camera exposure set to 3210 via %s", subdev)
-                break
+        await self._sensor_set("exposure", _EXP_MAX)
+        self._sensor_gain = 1024  # 自适应起点（暗室起步，亮场景首拍后下调）
 
     async def close(self) -> None:
         self._tmp.unlink(missing_ok=True)
 
     async def capture(self) -> bytes:
-        """抓 NV12 → BGR → 数字曝光补偿（均值锚定）→ JPEG。"""
+        """抓 NV12 → BGR → 简易软件 3A（模拟增益自适应）→ 数字补偿 → JPEG。"""
+        bgr = await self._capture_bgr_adaptive()
+        bgr = _digital_exposure(bgr)
+        ok, jpeg = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
+        if not ok:
+            raise HalError("JPEG 编码失败")
+        return jpeg.tobytes()
+
+    async def _sensor_set(self, ctrl: str, value: int) -> bool:
+        proc = await asyncio.create_subprocess_exec(
+            "v4l2-ctl", "-d", _SENSOR_SUBDEV, "-c", "%s=%d" % (ctrl, value),
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        return (await proc.wait()) == 0
+
+    def _luma_mean(self, bgr: np.ndarray) -> float:
+        return float(cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)[..., 0].mean())
+
+    async def _capture_bgr_adaptive(self) -> np.ndarray:
+        """单次自适应采集：暗室起步高增益；过暗/过亮按比例调增益重拍一次。"""
+        gain = getattr(self, "_sensor_gain", 1024)
+        bgr = await self._capture_bgr(gain)
+        mean = self._luma_mean(bgr)
+        if mean < _LUMA_LOW and gain < _GAIN_DARK:
+            new_gain = min(int(gain * _LUMA_LOW / max(mean, 1.0)), _GAIN_DARK)
+            if new_gain > gain:
+                await self._sensor_set("analogue_gain", new_gain)
+                self._sensor_gain = new_gain
+                bgr = await self._capture_bgr(new_gain)
+                mean = self._luma_mean(bgr)
+        elif mean > _LUMA_HIGH and gain > _GAIN_BRIGHT:
+            new_gain = max(int(gain * _LUMA_HIGH / max(mean, 1.0)), _GAIN_BRIGHT)
+            await self._sensor_set("analogue_gain", new_gain)
+            self._sensor_gain = new_gain
+            bgr = await self._capture_bgr(new_gain)
+        return bgr
+
+    async def _capture_bgr(self, gain: int) -> np.ndarray:
+        await self._sensor_set("analogue_gain", gain)
         proc = await asyncio.create_subprocess_exec(
             "v4l2-ctl",
             "-d", self.device,
@@ -80,12 +119,7 @@ class V4l2IspCamera(Camera):
         if buf.size != expected:
             raise HalError("ISP 帧大小不符: %d != %d" % (buf.size, expected))
         yuv = buf.reshape((h * 3) // 2, w)
-        bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
-        bgr = _digital_exposure(bgr)
-        ok, jpeg = cv2.imencode(".jpg", bgr, [cv2.IMWRITE_JPEG_QUALITY, 88])
-        if not ok:
-            raise HalError("JPEG 编码失败")
-        return jpeg.tobytes()
+        return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
 
 
 def _digital_exposure(bgr: np.ndarray) -> np.ndarray:

@@ -209,6 +209,8 @@ aplay /usr/share/sounds/alsa/Front_Center.wav   # 出声即通过
 
 ### 2.4 M3：MIPI 摄像头（实到 OV13855，CAM1，2026-10-02 验证）
 
+**独立画质诊断（2026-10-04/05）**：使用 `python -m lira.diagnostics.camera_quality` 抓取受控 NV12/PNG 并重放处理阶段，步骤和实测状态见 [画质实验记录](../docs/camera-quality-experiment.md)。当前手动查询与抓取已返回 4224×3136，历史的 2688 宽记录不能替代实际格式读回；生产 HAL 仍请求 2688×3136。默认参数近黑和历史识别字符数量不足以确定画质根因，新诊断以同批处理对照及已知正文错误率核实。正式采集行为保持现状。
+
 **断电接排线**（金手指朝板、蓝膜朝上，两端同面，插到底压紧锁扣）→ 上电。
 
 **① 使能 overlay**（Linux server 镜像默认不使能摄像头节点——dmesg 无任何 sensor 探测

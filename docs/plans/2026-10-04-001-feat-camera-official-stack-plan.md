@@ -1,7 +1,7 @@
 ---
 title: "feat: 摄像头官方栈对照验证与 rkaiq v6.x 引入(A→B 分步)"
 type: feat
-status: active
+status: completed
 date: 2026-10-04
 origin: docs/brainstorms/2026-10-04-camera-official-stack-requirements.md
 ---

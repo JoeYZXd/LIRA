@@ -265,6 +265,65 @@ class TestLifecycle:
 
 
 class TestDialogWiring:
+    async def test_book_command_reads_original_without_llm(self, tmp_path):
+        from lira.dialog import phrasebook as pb
+
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        original = "这是需要逐字核对的书本内容。" * 20
+        rt.ocr.text = original
+
+        async def forbidden_polish(text):
+            pytest.fail("读书指令不得改写原文")
+
+        rt.pipeline._text_polisher = forbidden_polish
+        await rt.engine.on_wake()
+        await rt.engine.on_asr_text("帮我读下这本书")
+        await settle(rt)
+        spoken = [text for text, _, _ in rig.tts.spoken]
+        assert spoken[:3] == [pb.WAKE_ACK, pb.CAPTURE_GUIDANCE, pb.OCR_COMPLETE]
+        assert "".join(spoken[3:]) == original
+        assert rt.camera.capture_calls == 1
+        assert rt.engine.state.value == "standby"
+
+    async def test_cleaned_input_is_received_during_prompt_playback(self, tmp_path):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        rt.tts.occupied = True
+
+        received = []
+        rt.asr_stream.feed = lambda samples: received.append(len(samples))
+        rt._gate.feed(np.zeros(1600, dtype=np.float32))
+        assert received == [1600]
+        rt.tts.occupied = False
+        rt.engine.tick(rt.engine.now + 8)
+        assert rt.engine.state.value == "standby"
+
+    async def test_book_retry_preserves_original_reading_mode(self, tmp_path):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        read_calls = 0
+        read = rt.ocr.read
+
+        def read_after_retry(image):
+            nonlocal read_calls
+            read_calls += 1
+            return [] if read_calls == 1 else read(image)
+
+        async def forbidden_polish(text):
+            pytest.fail("读书重拍后仍不得改写原文")
+
+        rt.ocr.read = read_after_retry
+        rt.pipeline._text_polisher = forbidden_polish
+        await rt.engine.on_wake()
+        await rt.engine.on_asr_text("帮我读下这本书")
+        await settle(rt)
+        assert rt.camera.capture_calls == 2
+        assert read_calls == 2
+        assert rt.engine.state.value == "standby"
+        assert not rt.engine.read_original
+
     async def test_wake_then_appliance_command(self, tmp_path):
         """唤醒 -> 指令 -> TTS 播报 + mock IR 记录（生产回调接线正确）。"""
         rig = make_rig(tmp_path)
@@ -409,7 +468,9 @@ class TestAssemblyHelpers:
         assert len(spoken) == 1
         store.close()
 
-    def test_build_board_hal_constructs_and_warns(self, tmp_path, caplog):
+    def test_build_board_hal_constructs_and_warns(self, tmp_path, caplog, monkeypatch):
+        monkeypatch.setattr("lira.audio.devices.board_audio_device",
+                            lambda value, **kwargs: int(value))
         """board 后端装配不触硬件：构造成功 + IR 待 M5 告警可见。"""
         from lira.hal.board import V4l2IspCamera
         from lira.audio.mic import SoundDeviceMic
@@ -494,7 +555,7 @@ class TestReviewFixes:
 
     async def test_engine_tick_wiring_via_injected_clock(self, tmp_path):
         """评审：engine.tick 接线此前无覆盖（删掉 tick 调用测试照绿）。
-        注入假时钟快进 LISTENING 8s 窗口 x2 -> 复述提示 -> 礼貌回待机。"""
+        注入假时钟快进 LISTENING 8s 窗口 -> 安静回待机。"""
         now = {"t": 1000.0}
 
         def fake_clock() -> float:
@@ -510,12 +571,8 @@ class TestReviewFixes:
             rig.source.push_silence(0.2)
             await asyncio.sleep(0.3)  # 等编排循环消费静音块并触发 tick
             await settle(rig.runtime)
-            assert any("指令" in t for t, _, _ in rig.tts.spoken)
-            now["t"] += 9.0  # 第二个窗口超时
-            rig.source.push_silence(0.2)
-            await asyncio.sleep(0.3)
-            await settle(rig.runtime)
             assert rig.runtime.engine.state.value == "standby"
+            assert [t for t, _, _ in rig.tts.spoken] == ["我在听。"]
         finally:
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)

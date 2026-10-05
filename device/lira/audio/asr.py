@@ -68,7 +68,7 @@ class StreamingAsr:
             enable_endpoint_detection=enable_endpoint_detection,
             rule1_min_trailing_silence=2.0,
             rule2_min_trailing_silence=0.8,
-            rule3_min_utterance_length=20,
+            rule3_min_utterance_length=1000000,  # dispatch segments; never time-cut active speech
             provider="cpu",
         )
         logging.info("ASR 已加载: %s", model_dir.name)

@@ -64,6 +64,7 @@ class HalConfig:
     speaker_device: str = ""
     #: 板上摄像头设备（M3：OV13855@CAM1 → /dev/video0）
     camera_device: str = ""
+    echo_cancel_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -125,6 +126,7 @@ DEFAULTS: dict[str, Any] = {
         "mic_device": "",
         "speaker_device": "",
         "camera_device": "",
+        "echo_cancel_enabled": False,
     },
     # U7：设备 Web UI 监听地址（局域网浏览器访问；M7 起 in-process 挂载主循环）
     "ui": {
@@ -160,6 +162,7 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_HAL_BACKEND": ("hal", "backend", str),
     "LIRA_HAL_MIC_DEVICE": ("hal", "mic_device", str),
     "LIRA_HAL_SPEAKER_DEVICE": ("hal", "speaker_device", str),
+    "LIRA_HAL_ECHO_CANCEL_ENABLED": ("hal", "echo_cancel_enabled", "bool"),
     "LIRA_HAL_CAMERA_DEVICE": ("hal", "camera_device", str),
     "LIRA_DB_PATH": (None, "db_path", str),
     "LIRA_SYNC_WS_URL": ("sync", "ws_url", str),
@@ -246,6 +249,11 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
     if int(llm["colloquial_threshold_chars"]) < 1:
         raise ConfigError("llm.colloquial_threshold_chars 必须 >= 1。")
 
+    hal = config["hal"]
+    if not isinstance(hal["echo_cancel_enabled"], bool):
+        raise ConfigError("hal.echo_cancel_enabled 必须为布尔值。")
+    if hal["echo_cancel_enabled"] and (hal["mic_device"] != "lira_audio" or hal["speaker_device"] != "lira_audio"):
+        raise ConfigError("消回声必须将 mic_device 和 speaker_device 均设为 lira_audio。")
     if config["hal"]["backend"] not in HAL_BACKENDS:
         raise ConfigError(
             f"hal.backend={config['hal']['backend']!r} 非法，可选值: {HAL_BACKENDS}。"
@@ -330,6 +338,7 @@ def load_config(
             mic_device=str(hal["mic_device"]),
             speaker_device=str(hal["speaker_device"]),
             camera_device=str(hal["camera_device"]),
+            echo_cancel_enabled=hal["echo_cancel_enabled"],
         ),
         sync=SyncConfig(
             ws_url=str(config["sync"]["ws_url"]),

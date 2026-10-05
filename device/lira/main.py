@@ -177,7 +177,9 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
     from lira.audio.mic import SoundDeviceMic
     from lira.hal.board.camera_isp import V4l2IspCamera
 
-    mic = SoundDeviceMic(device=_hal_device(cfg.hal.mic_device))
+    from lira.audio.devices import board_audio_device
+    mic = SoundDeviceMic(device=board_audio_device(cfg.hal.mic_device, direction="input",
+                        echo_cancel=cfg.hal.echo_cancel_enabled))
     # ISP 管线（NV12，干净帧）取代裸 Bayer 路径（板上实测条纹不可根治）
     camera = V4l2IspCamera(device=cfg.hal.camera_device or "/dev/video11")
     ir = MockIrController()
@@ -218,7 +220,9 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
         if cfg.hal.backend == "board":
             from lira.hal.board.audio import SoundDevicePlayer
 
-            player = SoundDevicePlayer(device=_hal_device(cfg.hal.speaker_device))
+            from lira.audio.devices import board_audio_device
+            player = SoundDevicePlayer(device=board_audio_device(cfg.hal.speaker_device, direction="output",
+                                       echo_cancel=cfg.hal.echo_cancel_enabled))
         tts = TtsEngine(player=player)
         if player is not None:
             player.samplerate = tts.sample_rate
@@ -349,9 +353,12 @@ class DeviceCallbacks:
 
     def start_listening(self) -> None:
         if self._rt.asr_stream is not None:
-            self._rt.asr_stream.reset()
+            self._rt.dispatcher.begin_listening()
 
     def set_audio_route(self, route: AudioRoute) -> None:
+        dispatcher = getattr(self._rt, "dispatcher", None)
+        if route is AudioRoute.WAKE and dispatcher is not None:
+            dispatcher.clear()
         self._rt.route = route
 
     def start_capture(self) -> asyncio.Task:
@@ -359,7 +366,9 @@ class DeviceCallbacks:
         speaker = self._rt.speaker
         speaker.volume = self._rt.settings.volume
         speaker.speed = self._rt.settings.tts_speed
-        return self._rt.spawn(self._rt.pipeline.run_capture())
+        return self._rt.spawn(
+            self._rt.pipeline.run_capture(read_original=self._rt.engine.read_original)
+        )
 
     def send_ir(self, device: str, action: str) -> None:
         # 状态机已完成高危确认 -> 装配层以 confirmed=True 过第二道闸
@@ -489,12 +498,14 @@ class DeviceRuntime:
             on_reading_finished=lambda: self.spawn(self.engine.on_reading_finished()),
             text_polisher=make_text_polisher(self._llm),
         )
+        self.dispatcher = RouteDispatch(streams=self, wakeword=self.wakeword, spawn=self.spawn)
         self._gate = PrivacyGatedSink(
-            RouteDispatch(streams=self, wakeword=self.wakeword, spawn=self.spawn),
+            self.dispatcher,
             self.privacy,
         )
         # 隐私门订阅注册（privacy.py 约定的广播次序：gate.apply -> 唤醒门 -> 播报）
         self.privacy.subscribe(self._gate.apply)
+        self.privacy.subscribe(self.dispatcher.apply_privacy)
         # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
         attach_announcer(self.privacy, self.callbacks.speak)
 
@@ -561,6 +572,7 @@ class DeviceRuntime:
         """
         if self._mic_paused:
             return
+        self.dispatcher.clear()
         self._mic_paused = True
         self._mic_resume_event = asyncio.Event()
         try:
@@ -573,6 +585,7 @@ class DeviceRuntime:
         """恢复主循环麦克风采集（录音窗口结束；编排循环自动续跑）。"""
         if not self._mic_paused:
             return
+        self.dispatcher.clear()
         self._mic_paused = False
         try:
             await self._hal["audio"].open()
@@ -654,7 +667,8 @@ class DeviceRuntime:
             task.cancel()
         await asyncio.gather(*pending, return_exceptions=True)
         if read_task in done:
-            return read_task.result()
+            chunk = read_task.result()
+            return None if self._mic_paused else chunk
         return None
 
     async def _orchestrate(self) -> None:
@@ -663,10 +677,20 @@ class DeviceRuntime:
 
         source = self._hal["audio"]
         while not self._stop.is_set():
-            chunk = await self._read_mic_chunk(source)
+            from lira.audio.mic import AudioInputError
+            try:
+                chunk = await self._read_mic_chunk(source)
+            except AudioInputError:
+                self.dispatcher.clear()
+                logging.warning("audio event=input_discontinuity")
+                callback = getattr(self.engine, "on_input_error", None)
+                if callback is not None:
+                    await callback()
+                continue
             if chunk is None:
                 continue  # 麦克风暂停窗口（dev 录音独占），恢复后自动续跑
             if not chunk:
+                self.dispatcher.clear()
                 logging.info("音频源结束（EOF），主循环退出")
                 break
             samples = np.frombuffer(chunk, dtype=np.int16)

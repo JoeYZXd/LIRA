@@ -156,10 +156,11 @@ class BroadlinkIrController(IrController):
             try:
                 data = await device.check_data()
             except Exception as exc:  # noqa: BLE001
-                # RM4 固件怪癖：未录到码时部分设备回 -5 StorageError 而非空载荷
-                # （按"还没录到"续等；Home Assistant 集成同此处理，见
-                # python-broadlink#698/#650）。其他异常照常上抛。
-                if "Storage" in type(exc).__name__:
+                # RM4 固件怪癖：未录到码时部分设备回 -5 StorageError（偶尔 -6
+                # ReadError 空码）而非空载荷——按"还没录到"续等；Home Assistant
+                # 集成同此处理（python-broadlink#698/#650）。其他异常照常上抛。
+                name = type(exc).__name__
+                if "Storage" in name or "Read" in name:
                     data = b""
                 else:
                     raise

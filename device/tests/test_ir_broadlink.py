@@ -166,19 +166,21 @@ class TestLearn:
         assert device.enter_calls == 1
         assert code == base64.b64encode(b"\x26\x01\x00\x9d").decode("ascii")
 
-    async def test_learn_treats_storage_error_as_no_data(self):
-        """RM4 固件怪癖：未录到码时回 -5 StorageError 而非空载荷——续等不算失败。"""
+    async def test_learn_treats_storage_and_read_errors_as_no_data(self):
+        """RM4 固件怪癖：未录到码时回 -5 StorageError/-6 ReadError 而非空载荷——续等不算失败。"""
         device = FakeBroadlinkDevice()
         ctrl = make_controller(device)
         await ctrl.open()
-        device.check_results = [b"", b"\x26\x01"]
+        device.check_results = [b"", b"", b"\x26\x01"]
         calls = {"n": 0}
         orig_check = device.check_data
 
         async def flaky_check():
             calls["n"] += 1
-            if calls["n"] == 1:  # 首次轮询抛 StorageError（实机观测行为）
+            if calls["n"] == 1:
                 raise type("StorageError", (Exception,), {})(-5, "storage is full")
+            if calls["n"] == 2:
+                raise type("ReadError", (Exception,), {})(-6, "empty code")
             return await orig_check()
 
         device.check_data = flaky_check

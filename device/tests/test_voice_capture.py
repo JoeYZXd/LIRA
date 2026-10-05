@@ -91,6 +91,19 @@ def test_activity_onset_and_silence_end_are_distinct_from_asr_result():
     assert not detector.active
 
 
+def test_recognition_progress_requires_new_command_text_not_wake_or_noise():
+    holder, dispatch, _ = rig()
+    progress = []
+    holder.engine.on_recognition_progress = lambda generation: progress.append(generation)
+    holder.asr_stream.is_endpoint = lambda: False
+    holder.route = AudioRoute.LISTEN
+    dispatch.begin_listening(replay=False)
+    for text in ("", "小丽拉", "小丽拉", "帮", "帮", "帮我", "帮我读"):
+        holder.asr_stream.result = text
+        dispatch.feed(np.full(1600, 0.03, dtype=np.float32))
+    assert progress == [dispatch.generation] * 3
+
+
 def test_long_active_speech_is_segmented_but_not_submitted():
     holder, dispatch, events = rig()
     holder.route = AudioRoute.LISTEN

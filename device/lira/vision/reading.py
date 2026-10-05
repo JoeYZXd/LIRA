@@ -269,9 +269,12 @@ class ReadingPipeline:
         self.raw_text: tuple[str, ...] = ()
         self._task_id = None
         self._cue_complete = False
+        self._cue_failed = False
+        self._cue_owner = None
+        self._cue_generation = 0
         self._recovery_task = None
         #: 播放控制方法（main.py 直接绑到 DialogCallbacks 的六个占位）
-        self.playback_pause = self._with_session(lambda s: s.pause())
+        self.playback_pause = self._pause
         self.playback_resume = self._resume
         self.playback_stop = self._stop
         self.playback_read_again = self._repeat
@@ -287,7 +290,8 @@ class ReadingPipeline:
 
         可取消（F1）：状态机取消离开 CAPTURING 时经任务句柄 cancel 本协程——
         CancelledError 在任一 await 点即中止流程，不回执 on_capture_done、
-        不创建朗读会话（防御性兜底：万一取消晚到，也先停掉已开的会话再上抛）。
+        不启动正文。已完成识别的缓存保持暂停，只有新的明确继续指令才能恢复；
+        停止或被新阅读取代的任务不会重新发布缓存。
         """
         notify = on_capture_done or self._on_capture_done
         created_session = None
@@ -347,13 +351,18 @@ class ReadingPipeline:
             created_session.resume()
         except asyncio.CancelledError:
             if created_session is not None and self._session is created_session:
-                self._stop()
+                # Completed OCR is an independent retained task. Interrupted
+                # feedback cannot emit late output, but explicit continue may
+                # retry its cue using this cache after the chat owner changes.
+                created_session.pause()
             raise
         except Exception:  # noqa: BLE001 - 拍摄/引导非预期故障也必须回执（评审：CAPTURING 卡死防线）
             # F3 同款纪律：状态机 CAPTURING 无计时器（拍摄开始即 disarm），协程若
             # 带 unretrieved 异常死掉，on_capture_done 永不到达 -> 引擎永久卡在
             # CAPTURING（唤醒词失效）。终局故障按"未检出"走 R26 引导/重拍。
             logging.exception("拍摄流程非预期故障（按未检出处理）")
+            if created_session is not None and self._session is created_session:
+                self._cue_failed = True
             if is_valid():
                 notify(False)
 
@@ -392,15 +401,28 @@ class ReadingPipeline:
 
         return call
 
+    def _cancel_cue(self):
+        owner, self._cue_owner = self._cue_owner, None
+        task, self._recovery_task = self._recovery_task, None
+        if owner is not None and isinstance(self._speaker, TtsBlockSpeaker):
+            self._speaker.cancel(owner)
+        if task is not None and not task.done():
+            task.cancel()
+
+    def _pause(self):
+        if self._session is not None:
+            self._session.pause()
+        self._cancel_cue()
+
     def _stop(self):
         if self._session is not None:
             self._session.stop()
-        if self._recovery_task is not None:
-            self._recovery_task.cancel()
+        self._cancel_cue()
         self._session = None
         self.raw_text = ()
         self._task_id = None
         self._cue_complete = False
+        self._cue_failed = False
 
     def _resume(self):
         session = self._session
@@ -409,19 +431,29 @@ class ReadingPipeline:
         if self._cue_complete:
             session.resume()
         elif self._recovery_task is None or self._recovery_task.done():
+            self._cue_generation += 1
+            owner = self._cue_owner = ReadingAudioOwner((session.task_id, "completion_cue"), self._cue_generation)
             async def recover():
                 try:
+                    if self._session is not session or self._cue_owner != owner:
+                        return
                     if isinstance(self._speaker, TtsBlockSpeaker):
-                        await self._speaker.play(OCR_COMPLETE, owner=ReadingAudioOwner(session.task_id, -1))
+                        await self._speaker.play(OCR_COMPLETE, owner=owner)
                     else:
                         await self._speaker.play(OCR_COMPLETE)
-                    if self._session is session:
+                    if self._session is session and self._cue_owner == owner:
                         self._cue_complete = True
+                        self._cue_failed = False
                         session.resume()
                 except asyncio.CancelledError:
                     raise
                 except Exception:
+                    if self._session is session and self._cue_owner == owner:
+                        self._cue_failed = True
                     logging.exception("阅读完成提示重试失败")
+                finally:
+                    if self._cue_owner == owner:
+                        self._cue_owner = None
             self._recovery_task = asyncio.create_task(recover())
 
     def _repeat(self):
@@ -433,7 +465,7 @@ class ReadingPipeline:
         session = self._session
         if session is None:
             return None
-        status = (ReadingTaskStatus.FAILED if session.failed or not self._cue_complete
+        status = (ReadingTaskStatus.FAILED if session.failed or self._cue_failed
                   else ReadingTaskStatus.COMPLETED if session.cursor >= len(session.blocks)
                   else ReadingTaskStatus.PAUSED if session.is_paused else ReadingTaskStatus.READING)
         return ReadingTaskFacts(status, resumable=bool(session.blocks))

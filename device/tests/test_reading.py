@@ -51,6 +51,63 @@ class RecordingSpeaker:
             await self.on_play(text)
 
 
+async def test_cancel_during_completion_cue_retains_completed_ocr_for_explicit_resume():
+    from lira.dialog.phrasebook import OCR_COMPLETE
+
+    speaker = RecordingSpeaker()
+    cue_started = asyncio.Event()
+    async def block_cue(text):
+        if text == OCR_COMPLETE:
+            cue_started.set()
+            await asyncio.Event().wait()
+    speaker.on_play = block_cue
+    camera = FakeCamera(tiny_png())
+    pipeline = ReadingPipeline(camera, FakeEngine([line(0, 0, "已识别的书页")]), speaker,
+                               on_capture_done=lambda ok: None)
+    capture = asyncio.create_task(pipeline.run_capture(read_original=True))
+    await asyncio.wait_for(cue_started.wait(), 2)
+    capture.cancel()
+    await asyncio.gather(capture, return_exceptions=True)
+    assert pipeline.session is not None and pipeline.session.is_paused
+    assert pipeline.raw_text == ("已识别的书页",)
+    speaker.on_play = None
+    pipeline.playback_resume()
+    await pipeline._recovery_task
+    await settle()
+    assert camera.capture_count == 1
+    assert speaker.played[-2:] == [OCR_COMPLETE, "已识别的书页"]
+    pipeline.playback_stop()
+
+
+async def test_pause_during_completion_cue_retry_prevents_late_reading_restart():
+    from lira.dialog.phrasebook import OCR_COMPLETE
+
+    speaker = RecordingSpeaker()
+    async def fail_cue(text):
+        if text == OCR_COMPLETE:
+            raise HalError("output failed")
+    speaker.on_play = fail_cue
+    pipeline = ReadingPipeline(FakeCamera(tiny_png()), FakeEngine([line(0, 0, "缓存正文")]),
+                               speaker, on_capture_done=lambda ok: None)
+    await pipeline.run_capture(read_original=True)
+    cue_started, cue_release = asyncio.Event(), asyncio.Event()
+    async def block_cue(text):
+        if text == OCR_COMPLETE:
+            cue_started.set()
+            await cue_release.wait()
+    speaker.on_play = block_cue
+    pipeline.playback_resume()
+    await asyncio.wait_for(cue_started.wait(), 2)
+    recovery = pipeline._recovery_task
+    pipeline.playback_pause()
+    cue_release.set()
+    await asyncio.gather(recovery, return_exceptions=True)
+    await settle()
+    assert pipeline.session.is_paused and pipeline.session.cursor == 0
+    assert "缓存正文" not in speaker.played
+    pipeline.playback_stop()
+
+
 class FakeEngine(OcrEngine):
     """固定结果的 OCR 替身：read() 返回预置 OcrLine 列表（空列表=未检出）。"""
 
@@ -355,7 +412,8 @@ class TestReadingPipeline:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
-        assert pipeline.session is None
+        assert pipeline.session is not None and pipeline.session.is_paused
+        assert captured == {}
         assert speaker.played == [CAPTURE_GUIDANCE, OCR_COMPLETE]
 
     async def test_failed_completion_cue_retains_cache_and_continue_retries_without_camera(self):

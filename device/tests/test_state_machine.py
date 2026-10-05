@@ -511,6 +511,18 @@ class ControlledRecorder(Recorder):
 
 
 class TestVoiceContinuity:
+    async def test_continuous_noise_without_recognition_progress_recovers(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        sm.on_speech_started(rec.generation)
+        for second in range(1, 40):
+            sm.tick(T0 + second)
+            sm.on_audio_progress(rec.generation)
+        assert pb.INPUT_NOT_HEARD in rec.spoken
+        assert sm.state is State.STANDBY
+
     async def test_old_capture_receipt_and_progress_do_not_affect_new_capture(self):
         rec = Recorder()
         sm = build_engine(rec)
@@ -608,6 +620,7 @@ class TestVoiceContinuity:
         for second in range(8, 49):
             sm.tick(T0 + second)
             sm.on_audio_progress(rec.generation)
+            sm.on_recognition_progress(rec.generation)
         assert sm.state is State.LISTENING
         sm.on_speech_ended(rec.generation)
         await sm.on_asr_text("打开台灯", generation=rec.generation)

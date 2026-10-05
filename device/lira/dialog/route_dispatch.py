@@ -22,6 +22,7 @@ class RouteDispatch:
         self._last_route = streams.route
         self._parts = []
         self._segment_samples = 0
+        self._last_text = ""
 
     @property
     def generation(self):
@@ -34,6 +35,7 @@ class RouteDispatch:
         self._activity.reset()
         self._parts.clear()
         self._segment_samples = 0
+        self._last_text = ""
         self._wake_pending = False
         for stream in (self._streams.asr_stream, self._streams.wake_stream,
                        self._streams.playback_stream):
@@ -50,6 +52,7 @@ class RouteDispatch:
         self._activity.reset()
         self._parts.clear()
         self._segment_samples = 0
+        self._last_text = ""
         self._wake_pending = False
         self._last_route = AudioRoute.LISTEN
         # The event loop cannot interleave another feed with this synchronous snapshot.
@@ -80,6 +83,12 @@ class RouteDispatch:
         stream.feed(samples)
         self._segment_samples += len(samples)
         text = stream.text().strip()
+        usable_text = text
+        if usable_text.startswith(self._wakeword):
+            usable_text = usable_text[len(self._wakeword):].lstrip(" ，,。.!！?？、")
+        if usable_text and text != self._last_text:
+            self._event("on_recognition_progress")
+        self._last_text = text
         endpoint = stream.is_endpoint()
         # Segment long speech for bounded recognizer memory, without submitting an
         # unfinished user request. Only real silence allows delivery.
@@ -88,12 +97,14 @@ class RouteDispatch:
                 self._parts.append(text)
             stream.reset()
             self._segment_samples = 0
+            self._last_text = ""
             return
         if endpoint and not self._activity.active:
             text = "".join(self._parts) + text
             self._parts.clear()
             stream.reset()
             self._segment_samples = 0
+            self._last_text = ""
             if text.startswith(self._wakeword):
                 text = text[len(self._wakeword):].lstrip(" ，,。.!！?？、")
             if text:

@@ -196,6 +196,7 @@ class DialogEngine:
         self._awaiting_endpoint = False
         self._last_audio_progress = 0.0
         self._last_speech_progress = 0.0
+        self._last_recognition_progress = 0.0
         self._confirmed_ir: tuple[OperationOwner, str, str] | None = None
         self._effect_tasks: set[asyncio.Task] = set()
         self._last_completion = None
@@ -210,7 +211,8 @@ class DialogEngine:
             stalled = now - self._last_audio_progress >= self.INPUT_STALL_SECONDS
             endpoint_stalled = (not self._speech_active and
                                 now - self._last_speech_progress >= self.INPUT_STALL_SECONDS)
-            if stalled or endpoint_stalled:
+            recognition_stalled = now - self._last_recognition_progress >= self.INPUT_STALL_SECONDS
+            if stalled or endpoint_stalled or recognition_stalled:
                 self._speech_active = self._awaiting_endpoint = False
                 self._speak(pb.INPUT_NOT_HEARD)
                 if self.state is State.CONFIRMING:
@@ -294,6 +296,7 @@ class DialogEngine:
         if self._input_current(generation) and self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING, State.CONFIRMING):
             self._speech_active = self._awaiting_endpoint = True
             self._last_audio_progress = self._last_speech_progress = self.now
+            self._last_recognition_progress = self.now
             self._deadline = None
             if self.state is State.FOLLOWUP:
                 self._transition(State.LISTENING)
@@ -314,6 +317,10 @@ class DialogEngine:
             self._last_audio_progress = self.now
             if self._speech_active:
                 self._last_speech_progress = self.now
+
+    def on_recognition_progress(self, generation: int) -> None:
+        if self._input_current(generation) and self._awaiting_endpoint:
+            self._last_recognition_progress = self.now
 
     async def on_input_error(self) -> None:
         if self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING, State.CONFIRMING):

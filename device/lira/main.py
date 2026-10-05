@@ -11,7 +11,7 @@
     DialogEngine.tick（单调时钟：LISTENING 8s / CONFIRMING 10s 超时）
     speak            -> TtsEngine（音量/语速读 DeviceSettings，R28 等待反馈挂 LLM）
     start_capture    -> 任务句柄返回状态机（F1 取消依据）
-    send_ir          -> IRService.send_ir(confirmed=True)（第二道安全闸）
+    send_ir          -> 操作准入 + IRService 独立确认安全闸
     播放控制六方法    -> ReadingPipeline 播放控制入口
 
 伴随任务：同步监督循环（断线指数退避重连）与设备 Web UI（uvicorn in-process，
@@ -334,7 +334,9 @@ class DeviceCallbacks:
     def __init__(self, runtime: "DeviceRuntime") -> None:
         self._rt = runtime
 
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, *, owner=None):
+        if owner is not None and not self._rt.engine.is_current(owner):
+            return None
         # 最近播报环形记录（内存，不落盘；dev 回放/状态区展示面）
         self._rt.recent_speaks.append(text)
         # 语音交互日志（内存展示区，可含话术片段；logging 行纪律不变）
@@ -345,15 +347,33 @@ class DeviceCallbacks:
             # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
             logging.info("播报降级 event=spoken_no_tts chars=%d", len(text))
             return
-        tts.speak(
+        return tts.speak(
             text,
             speed=self._rt.settings.tts_speed,
             volume=self._rt.settings.volume,
+            owner=owner,
         )
 
-    def start_listening(self) -> None:
+    def chime(self, *, owner=None):
+        if owner is not None and not self._rt.engine.is_current(owner):
+            return None
+        return self._rt.tts.chime(owner=owner, volume=self._rt.settings.volume)
+
+    def cancel_audio(self, owner) -> None:
+        if self._rt.tts is not None:
+            self._rt.tts.cancel_owner(owner)
+
+    async def stop_audio(self, owner) -> None:
+        if self._rt.tts is not None:
+            await self._rt.tts.stop(owner)
+
+    def input_generation(self) -> int:
+        dispatcher = getattr(self._rt, "dispatcher", None)
+        return dispatcher.generation if dispatcher is not None else 0
+
+    def start_listening(self, *, replay=True) -> None:
         if self._rt.asr_stream is not None:
-            self._rt.dispatcher.begin_listening()
+            self._rt.dispatcher.begin_listening(replay=replay)
 
     def set_audio_route(self, route: AudioRoute) -> None:
         dispatcher = getattr(self._rt, "dispatcher", None)
@@ -361,23 +381,32 @@ class DeviceCallbacks:
             dispatcher.clear()
         self._rt.route = route
 
-    def start_capture(self) -> asyncio.Task:
+    def start_capture(self, *, owner=None) -> asyncio.Task:
         # 新阅读会话以全局音量/语速起步（会话内"大声点/小声点"再由 R21 调整）
         speaker = self._rt.speaker
         speaker.volume = self._rt.settings.volume
         speaker.speed = self._rt.settings.tts_speed
         return self._rt.spawn(
-            self._rt.pipeline.run_capture(read_original=self._rt.engine.read_original)
+            self._rt.pipeline.run_capture(
+                read_original=self._rt.engine.read_original, owner=owner,
+                is_valid=lambda: self._rt.engine.is_current(owner),
+                on_capture_done=lambda ok: self._rt.spawn(self._rt.engine.on_capture_done(ok, owner=owner)),
+                on_reading_finished=lambda: self._rt.spawn(self._rt.engine.on_reading_finished(owner=owner)),
+            )
         )
 
-    def send_ir(self, device: str, action: str) -> None:
+    def send_ir(self, device: str, action: str, *, owner=None, confirmed=False):
         # 状态机已完成高危确认 -> 装配层以 confirmed=True 过第二道闸
         # （第二道闸仍独立校验 enabled/动作/码值，防御直调）
-        self._rt.spawn(self._send_ir(device, action))
+        return self._rt.spawn(self._send_ir(device, action, owner=owner, confirmed=confirmed))
 
-    async def _send_ir(self, device: str, action: str) -> None:
+    async def _send_ir(self, device: str, action: str, *, owner=None, confirmed=False) -> None:
         try:
-            await self._rt.ir_service.send_ir(device, action, confirmed=True)
+            # Admission and the service's synchronous safety checks happen on
+            # the event loop with no await before entry into HAL.send.
+            if not self._rt.engine.admit_ir(owner, device, action, confirmed=confirmed):
+                return
+            await self._rt.ir_service.send_ir(device, action, confirmed=confirmed)
             logging.info("IR 已发射 device=%s action=%s", device, action)
         except Exception as exc:  # noqa: BLE001 - IR 故障不拖垮主循环
             logging.warning("IR 发送失败 device=%s action=%s kind=%s", device, action,
@@ -385,6 +414,9 @@ class DeviceCallbacks:
 
     def playback_pause(self) -> None:
         self._rt.pipeline.playback_pause()
+        # Invalidate current legacy reading entries before successor feedback.
+        if self._rt.tts is not None:
+            self._rt.tts.cancel_owner(None)
 
     def playback_resume(self) -> None:
         self._rt.pipeline.playback_resume()
@@ -484,12 +516,13 @@ class DeviceRuntime:
                 cfg,
                 privacy=self.privacy,
                 network_ok=self._network_ok,
-                on_wait_feedback=lambda: self.callbacks.speak(pb.WAIT_REMOTE),
+                on_wait_feedback=None,
             )
         self._llm = llm
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
 
         self.engine = self._build_engine(llm)
+        self.engine.tick(self._clock())
         self.pipeline = ReadingPipeline(
             hal["camera"],
             ocr,
@@ -506,6 +539,7 @@ class DeviceRuntime:
         # 隐私门订阅注册（privacy.py 约定的广播次序：gate.apply -> 唤醒门 -> 播报）
         self.privacy.subscribe(self._gate.apply)
         self.privacy.subscribe(self.dispatcher.apply_privacy)
+        self.privacy.subscribe(self.engine.apply_privacy)
         # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
         attach_announcer(self.privacy, self.callbacks.speak)
 
@@ -642,6 +676,7 @@ class DeviceRuntime:
                 logging.info("同步未配置（sync.ws_url 为空）：离线纯本地运行")
             self._ui_task = self.spawn_companion(self._run_ui())
             self.spawn_companion(self._network_ok.run(self._stop))
+            self.spawn_companion(self._dialog_clock())
             print("LIRA 运行中（Ctrl-C 退出）...")
             await self._orchestrate()
         finally:
@@ -697,6 +732,15 @@ class DeviceRuntime:
             samples = samples.astype(np.float32) / 32768.0
             self._gate.feed(samples)
             self.engine.tick(self._clock())
+
+    async def _dialog_clock(self) -> None:
+        """Idle and stalled-input timers must run even if input is blocked."""
+        while not self._stop.is_set():
+            self.engine.tick(self._clock())
+            try:
+                await asyncio.wait_for(self._stop.wait(), timeout=0.05)
+            except TimeoutError:
+                pass
 
     # ---------- 伴随任务：同步 / UI ----------
 
@@ -851,6 +895,8 @@ class DeviceRuntime:
     async def _shutdown(self, stack) -> None:
         """优雅停机：UI 先退（should_exit -> serve 自然返回）->
         取消引擎在途任务与伴随任务 -> 释放 HAL。幂等。"""
+        self.engine.close()
+        self.pipeline.playback_pause()
         if self._ui_server is not None:
             self._ui_server.should_exit = True
         if self._ui_task is not None and not self._ui_task.done():
@@ -868,6 +914,8 @@ class DeviceRuntime:
             task.cancel()
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
+        if self.tts is not None:
+            await self.tts.close()
         await stack.aclose()
         logging.info("LIRA 已退出，HAL 资源已释放。")
 

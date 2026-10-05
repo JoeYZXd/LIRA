@@ -35,6 +35,8 @@ def rig():
     events = []
     async def asr(text):
         events.append(text)
+    async def wake():
+        events.append("wake")
     def spawn(event):
         if inspect.isawaitable(event):
             asyncio.run(event)
@@ -42,7 +44,7 @@ def rig():
             events.append(event)
     holder = SimpleNamespace(route=AudioRoute.WAKE, wake_stream=Stream(),
         asr_stream=Stream(), playback_stream=Stream(), tts=SimpleNamespace(occupied=True),
-        engine=SimpleNamespace(on_wake=lambda: "wake", on_asr_text=asr))
+        engine=SimpleNamespace(on_wake=wake, on_asr_text=asr))
     return holder, RouteDispatch(streams=holder, wakeword="小丽拉", spawn=spawn), events
 
 

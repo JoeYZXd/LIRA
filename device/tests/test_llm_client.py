@@ -27,6 +27,60 @@ from lira.llm.prompts import is_complex_text, is_medical_text
 BASE_URL = "http://unit.test/v1"
 
 
+@pytest.mark.parametrize("phase", ["first_token", "iteration"])
+async def test_cancel_closes_acquired_stream(phase):
+    from types import SimpleNamespace
+    entered = asyncio.Event()
+    class Stream:
+        closed = False
+        calls = 0
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            self.calls += 1
+            if phase == "iteration" and self.calls == 1:
+                return SimpleNamespace(choices=[])
+            entered.set()
+            await asyncio.Event().wait()
+        async def close(self):
+            self.closed = True
+    stream = Stream()
+    async def create(**kwargs):
+        return stream
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = LlmClient(make_llm_cfg(), openai_client=sdk)
+    task = asyncio.create_task(client.chat("问题"))
+    await entered.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert stream.closed
+
+
+@pytest.mark.parametrize("empty", [False, True])
+async def test_normal_and_empty_streams_are_closed(empty):
+    from types import SimpleNamespace
+    class Stream:
+        closed = False
+        delivered = False
+        def __aiter__(self):
+            return self
+        async def __anext__(self):
+            if empty or self.delivered:
+                raise StopAsyncIteration
+            self.delivered = True
+            return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="回答"))])
+        async def close(self):
+            self.closed = True
+    stream = Stream()
+    async def create(**kwargs):
+        return stream
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = LlmClient(make_llm_cfg(), openai_client=sdk)
+    assert await client.chat("问题") == ("" if empty else "回答")
+    assert stream.closed
+
+
 # ---------- 测试基建：fake 远端 ----------
 
 
@@ -362,6 +416,9 @@ class TestRemoteHandlerAdapter:
         client = make_client(fake)
         handler = make_remote_handler(client)
         assert await handler("复杂问题") == "远程回答"
+        body = json.loads(fake.last_request.read().decode("utf-8"))
+        assert body["messages"][0]["role"] == "system"
+        assert "不要自行发散" in body["messages"][0]["content"]
 
     async def test_adapter_returns_none_when_breaker_open(self):
         fake = FakeRemote(connect_error)

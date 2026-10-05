@@ -76,6 +76,7 @@ class RouteDispatch:
             return
         for event in self._activity.feed(samples):
             self._event("on_speech_" + event)
+        self._event("on_audio_progress")
         stream.feed(samples)
         self._segment_samples += len(samples)
         text = stream.text().strip()
@@ -98,13 +99,19 @@ class RouteDispatch:
             if text:
                 VOICE_LOG.log("asr", f"识别到指令：{text}")
                 self._deliver(text)
+            else:
+                self._event("on_empty_endpoint")
 
     def _deliver(self, text):
         generation = self._generation
         async def deliver():
             if generation != self._generation:
                 return
-            await self._streams.engine.on_asr_text(text)
+            engine = self._streams.engine
+            if hasattr(engine, "listening_generation"):
+                await engine.on_asr_text(text, generation=generation)
+            else:
+                await engine.on_asr_text(text)
         self._spawn(deliver())
 
     def feed(self, samples) -> None:
@@ -134,7 +141,11 @@ class RouteDispatch:
         if hit and self._wakeword in hit and not self._wake_pending:
             self._wake_pending = True
             VOICE_LOG.log("wake", f"收到语音唤醒（{self._wakeword}）")
-            self._spawn(rt.engine.on_wake())
+            generation = self._generation
+            async def wake():
+                if generation == self._generation:
+                    await rt.engine.on_wake()
+            self._spawn(wake())
             return
         if route is AudioRoute.LISTEN and not self._wake_pending:
             self._feed_asr(start, samples)

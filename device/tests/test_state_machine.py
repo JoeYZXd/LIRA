@@ -303,20 +303,19 @@ class TestR24RecognitionFailureGuidance:
 
 
 class TestR25ListenWindow:
-    async def test_timeout_reminds_once_then_standby(self):
-        """Test scenario 6: 8s 无语音 → 复述提示一次（重开窗口）→ 再超时 → 待机。"""
+    async def test_timeout_exits_silently_after_one_window(self):
+        """唤醒后无指令，单个窗口到期即安静回待机。"""
         rec = Recorder()
         sm = build_engine(rec)
         await enter_state(sm, rec, State.LISTENING)
 
-        sm.tick(T0 + 8.1)
-        assert sm.state is State.LISTENING, "第一次超时应复述提示并继续聆听"
-        assert any(pb.LISTEN_REMIND == s for s in rec.spoken)
-
-        sm.tick(T0 + 16.2)
-        assert sm.state is State.STANDBY, "第二次超时回待机"
-        reminds = [s for s in rec.spoken if s == pb.LISTEN_REMIND]
-        assert len(reminds) == 1, "复述提示只出现一次"
+        sm.tick(T0 + 7.9)
+        assert sm.state is State.LISTENING
+        sm.tick(T0 + 8.0)
+        assert sm.state is State.STANDBY
+        assert rec.spoken == [pb.WAKE_ACK]
+        await sm.on_asr_text("帮我读下这本书")
+        assert sm.state is State.STANDBY
 
     async def test_speech_resets_window(self):
         rec = Recorder()
@@ -339,7 +338,7 @@ class TestR31Help:
         sm = build_engine(rec)
         await enter_state(sm, rec, State.LISTENING)
         await sm.on_asr_text("你能做什么")
-        assert sm.state is State.STANDBY
+        assert sm.state is State.FOLLOWUP
         assert any(("读" in s and "家电" in s) for s in rec.spoken), pb.HELP_TEXT
 
 
@@ -448,13 +447,13 @@ class TestCancelAbortsCapture:
 
 
 class TestLlmDegradeInSession:
-    async def test_local_llm_reply_spoken_and_session_ends(self):
+    async def test_local_llm_reply_spoken_and_opens_followup(self):
         rec = Recorder()
         sm = build_engine(rec, local_llm=text_reply("这个我记下了。"))
         await enter_state(sm, rec, State.LISTENING)
         await sm.on_asr_text("提醒我明天吃药")
         assert "这个我记下了。" in rec.spoken
-        assert sm.state is State.STANDBY
+        assert sm.state is State.FOLLOWUP
 
     async def test_remote_reply_spoken(self):
         rec = Recorder()
@@ -462,7 +461,7 @@ class TestLlmDegradeInSession:
         await enter_state(sm, rec, State.LISTENING)
         await sm.on_asr_text("复杂问题")
         assert "远程回答" in rec.spoken
-        assert sm.state is State.STANDBY
+        assert sm.state is State.FOLLOWUP
 
 
 def text_reply(reply: str):
@@ -470,3 +469,179 @@ def text_reply(reply: str):
         return reply
 
     return handler
+
+
+class ControlledCompletion(asyncio.Event):
+    def __init__(self):
+        super().__init__()
+        self.status = "pending"
+
+    def finish(self, status="success"):
+        self.status = status
+        self.set()
+
+
+class ControlledRecorder(Recorder):
+    def __init__(self):
+        super().__init__()
+        self.completions = []
+        self.generation = 0
+        self.stopped = []
+
+    def speak(self, text, *, owner=None):
+        self.spoken.append(text)
+        done = ControlledCompletion()
+        self.completions.append(done)
+        return done
+
+    def chime(self, *, owner=None):
+        done = ControlledCompletion()
+        done.finish()
+        return done
+
+    def input_generation(self):
+        return self.generation
+
+    def start_listening(self, *, replay=True):
+        self.generation += 1
+        super().start_listening()
+
+    async def stop_audio(self, owner):
+        self.stopped.append(owner)
+
+
+class TestVoiceContinuity:
+    async def test_old_capture_receipt_and_progress_do_not_affect_new_capture(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.CAPTURING)
+        old_owner = sm.owner
+        await sm.on_wake()
+        await sm.on_asr_text("帮我读下这本书")
+        spoken = list(rec.spoken)
+        await sm.on_capture_done(True, owner=old_owner)
+        sm.speak_progress(old_owner, "旧识别完成")
+        assert sm.state is State.CAPTURING
+        assert rec.spoken == spoken
+        await sm.on_capture_done(True, owner=sm.owner)
+        assert sm.state is State.READING
+
+    async def test_failed_stop_still_recovers_input_readiness(self):
+        rec = ControlledRecorder()
+        async def fail(owner):
+            raise RuntimeError("driver failed")
+        rec.stop_audio = fail
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        assert sm.state is State.LISTENING
+        assert rec.spoken[-1] == pb.PLAYBACK_FAILED
+        sm.tick(T0 + 8)
+        assert sm.state is State.STANDBY
+
+    async def test_failed_playback_recovers_without_followup(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec, local_llm=text_reply("回答"))
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("问题")
+        rec.completions[-1].finish("failed")
+        await asyncio.sleep(0)
+        assert sm.state is State.LISTENING
+        assert rec.spoken[-1] == pb.PLAYBACK_FAILED
+        sm.tick(T0 + 8)
+        assert sm.state is State.STANDBY
+
+    async def test_missing_input_recovers_without_truncating_ongoing_speech(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        sm.on_speech_started(rec.generation)
+        sm.tick(T0 + 29.9)
+        assert sm.state is State.LISTENING
+        sm.tick(T0 + 30)
+        assert sm.state is State.LISTENING
+        assert rec.spoken[-1] == pb.INPUT_NOT_HEARD
+        sm.tick(T0 + 38)
+        assert sm.state is State.STANDBY
+
+    async def test_wake_reading_pauses_before_listening(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.READING)
+        await sm.on_wake()
+        assert rec.playback == ["pause"]
+        assert sm.state is State.LISTENING
+
+    async def test_cancel_pending_playback_prevents_late_followup(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec, local_llm=text_reply("回答"))
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("问题")
+        done = rec.completions[-1]
+        await sm.on_asr_text("结束聊天")
+        done.finish()
+        await asyncio.sleep(0)
+        assert sm.state is State.STANDBY
+
+    async def test_followup_starts_only_after_successful_playback(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec, local_llm=text_reply("回答"))
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("为什么天是蓝的")
+        assert sm.state is State.SPEAKING
+        sm.tick(T0 + 60)
+        assert sm.state is State.SPEAKING
+        rec.completions[-1].finish()
+        await asyncio.sleep(0)
+        assert sm.state is State.FOLLOWUP
+        sm.tick(T0 + 74.9)
+        assert sm.state is State.FOLLOWUP
+        sm.tick(T0 + 75)
+        assert sm.state is State.STANDBY
+
+    async def test_valid_long_speech_is_not_cut_by_idle_window(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        sm.tick(T0 + 7.9)
+        sm.on_speech_started(rec.generation)
+        for second in range(8, 49):
+            sm.tick(T0 + second)
+            sm.on_audio_progress(rec.generation)
+        assert sm.state is State.LISTENING
+        sm.on_speech_ended(rec.generation)
+        await sm.on_asr_text("打开台灯", generation=rec.generation)
+        assert rec.ir == [("台灯", "打开")]
+
+    async def test_old_route_result_after_new_wake_is_discarded(self):
+        entered, release = asyncio.Event(), asyncio.Event()
+        async def handler(text):
+            entered.set()
+            try:
+                await release.wait()
+            except asyncio.CancelledError:
+                pass  # non-cancellable backend returning late
+            return "迟到的旧回答"
+        rec = ControlledRecorder()
+        sm = build_engine(rec, local_llm=handler)
+        await enter_state(sm, rec, State.LISTENING)
+        old = asyncio.create_task(sm.on_asr_text("旧问题"))
+        await entered.wait()
+        assert sm.state is State.PROCESSING
+        await sm.on_wake()
+        release.set()
+        await old
+        assert sm.state is State.LISTENING
+        assert "迟到的旧回答" not in rec.spoken
+
+    async def test_stale_speech_and_endpoint_do_not_extend_new_session(self):
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        old_generation = rec.generation
+        await sm.on_wake()
+        sm.on_speech_started(old_generation)
+        await sm.on_asr_text("打开台灯", generation=old_generation)
+        sm.tick(T0 + 8)
+        assert sm.state is State.STANDBY
+        assert rec.ir == []

@@ -72,12 +72,30 @@ class FakeTts:
 
     def __init__(self) -> None:
         self.spoken: list[tuple[str, float, float]] = []
+        self.chimes = 0
+        self.cancelled_owners = []
+        self.closed = False
 
-    def speak(self, text: str, speed: float = 1.0, volume: float = 1.0) -> asyncio.Event:
+    def speak(self, text: str, speed: float = 1.0, volume: float = 1.0, *, owner=None) -> asyncio.Event:
         self.spoken.append((text, speed, volume))
         done = asyncio.Event()
         done.set()
         return done
+
+    def chime(self, *, owner=None, volume=1):
+        self.chimes += 1
+        done = asyncio.Event()
+        done.set()
+        return done
+
+    def cancel_owner(self, owner):
+        self.cancelled_owners.append(owner)
+
+    async def stop(self, owner=None):
+        self.cancel_owner(owner)
+
+    async def close(self):
+        self.closed = True
 
 
 class FakeLlm:
@@ -262,6 +280,72 @@ class TestLifecycle:
         rig.source.push_eof()
         await asyncio.wait_for(task, timeout=5.0)
         assert task.done() and not task.exception()
+        assert rig.tts.closed
+
+
+class TestOwnedEffects:
+    async def test_wake_only_preroll_endpoint_keeps_original_eight_second_deadline(self, tmp_path):
+        rig = make_rig(tmp_path, clock=lambda: 1000.0)
+        rt = rig.runtime
+        rt.wake_stream.hits.append("小丽拉")
+        rt._gate.feed(np.full(1600, .1, dtype=np.float32))
+        await settle(rt)
+        assert rt.engine.state.value == "listening"
+        assert rt.engine._awaiting_endpoint
+        rt.asr_stream.text = lambda: "小丽拉"
+        rt.asr_stream.is_endpoint = lambda: True
+        rt._gate.feed(np.zeros(12000, dtype=np.float32))
+        await settle(rt)
+        rt.engine.tick(1008.0)
+        assert rt.engine.state.value == "standby"
+
+    async def test_queued_wake_before_privacy_cycle_is_discarded(self, tmp_path):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        rt.wake_stream.hits.append("小丽拉")
+        rt._gate.feed(np.zeros(1600, dtype=np.float32))
+        await rt.privacy.set_enabled(True, source="test")
+        await rt.privacy.set_enabled(False, source="test")
+        await settle(rt)
+        assert rt.engine.state.value == "standby"
+        assert rig.tts.chimes == 0
+
+    @pytest.mark.parametrize("interrupt", ["cancel", "wake", "privacy"])
+    async def test_queued_ir_is_rejected_if_owner_is_invalidated(self, tmp_path, interrupt):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        await rt.engine.on_asr_text("打开台灯")
+        # IR task is queued but has not run yet; interrupt without yielding.
+        if interrupt == "cancel":
+            await rt.engine.on_asr_text("取消")
+        elif interrupt == "wake":
+            await rt.engine.on_wake()
+        else:
+            await rt.privacy.set_enabled(True, source="test")
+        await settle(rt)
+        assert rig.ir.sent_codes == []
+
+    async def test_high_risk_admission_needs_same_owner_confirmation(self, tmp_path):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        owner = rt.engine.owner
+        assert not rt.engine.admit_ir(owner, "取暖器", "打开", confirmed=True)
+        assert not rt.engine.admit_ir(None, "台灯", "打开", confirmed=False)
+        await rt.engine.on_asr_text("结束聊天")
+        assert not rt.engine.admit_ir(owner, "台灯", "打开", confirmed=False)
+
+    async def test_privacy_invalidates_pending_answer_and_stops_owned_audio(self, tmp_path):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        owner = rt.engine.owner
+        await rt.privacy.set_enabled(True, source="test")
+        assert rt.engine.state.value == "standby"
+        assert not rt.engine.is_current(owner)
+        assert owner in rig.tts.cancelled_owners
+        assert rt.dispatcher.generation != rt.engine.listening_generation
 
 
 class TestDialogWiring:
@@ -281,8 +365,9 @@ class TestDialogWiring:
         await rt.engine.on_asr_text("帮我读下这本书")
         await settle(rt)
         spoken = [text for text, _, _ in rig.tts.spoken]
-        assert spoken[:3] == [pb.WAKE_ACK, pb.CAPTURE_GUIDANCE, pb.OCR_COMPLETE]
-        assert "".join(spoken[3:]) == original
+        assert rig.tts.chimes == 1
+        assert spoken[:2] == [pb.CAPTURE_GUIDANCE, pb.OCR_COMPLETE]
+        assert "".join(spoken[2:]) == original
         assert rt.camera.capture_calls == 1
         assert rt.engine.state.value == "standby"
 
@@ -335,7 +420,7 @@ class TestDialogWiring:
             await rig.runtime.engine.on_asr_text("打开台灯")
             await settle(rig.runtime)
             spoken = [t for t, _, _ in rig.tts.spoken]
-            assert any("我在听" in t for t in spoken)
+            assert rig.tts.chimes == 1
             assert any("台灯" in t for t in spoken)
             assert rig.ir.sent_codes == ["CODE_LAMP_ON"]
             assert rig.runtime.engine.state.value == "standby"
@@ -568,11 +653,12 @@ class TestReviewFixes:
             await rig.runtime.engine.on_wake()
             assert rig.runtime.engine.state.value == "listening"
             now["t"] += 9.0  # 第一个 8s 窗口超时
-            rig.source.push_silence(0.2)
-            await asyncio.sleep(0.3)  # 等编排循环消费静音块并触发 tick
+            # No microphone block arrives: the independent clock must expire.
+            await asyncio.sleep(0.15)
             await settle(rig.runtime)
             assert rig.runtime.engine.state.value == "standby"
-            assert [t for t, _, _ in rig.tts.spoken] == ["我在听。"]
+            assert rig.tts.spoken == []
+            assert rig.tts.chimes == 1
         finally:
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)

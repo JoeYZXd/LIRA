@@ -16,6 +16,9 @@ from typing import Sequence
 
 __all__ = [
     "WAKE_ACK",
+    "INPUT_NOT_HEARD",
+    "UNDERSTANDING_FAILED",
+    "PLAYBACK_FAILED",
     "LISTEN_REMIND",
     "LISTEN_GOODBYE",
     "SESSION_CANCELLED",
@@ -37,6 +40,7 @@ __all__ = [
     "OCR_GUIDANCE",
     "OCR_GIVEUP",
     "CAPTURE_GUIDANCE",
+    "OCR_COMPLETE",
     "PRIVACY_ON",
     "PRIVACY_OFF",
     "ir_sent_text",
@@ -120,8 +124,12 @@ DISCLAIMER_OFFLINE = "当前没有网络，我按原文读给您听。"
 OCR_GUIDANCE = "我没有看清，请把材料放平，再靠近一点。"
 OCR_GIVEUP = "我还是没看清。请找家人帮忙，或者稍后再试。"
 CAPTURE_GUIDANCE = "正在为您拍摄，请把材料放平，不要遮挡镜头。"
+OCR_COMPLETE = "识别已完成，可以把书或材料从摄像头前移开了。我现在读给您听。"
 
 # ---------- 隐私模式后果播报（R12，U7 使用；含麦克风已关提示） ----------
 
 PRIVACY_ON = "好的，隐私模式已开启。麦克风已经关闭，我不会再听您说话，也不会把任何内容发到网上。想让我继续工作，请让家人在手机上打开设备管理页面关闭隐私模式。"
 PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫我小丽拉。"
+INPUT_NOT_HEARD = "收音没有完成，请再说一遍。"
+UNDERSTANDING_FAILED = "理解指令时出了问题，请再说一遍。"
+PLAYBACK_FAILED = "回答没有播完，您可以再问一次。"

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import logging
+import inspect
 from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Iterable
@@ -62,7 +63,7 @@ class Router:
         """当前家电表（U6 状态机澄清/未配置细分检查复用同一份）。"""
         return tuple(self._appliances()) if callable(self._appliances) else self._appliances  # type: ignore[return-value]
 
-    async def route(self, text: str) -> RouteResult:
+    async def route(self, text: str, *, on_wait_feedback=None) -> RouteResult:
         # Tier 1: 本地规则（家电/阅读/帮助/取消）；家电表经 property 现读
         # （callable 提供者 = 每次匹配取本地库最新快照，U6/AE7 同步即时生效）
         intent = match_local(text, self.appliances)
@@ -71,15 +72,22 @@ class Router:
 
         # Tier 2: 本地 LLM（未配置则跳过 = 可配置降级）
         if self._local_llm is not None:
-            reply = await self._local_llm(text)
+            reply = await self._call_llm(self._local_llm, text, on_wait_feedback)
             if reply:
                 return RouteResult(RouterTier.LOCAL_LLM, reply=reply)
 
         # Tier 3: 远程 LLM（可用性信号不满足时绝不发起调用）
         if self._remote_llm is not None and self._remote_available():
-            reply = await self._remote_llm(text)
+            reply = await self._call_llm(self._remote_llm, text, on_wait_feedback)
             if reply:
                 return RouteResult(RouterTier.REMOTE_LLM, reply=reply)
 
         logging.debug("路由降级: 全部层级无结果")
         return RouteResult(RouterTier.UNAVAILABLE)
+
+    @staticmethod
+    async def _call_llm(handler, text, on_wait_feedback):
+        parameters = inspect.signature(handler).parameters
+        if "on_wait_feedback" in parameters:
+            return await handler(text, on_wait_feedback=on_wait_feedback)
+        return await handler(text)

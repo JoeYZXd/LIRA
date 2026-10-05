@@ -23,7 +23,7 @@ from typing import Awaitable, Callable, Protocol, Sequence
 import cv2
 import numpy as np
 
-from lira.dialog.phrasebook import CAPTURE_GUIDANCE
+from lira.dialog.phrasebook import CAPTURE_GUIDANCE, OCR_COMPLETE
 from lira.hal import Camera, HalError
 from lira.vision.engine import OcrEngine
 
@@ -89,9 +89,13 @@ class TtsBlockSpeaker:
         self.volume: float = 1.0
         self.speed: float = speed
 
-    async def play(self, text: str) -> None:
-        done = self._tts.speak(text, volume=self.volume, speed=self.speed)  # type: ignore[attr-defined]
+    async def play(self, text: str, *, owner=None) -> None:
+        done = self._tts.speak(text, volume=self.volume, speed=self.speed, owner=owner)  # type: ignore[attr-defined]
         await done.wait()
+        if getattr(done, "status", "success") == "cancelled":
+            raise asyncio.CancelledError
+        if getattr(done, "status", "success") != "success":
+            raise HalError("阅读播报失败")
 
 
 class ReadingSession:
@@ -239,40 +243,71 @@ class ReadingPipeline:
 
     # ---------- 拍摄流程（R4/R26） ----------
 
-    async def run_capture(self) -> None:
+    async def run_capture(self, *, read_original: bool = False, owner=None,
+                          is_valid: Callable[[], bool] = lambda: True,
+                          on_capture_done=None, on_reading_finished=None) -> None:
         """R4 引导 → 拍摄 → OCR；空结果/失败 → on_capture_done(False)（R26 信号）。
 
         可取消（F1）：状态机取消离开 CAPTURING 时经任务句柄 cancel 本协程——
         CancelledError 在任一 await 点即中止流程，不回执 on_capture_done、
         不创建朗读会话（防御性兜底：万一取消晚到，也先停掉已开的会话再上抛）。
         """
+        notify = on_capture_done or self._on_capture_done
+        created_session = None
+        def check():
+            if not is_valid():
+                raise asyncio.CancelledError
+        async def play(text):
+            check()
+            if isinstance(self._speaker, TtsBlockSpeaker):
+                await self._speaker.play(text, owner=owner)
+            else:
+                await self._speaker.play(text)
+            check()
         try:
-            await self._speaker.play(CAPTURE_GUIDANCE)
+            check()
+            await play(CAPTURE_GUIDANCE)
             image = await self._grab()
+            check()
             if image is None:
-                self._on_capture_done(False)
+                notify(False)
                 return
             try:
                 lines = await asyncio.to_thread(self._engine.read, image)
             except Exception:  # noqa: BLE001 - 推理故障按"未检出"走 R26 引导
                 logging.exception("OCR 推理失败")
                 lines = []
+            check()
             if not lines:
                 logging.info("OCR 未检出文本行（R26 引导信号）")
-                self._on_capture_done(False)
+                notify(False)
                 return
-            raw_text = [line.text for line in lines]
-            blocks = chunk_lines(await self._polish(raw_text), self._block_chars)
-            self._session = ReadingSession(
+            raw_text = [line.text for line in lines if line.text.strip()]
+            if not raw_text:
+                notify(False)
+                return
+            # OCR 已结束，先明确告知可以移开材料，再加工或朗读缓存文本。
+            await play(OCR_COMPLETE)
+            text = raw_text if read_original else await self._polish(raw_text)
+            check()
+            blocks = chunk_lines(text, self._block_chars)
+            def finished():
+                if self._session is created_session:
+                    self._session = None
+                    callback = on_reading_finished or self._on_reading_finished
+                    if callback is not None:
+                        callback()
+            created_session = ReadingSession(
                 blocks,
                 self._speaker,
-                on_finished=self._handle_finished,
+                on_finished=finished,
             )
+            self._session = created_session
+            notify(True)
             self._session.start()
-            self._on_capture_done(True)
         except asyncio.CancelledError:
-            if self._session is not None:
-                self._session.stop()
+            if created_session is not None and self._session is created_session:
+                created_session.stop()
                 self._session = None
             raise
         except Exception:  # noqa: BLE001 - 拍摄/引导非预期故障也必须回执（评审：CAPTURING 卡死防线）
@@ -280,7 +315,8 @@ class ReadingPipeline:
             # 带 unretrieved 异常死掉，on_capture_done 永不到达 -> 引擎永久卡在
             # CAPTURING（唤醒词失效）。终局故障按"未检出"走 R26 引导/重拍。
             logging.exception("拍摄流程非预期故障（按未检出处理）")
-            self._on_capture_done(False)
+            if is_valid():
+                notify(False)
 
     async def _polish(self, raw_lines: list[str]) -> list[str]:
         """可选口语化加工（AE2）：失败/空结果回退原文，不静默、不拒读。"""

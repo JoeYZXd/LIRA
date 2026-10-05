@@ -31,6 +31,7 @@ from lira.dialog.phrasebook import WAIT_REMOTE
 from lira.llm.breaker import CircuitBreaker
 from lira.llm.prompts import (
     PLAIN_SPEAK_SYSTEM_PROMPT,
+    VOICE_ASSISTANT_SYSTEM_PROMPT,
     assemble_colloquial,
     is_complex_text,
     is_medical_text,
@@ -47,6 +48,7 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+_DEFAULT_FEEDBACK = object()
 
 
 class PrivacyBlocked(Exception):
@@ -100,7 +102,8 @@ class LlmClient:
 
     # ---------- 基础对话（流式回收） ----------
 
-    async def chat(self, prompt: str, *, system: str | None = None) -> str:
+    async def chat(self, prompt: str, *, system: str | None = None,
+                   on_wait_feedback=_DEFAULT_FEEDBACK) -> str:
         """发起一次流式对话并回收完整文本。
 
         Raises:
@@ -123,7 +126,7 @@ class LlmClient:
         VOICE_LOG.log("llm", f"与大模型交互中（提示 {len(prompt)} 字）…")
         started = time.monotonic()
         try:
-            text = await self._stream_chat(messages)
+            text = await self._stream_chat(messages, on_wait_feedback=on_wait_feedback)
         except APIConnectionError as exc:
             # 含 APITimeoutError（其父类是 APIConnectionError），由熔断器计数
             self._breaker.record_failure()
@@ -143,38 +146,48 @@ class LlmClient:
         VOICE_LOG.log("llm_reply", f"大模型返回结果（{len(text)} 字）：{preview}")
         return text
 
-    async def _stream_chat(self, messages: list[dict[str, str]]) -> str:
+    async def _stream_chat(self, messages: list[dict[str, str]], *,
+                           on_wait_feedback=_DEFAULT_FEEDBACK) -> str:
         """建流并回收全部增量；首 token 等待超窗时触发一次 R28 回调。"""
 
-        async def _open_and_first_chunk() -> tuple[object, object]:
+        stream = None
+        async def _open_and_first_chunk() -> object:
+            nonlocal stream
             stream = await self._client.chat.completions.create(
                 model=self._model,
                 messages=messages,  # type: ignore[arg-type]
                 stream=True,
             )
-            return stream, await anext(stream)  # type: ignore[func-returns-value]
+            try:
+                return await anext(stream)
+            except StopAsyncIteration:
+                return None
 
-        # create + 首 token 共用一个 R28 等待窗口；用 asyncio.wait 竞速，
-        # 绝不取消在途任务（取消会破坏底层流），超窗后继续等待至完成。
+        # Opening and first token share the feedback window. Only an explicit
+        # cancellation aborts the operation and closes its acquired stream.
         task = asyncio.ensure_future(_open_and_first_chunk())
         try:
             done, _ = await asyncio.wait({task}, timeout=self._wait_feedback_seconds)
             if not done:
-                self._fire_wait_feedback()
-            stream, first_chunk = await task
-        except asyncio.CancelledError:
-            task.cancel()
-            raise
-
-        parts: list[str] = []
-        chunk = first_chunk
-        while True:
-            self._append_delta(parts, chunk)
-            try:
-                chunk = await anext(stream)  # type: ignore[arg-type]
-            except StopAsyncIteration:
-                break
-        return "".join(parts)
+                self._fire_wait_feedback(on_wait_feedback)
+            first_chunk = await task
+            parts: list[str] = []
+            if first_chunk is not None:
+                self._append_delta(parts, first_chunk)
+                async for chunk in stream:
+                    self._append_delta(parts, chunk)
+            return "".join(parts)
+        finally:
+            if not task.done():
+                task.cancel()
+            # Opening can acquire a stream just as cancellation arrives. Await
+            # its cleanup before inspecting/closing the acquired resource.
+            await asyncio.gather(task, return_exceptions=True)
+            if stream is not None:
+                try:
+                    await stream.close()
+                except Exception:
+                    logger.warning("llm.chat event=stream_close_failed")
 
     @staticmethod
     def _append_delta(parts: list[str], chunk: object) -> None:
@@ -186,10 +199,12 @@ class LlmClient:
         if content:
             parts.append(content)
 
-    def _fire_wait_feedback(self) -> None:
-        if self._on_wait_feedback is not None:
+    def _fire_wait_feedback(self, callback=_DEFAULT_FEEDBACK) -> None:
+        if callback is _DEFAULT_FEEDBACK:
+            callback = self._on_wait_feedback
+        if callback is not None:
             logger.info("llm.chat event=wait_feedback threshold=%.2fs", self._wait_feedback_seconds)
-            self._on_wait_feedback()
+            callback()
 
     # ---------- 复杂文本转白话（R3/R27） ----------
 
@@ -212,11 +227,12 @@ def make_remote_handler(client: LlmClient) -> Callable[[str], Awaitable[str | No
     异常不外抛——降级语义归路由层，播报归状态机。
     """
 
-    async def handler(text: str) -> str | None:
+    async def handler(text: str, *, on_wait_feedback=None) -> str | None:
         if not client.is_available():
             return None
         try:
-            return await client.chat(text)
+            return await client.chat(text, system=VOICE_ASSISTANT_SYSTEM_PROMPT,
+                                     on_wait_feedback=on_wait_feedback)
         except PrivacyBlocked:
             # 隐私后果播报（R12）由状态机/装配层负责，路由层只见降级
             return None

@@ -583,6 +583,46 @@ class TestAssemblyHelpers:
         hal = build_board_hal(cfg)  # 构造不触网（open 时才连）
         assert isinstance(hal["ir"], BroadlinkIrController)
 
+    async def test_enter_hal_resources_ir_failure_degrades_to_mock(self, caplog):
+        """R9 韧性：IR open 失败（离线/锁定）回退 Mock，主循环不崩。"""
+        from contextlib import AsyncExitStack
+
+        from lira.hal.base import HalError
+        from lira.hal.mock.ir import MockIrController
+        from lira.main import enter_hal_resources
+
+        class FailingIr:
+            async def __aenter__(self):
+                raise HalError("BroadLink 认证被拒")
+
+            async def __aexit__(self, *exc):
+                return False
+
+        hal = {"camera": MockIrController(), "ir": FailingIr()}  # camera 槽位用无害 mock 占位
+        stack = AsyncExitStack()
+        with caplog.at_level(logging.ERROR):
+            await enter_hal_resources(hal, stack)
+        assert isinstance(hal["ir"], MockIrController)
+        assert any("IR 初始化失败" in r.message for r in caplog.records)
+        await stack.aclose()
+
+    async def test_enter_hal_resources_non_ir_failure_raises(self):
+        """非 IR HAL 失败仍快速上抛（致命可见，不吞）。"""
+        from contextlib import AsyncExitStack
+
+        from lira.hal.base import HalError
+        from lira.main import enter_hal_resources
+
+        class FailingCam:
+            async def __aenter__(self):
+                raise HalError("相机故障")
+
+            async def __aexit__(self, *exc):
+                return False
+
+        with pytest.raises(HalError):
+            await enter_hal_resources({"camera": FailingCam()}, AsyncExitStack())
+
     async def test_main_exit_codes(self, tmp_path, monkeypatch):
         """--dry-run=0；非 dry-run 缺 api_key=2（真实装配错误路径）。"""
         from lira import main as main_mod

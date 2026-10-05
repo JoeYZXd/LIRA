@@ -196,6 +196,31 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
     return {"camera": camera, "audio": mic, "ir": ir, "display": MockDisplay()}
 
 
+async def enter_hal_resources(hal: dict[str, object], stack) -> None:
+    """逐个进入 HAL 上下文并打就绪日志。
+
+    IR 专属韧性降级（R9）：RM4 Mini 断电/离线/锁定导致 open 失败时，回退
+    MockIrController——家电控制不可用但语音/阅读照常，服务不进崩溃循环；
+    ERROR 日志带修复指引。其余 HAL 失败照旧上抛（致命，快速失败可见）。
+    """
+    for name, resource in list(hal.items()):
+        try:
+            await stack.enter_async_context(resource)
+        except Exception:
+            if name != "ir":
+                raise
+            logging.exception(
+                "IR 初始化失败：回退 MockIrController（家电控制不可用，语音/阅读不受影响）；"
+                "检查 RM4 Mini 供电/网络/安全锁后重启服务"
+            )
+            from lira.hal.mock.ir import MockIrController
+
+            fallback = MockIrController()
+            await stack.enter_async_context(fallback)
+            hal["ir"] = fallback
+        logging.info("HAL 资源已就绪: %s", name)
+
+
 # ---------- 引擎装配（依赖/模型缺失 -> None + 日志指引；dry-run 不构造） ----------
 
 
@@ -684,9 +709,7 @@ class DeviceRuntime:
 
         stack = AsyncExitStack()
         try:
-            for name, resource in self._hal.items():
-                await stack.enter_async_context(resource)
-                logging.info("HAL 资源已就绪: %s", name)
+            await enter_hal_resources(self._hal, stack)
             if self._cfg.sync.ws_url:
                 self.spawn_companion(self._run_sync())
             else:

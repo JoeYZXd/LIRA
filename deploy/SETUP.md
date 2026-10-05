@@ -354,10 +354,12 @@ gpio-ir/ir-ctl 路线，改用 **BroadLink RM4 Mini**（约 40~90 元）：USB �
    （码值为不透明字符串，直接换传输层）。板上 config.yaml 已加
    `hal.ir_host/ir_mac`。**IR open 失败（离线/锁定）自动降级 Mock**：家电控制
    不可用但语音/阅读照常，不进崩溃循环（R9）。
-4. ⏳ 待设备解锁后冒烟：**锁定是 auth -1 的头号原因**——新固件设备默认锁到云
-   账户（App 发现探测可见 `is_locked=True`）。官方 App → 设备 → 设置 → 关闭
-   「安全锁/Lock Device」→ 服务重启后日志应现 `BroadLink IR 就绪`；学习电视
-   "音量+" → 语音/后台发送 → 电视有反应 = M5 ✅
+4. ✅ 设备解锁与实机冒烟（2026-10-05）：**锁定是 auth -1 的头号原因**——新固件设备
+   默认锁到云账户（App 发现探测可见 `is_locked=True`）。官方 App → 设备 → 设置 →
+   关闭「安全锁/Lock Device」后 auth 即通。实机冒烟：`learn` 轮询捕获 266 字节码
+   （未按键期间持续 -5 StorageError 属正常等待，轮询按"还没录到"续等）→ 5s 后
+   `send` 回放 → **目标设备有反应**。服务装配日志：`BroadLink IR 就绪:
+   host=192.168.101.27 devtype=0x653a model=RM4 mini locked=False`。M5 ✅
 
 **韧性注记**：R9 的"断网"指外网——RM4 走局域网，外网断不影响；家庭 AP 故障则 IR 失效
 （open 失败自动降级 Mock，主循环不受影响），作为已知限制随本节记录（最终形态若不可接受，
@@ -382,7 +384,7 @@ gpio-ir/ir-ctl 路线，改用 **BroadLink RM4 Mini**（约 40~90 元）：USB �
 > 全绿；**语音唤醒→ASR→LLM 对话链路已于 2026-10-04 实机验证通过**（真麦 KWS 命中
 > "小丽拉"→ 播"我在听"→ GLM 远程调用 200 OK/2.5s； systemd user unit 常驻 +
 > 开机自启，见 ④）；阅读/视觉链路经开发者控制台实机使用中（vision/OCR 事件正常）。
-> 同步（ws_url）与 IR（BroadLink 待到货）仍待接。
+> 同步（ws_url）仍待接；IR 已接通（2026-10-05 M5 冒烟通过，见 2.6）。
 
 **① 依赖与安装**（extras 名以 `device/pyproject.toml` 为准）：
 
@@ -481,7 +483,7 @@ dev_console:
 | M2 | 蓝牙音频链路延迟（主观） | A2DP 通（智能音箱 Pro-2639，MAC 50:FE:39:F8:83:8B，trust 已设）；aplay 全链路出声；延迟主观可接受（TTS 场景） | 2026-10-02 |
 | M3 | 摄像头节点 / 抓帧格式与分辨率 | OV13855@CAM1（overlay `ov13855-c1`，sensor 7-0036）；ISP mainpath `/dev/video11` **2688×3136** NV12（4224 请求被 rkcif 驱动钳宽），HAL 走 ISP 管线+软件 3A（`hal/board/camera_isp.py`，2026-10-03 打通；CIF 裸 RAW 路径已退役）；链路 rkcif→sditf→rkisp0-vir2 经 media1 确认 ENABLED | 2026-10-02/04 |
 | M4 | 麦阵 / 采集验证 | FY-SP003U 双麦（USB，card 3），`plughw:3,0` 16k/S16LE/stereo 录音 ✓；回放经蓝牙音箱 ✓。板载 ES8388 = card 2（3.5mm 口，M6 本地喇叭用） | 2026-10-02 |
-| M5 | 红外学习/回放 | 传输层已交付（RM4 mini @192.168.101.27，1.0.6 锁定安装，见 2.6）；**待设备解锁（is_locked=True）后学习/回放冒烟** | — |
+| M5 | 红外学习/回放 | RM4 mini @192.168.101.27（0x653a）；python-broadlink==1.0.6 锁定安装；解锁后实机冒烟：学习 266B 码 → 回放设备有反应 ✅（见 2.6） | 2026-10-05 |
 | M6 | 本地喇叭出声 | USB 有源音箱（3.5mm AUX）← 板载 ES8388 card 2 ✓；软音量经 PipeWire；PAM8403 方案取消 | 2026-10-03 |
 | M7 | 唤醒→对话链路实机 + 常驻 | systemd user unit 常驻（Linger 开机自启、Restart=always）、音频设备号钉死 `pipewire` 子串；真麦 唤醒→ASR→GLM（200 OK/1~3s）→TTS 全链路 ✓；UI 200；详见 2.8 ④ | 2026-10-04 |
 | KWS | 唤醒词误触/漏触（实机 10 分钟） | 夹具 0.1~0.25 四档阈值全命中、负样本零误触（2026-10-03）；**实机 soak：待机态唤醒 4/4 漏触 0、误触 0**——背景为持续大音量外来语视频语音（峰值削波），每次命中均完成唤醒→指令→GLM 回复全链路；另 2 次对话态重复唤醒被状态机按设计抑制（离线复核检出、实时正确不响应） | 2026-10-04 |

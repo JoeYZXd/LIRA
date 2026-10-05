@@ -65,6 +65,9 @@ class HalConfig:
     #: 板上摄像头设备（M3：OV13855@CAM1 → /dev/video0）
     camera_device: str = ""
     echo_cancel_enabled: bool = False
+    #: 板上红外（M5：BroadLink RM4 Mini）。ir_host 空 = 未配置（板上装配 Mock 回退）
+    ir_host: str = ""
+    ir_mac: str = ""
 
 
 @dataclass(frozen=True)
@@ -127,6 +130,9 @@ DEFAULTS: dict[str, Any] = {
         "speaker_device": "",
         "camera_device": "",
         "echo_cancel_enabled": False,
+        # M5：BroadLink RM4 Mini（局域网固定 IP + MAC；空 = IR 未配置）
+        "ir_host": "",
+        "ir_mac": "",
     },
     # U7：设备 Web UI 监听地址（局域网浏览器访问；M7 起 in-process 挂载主循环）
     "ui": {
@@ -164,6 +170,8 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_HAL_SPEAKER_DEVICE": ("hal", "speaker_device", str),
     "LIRA_HAL_ECHO_CANCEL_ENABLED": ("hal", "echo_cancel_enabled", "bool"),
     "LIRA_HAL_CAMERA_DEVICE": ("hal", "camera_device", str),
+    "LIRA_HAL_IR_HOST": ("hal", "ir_host", str),
+    "LIRA_HAL_IR_MAC": ("hal", "ir_mac", str),
     "LIRA_DB_PATH": (None, "db_path", str),
     "LIRA_SYNC_WS_URL": ("sync", "ws_url", str),
     "LIRA_SYNC_HEARTBEAT_SECONDS": ("sync", "heartbeat_seconds", float),
@@ -258,6 +266,26 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
         raise ConfigError(
             f"hal.backend={config['hal']['backend']!r} 非法，可选值: {HAL_BACKENDS}。"
         )
+    # M5：IR 配置须成对，MAC 格式在此把关（运行期校验在 HAL 层）
+    ir_host = str(hal["ir_host"]).strip()
+    ir_mac = str(hal["ir_mac"]).strip()
+    if ir_host and not ir_mac:
+        raise ConfigError(
+            "hal.ir_host 已配置但 hal.ir_mac 为空。请同时配置设备 MAC"
+            "（板上发现探测: python -m lira.hal.board.ir_broadlink）。"
+        )
+    if not ir_host and ir_mac:
+        raise ConfigError("hal.ir_mac 已配置但 hal.ir_host 为空。请同时配置设备固定 IP。")
+    if ir_mac:
+        text = ir_mac.replace(":", "").replace("-", "").lower()
+        if len(text) != 12:
+            raise ConfigError(
+                f"hal.ir_mac={ir_mac!r} 非法（应为 6 字节十六进制，如 ec:0b:ae:0c:74:e4）。"
+            )
+        try:
+            bytes.fromhex(text)
+        except ValueError as exc:
+            raise ConfigError(f"hal.ir_mac={ir_mac!r} 含非十六进制字符。") from exc
     if not config["db_path"]:
         raise ConfigError("db_path 为空。请设置本地家电配置库路径（如 data/device.db）。")
     if config["sync"]["heartbeat_seconds"] <= 0:
@@ -339,6 +367,8 @@ def load_config(
             speaker_device=str(hal["speaker_device"]),
             camera_device=str(hal["camera_device"]),
             echo_cancel_enabled=hal["echo_cancel_enabled"],
+            ir_host=str(hal["ir_host"]).strip(),
+            ir_mac=str(hal["ir_mac"]).strip(),
         ),
         sync=SyncConfig(
             ws_url=str(config["sync"]["ws_url"]),

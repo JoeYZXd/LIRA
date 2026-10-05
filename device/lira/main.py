@@ -171,8 +171,8 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
       build_audio_stack）。
     - Camera = V4l2IspCamera（RKISP NV12 管线；取代裸 Bayer 路径，见 camera_raw 模块注）。
     - Display 无触摸屏 -> MockDisplay（no-op 语义一致）。
-    - IR 待 M5（BroadLink RM4 Mini 到货接 ``ir_broadlink``，传输层替换，链路不变），
-      当前以 MockIrController 装配并明确告警：发射只记录、不生效。
+    - IR = BroadlinkIrController（M5：RM4 Mini 局域网本地协议；hal.ir_host/ir_mac
+      已配置时启用）。未配置则回退 MockIrController 并明确告警：发射只记录、不生效。
     """
     from lira.audio.mic import SoundDeviceMic
     from lira.hal.board.camera_isp import V4l2IspCamera
@@ -182,11 +182,17 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
                         echo_cancel=cfg.hal.echo_cancel_enabled))
     # ISP 管线（NV12，干净帧）取代裸 Bayer 路径（板上实测条纹不可根治）
     camera = V4l2IspCamera(device=cfg.hal.camera_device or "/dev/video11")
-    ir = MockIrController()
-    logging.warning(
-        "IR 板上实现待 M5（BroadLink RM4 Mini）：当前装配 MockIrController，"
-        "红外发射只记录不生效（家电控制不可用）"
-    )
+    if cfg.hal.ir_host:
+        from lira.hal.board.ir_broadlink import BroadlinkIrController
+
+        ir = BroadlinkIrController(cfg.hal.ir_host, cfg.hal.ir_mac)
+        logging.info("IR = BroadlinkIrController（BroadLink RM4 Mini @ %s）", cfg.hal.ir_host)
+    else:
+        ir = MockIrController()
+        logging.warning(
+            "IR 未配置（hal.ir_host 为空）：装配 MockIrController，"
+            "红外发射只记录不生效（家电控制不可用）；配置步骤见 deploy/SETUP.md 2.6"
+        )
     return {"camera": camera, "audio": mic, "ir": ir, "display": MockDisplay()}
 
 

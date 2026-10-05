@@ -556,23 +556,32 @@ class TestAssemblyHelpers:
     def test_build_board_hal_constructs_and_warns(self, tmp_path, caplog, monkeypatch):
         monkeypatch.setattr("lira.audio.devices.board_audio_device",
                             lambda value, **kwargs: int(value))
-        """board 后端装配不触硬件：构造成功 + IR 待 M5 告警可见。"""
+        """board 后端装配不触硬件：IR 未配置回退 Mock 并告警；配置即换 BroadlinkIrController。"""
         from lira.hal.board import V4l2IspCamera
+        from lira.hal.board.ir_broadlink import BroadlinkIrController
+        from lira.hal.mock.ir import MockIrController
         from lira.audio.mic import SoundDeviceMic
 
-        yaml_text = (
+        base = (
             "llm:\n  api_key: k\n"
-            "hal:\n  backend: board\n  mic_device: '3'\n  speaker_device: '2'\n"
             f"db_path: {(tmp_path / 'device.db').as_posix()}\n"
+            "hal:\n  backend: board\n  mic_device: '3'\n  speaker_device: '2'\n"
         )
         path = tmp_path / "cfg.yaml"
-        path.write_text(yaml_text, encoding="utf-8")
+        path.write_text(base, encoding="utf-8")
         cfg = load_config(path, env={})
         with caplog.at_level(logging.WARNING):
             hal = build_board_hal(cfg)
         assert isinstance(hal["camera"], V4l2IspCamera)
         assert isinstance(hal["audio"], SoundDeviceMic)
-        assert any("M5" in r.message for r in caplog.records)
+        assert isinstance(hal["ir"], MockIrController)  # 未配置回退 Mock
+        assert any("IR 未配置" in r.message for r in caplog.records)
+
+        path.write_text(base + "  ir_host: 192.168.101.27\n  ir_mac: ec:0b:ae:0c:74:e4\n",
+                        encoding="utf-8")
+        cfg = load_config(path, env={})
+        hal = build_board_hal(cfg)  # 构造不触网（open 时才连）
+        assert isinstance(hal["ir"], BroadlinkIrController)
 
     async def test_main_exit_codes(self, tmp_path, monkeypatch):
         """--dry-run=0；非 dry-run 缺 api_key=2（真实装配错误路径）。"""

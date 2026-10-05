@@ -18,8 +18,10 @@ ocr-x86 = ["onnxruntime>=1.17", "pillow>=10.0", "opencv-python-headless>=4.9", "
 audio = ["sherpa-onnx>=1.10", "sounddevice>=0.4"]
 # U7：设备本地触摸屏 Web UI（python-multipart：starlette 表单解析依赖）
 ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9", "itsdangerous>=2.1"]
-# M7：设备↔后台真实 WS 同步传输（lira/sync_ws.py；python-broadlink 待 M5 另装）
+# M7：设备↔后台真实 WS 同步传输（lira/sync_ws.py）
 sync = ["websockets>=13"]
+# M5：python-broadlink 不入 pyproject（上游 1.0.x 元数据要求 py>=3.13，板上 3.11 需
+# --ignore-requires-python 安装），仅按 deploy/SETUP.md 2.6 装入板上 venv 并锁定 ==1.0.6
 
 # dev：单元 + e2e。e2e 在同进程内拉起真实后台（backend/app），故附带其运行依赖
 # （FastAPI 表单/Jinja2 + PyJWT/bcrypt/itsdangerous 鉴权），见 tests/e2e/conftest.py。

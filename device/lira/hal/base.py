@@ -70,11 +70,12 @@ class AudioIO(_AsyncResource, ABC):
 
 
 class IrController(_AsyncResource, ABC):
-    """红外收发接口。板上实现经 `ir-ctl -r/-s` 原始 pulse/space 码（LIRC 弃用）。"""
+    """红外收发接口。板上实现经 BroadLink RM4 Mini（python-broadlink 局域网 UDP
+    本地协议；2026-10-03 改道，gpio-ir/ir-ctl/LIRC 路线废弃，见 SETUP.md 2.6）。"""
 
     @abstractmethod
     async def send(self, code: str) -> None:
-        """回放一帧原始码（pulse/space 文本，与 ir-ctl -s 输入格式一致）。
+        """回放一帧原始码（码值为传输层约定的不透明字符串——板上实现用 base64 载荷）。
 
         前置安全校验（enabled/high-risk）在 appliances 层完成，HAL 层不做业务判断。
         """

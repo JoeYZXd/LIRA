@@ -26,6 +26,8 @@ import base64
 import binascii
 import logging
 import sys
+from collections.abc import Awaitable, Callable
+from typing import Any
 
 from lira.hal.mock.ir import MockIrController
 from lira.hal.base import HalError, IrController, parse_mac  # parse_mac: 再导出（配置/CLI 用）
@@ -36,11 +38,28 @@ __all__ = ["BroadlinkIrController", "parse_mac", "DEFAULT_LEARN_POLL_INTERVAL"]
 DEFAULT_LEARN_POLL_INTERVAL = 0.3
 
 
-async def _default_factory(host: str, hello_timeout: float):
-    """默认设备工厂：经 hello(ip) 获取正确设备类型（含 devtype→类映射与锁定标志）。"""
+async def _default_factory(host: str, hello_timeout: float) -> Any:
+    """默认设备工厂：经 hello(ip) 获取正确设备类型（含 devtype→类映射与锁定标志）。
+
+    返回值是 broadlink.device.Device（依赖仅在板上 venv，x86 不装，故注解 Any）。
+    """
     from broadlink import hello  # 延迟导入：x86 开发/单测环境无此依赖（见模块注）
 
     return await hello(host, timeout=hello_timeout)
+
+
+async def _aclose_quietly(device: Any) -> None:
+    """尽力释放已认证设备（1.0.6 Device 持有 asyncio UDP transport，弃置即泄漏）。
+
+    仅用于 open 失败路径：清理失败只记 debug，绝不掩盖正在上抛的原始错误。
+    """
+    aclose = getattr(device, "aclose", None)
+    if aclose is None:
+        return
+    try:
+        await aclose()
+    except Exception:  # noqa: BLE001 - 清理失败不掩盖原始错误
+        logging.debug("BroadLink 设备释放失败（忽略）", exc_info=True)
 
 
 def _translate_open_error(exc: Exception) -> HalError:
@@ -74,7 +93,7 @@ class BroadlinkIrController(IrController):
         *,
         hello_timeout: float = 5.0,
         learn_poll_interval: float = DEFAULT_LEARN_POLL_INTERVAL,
-        device_factory=None,
+        device_factory: Callable[[str, float], Awaitable[Any]] | None = None,
     ) -> None:
         self._host = host
         self._mac = mac
@@ -82,26 +101,30 @@ class BroadlinkIrController(IrController):
         self._hello_timeout = hello_timeout
         self._poll = learn_poll_interval
         self._factory = device_factory or _default_factory
-        self._device = None
+        self._device: Any = None
 
     # ---------- 生命周期 ----------
 
     async def open(self) -> None:
         """发现设备并认证。失败一律 HalError（带解锁/在线指引），不抛裸异常。"""
+        device: Any = None
         try:
             device = await self._factory(self._host, self._hello_timeout)
             await device.auth()
         except Exception as exc:  # 上游异常统一转 HalError（HAL 约定）
+            if device is not None:
+                # 认证失败时 device 已持有 UDP transport，弃置即泄漏——尽力释放
+                await _aclose_quietly(device)
             raise _translate_open_error(exc) from exc
         # MAC 核对（factory 注入路径同样过闸）：换设备/配置过期时 fail-closed，
         # 拒绝把红外码发进别的设备
         reported = bytes(device.mac)
         if reported != self._mac_bytes:
+            await _aclose_quietly(device)
             raise HalError(
                 f"BroadLink 设备 MAC 不符: hello 报告 {reported.hex(':')}，"
                 f"配置为 {self._mac}。检查配置是否过期或接了别的设备。"
             )
-        self._device = device
         self._device = device
         logging.info(
             "BroadLink IR 就绪: host=%s devtype=%s model=%s locked=%s",
@@ -110,13 +133,20 @@ class BroadlinkIrController(IrController):
         )
 
     async def close(self) -> None:
-        if self._device is not None:
-            aclose = getattr(self._device, "aclose", None)
+        """释放设备会话。幂等且不抛：关闭失败不阻断停机（含 __aexit__ 展开）。"""
+        device = self._device
+        if device is None:
+            return
+        try:
+            aclose = getattr(device, "aclose", None)
             if aclose is not None:
                 await aclose()
-        self._device = None
+        except Exception:  # noqa: BLE001 - 关闭失败不拖垮停机路径（日志可见）
+            logging.warning("event=ir_close_error", exc_info=True)
+        finally:
+            self._device = None
 
-    def _require_device(self):
+    def _require_device(self) -> Any:
         if self._device is None:
             raise HalError("BroadLink IR 未连接（open 未成功）。")
         return self._device
@@ -132,7 +162,10 @@ class BroadlinkIrController(IrController):
             raise HalError(f"红外码值不是合法 base64: {exc}") from exc
         if not payload:
             raise HalError("红外码值为空，拒绝发送。")
-        await device.send_data(payload)
+        try:
+            await device.send_data(payload)
+        except Exception as exc:  # noqa: BLE001 - 库异常统一转 HalError（HAL 约定）
+            raise HalError(f"BroadLink 发送失败: {exc!r}") from exc
 
     async def learn(self, timeout_seconds: float = 10.0) -> str:
         """录一帧原始码：进入学习模式后轮询，返回 base64 码值。
@@ -141,20 +174,25 @@ class BroadlinkIrController(IrController):
         转 learn_failed 话术）。
         """
         device = self._require_device()
-        await device.enter_learning()
+        try:
+            await device.enter_learning()
+        except Exception as exc:  # noqa: BLE001 - 库异常统一转 HalError（HAL 约定）
+            raise HalError(f"BroadLink 进入学习模式失败: {exc!r}") from exc
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         while True:
             try:
                 data = await device.check_data()
             except Exception as exc:  # noqa: BLE001
-                # RM4 固件怪癖：未录到码时部分设备回 -5 StorageError（偶尔 -6
-                # ReadError 空码）而非空载荷——按"还没录到"续等（HA 集成同此
-                # 处理，python-broadlink#698/#650）。按类名匹配而非 isinstance：
-                # x86 单测注入同名 fake 即可覆盖（broadlink 不装 x86），且依赖
-                # 版本锁定 ==1.0.6，异常分类无漂移风险。其他异常照常上抛。
+                # RM4 固件怪癖：未录到码时部分设备不回空载荷而回错误码——
+                # python-broadlink==1.0.6 分类：-5 StorageError / -6
+                # StructureAbnormalError / -10 ReadError，均按"还没录到"续等
+                # （HA 集成同此处理，python-broadlink#698/#650）。按类名匹配
+                # 而非 isinstance：x86 单测注入同名 fake 即可覆盖（broadlink
+                # 不装 x86），并以 errno 兜底防上游改名漂移。其他异常照常上抛。
                 name = type(exc).__name__
-                if "Storage" in name or "Read" in name:
+                if ("Storage" in name or "Read" in name or "Structure" in name
+                        or getattr(exc, "errno", None) in (-5, -6, -10)):
                     data = b""
                 else:
                     raise

@@ -29,6 +29,7 @@ import socket
 import sys
 import time
 from collections import deque
+from contextlib import AsyncExitStack
 from dataclasses import dataclass
 
 from lira.appliances import IRService, LearningManager
@@ -72,6 +73,7 @@ __all__ = [
     "build_audio_stack",
     "build_board_hal",
     "build_mock_hal",
+    "enter_hal_resources",
     "main",
 ]
 
@@ -196,7 +198,7 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
     return {"camera": camera, "audio": mic, "ir": ir, "display": MockDisplay()}
 
 
-async def enter_hal_resources(hal: dict[str, object], stack) -> None:
+async def enter_hal_resources(hal: dict[str, object], stack: AsyncExitStack) -> None:
     """逐个进入 HAL 上下文并打就绪日志。
 
     带 ``fallback_factory`` 的资源（可选语义，R9）open 失败时降级其 fallback——
@@ -483,6 +485,9 @@ class DeviceRuntime:
 
     Args 与 e2e DeviceHarness 同构，但组件为生产实现；audio/ocr/llm 均可注入
     替身供单测（None 语义见各字段）。
+
+    注意 ir_service/learning 在 run() 进入 HAL 后才存在（R9 降级可达，见
+    __init__ 注）：消费面（回调/lambda）均为调用时解析，构造期不触发。
     """
 
     def __init__(
@@ -546,8 +551,11 @@ class DeviceRuntime:
         self.asr_stream = audio.asr.create_stream()
         self.playback_stream = audio.playback_kws.create_stream()
 
-        self.ir_service = IRService(store, hal["ir"])
-        self.learning = LearningManager(self.ir_service)
+        # IR 服务不在构造期绑定：run() 在 enter_hal_resources（R9 降级已发生）
+        # 之后才装配——构造期绑定会永远持有降级前的 BroadlinkIrController，
+        # 降级 Mock 只换了 hal 字典槽位、到不了服务（评审 P1）。消费面均为
+        # 调用时解析（DeviceCallbacks._send_ir / sync learn_handler lambda），
+        # run() 之前不触发发射/学习。
         self.callbacks = DeviceCallbacks(self)
 
         # LLM 注入点：未注入按配置构建（R28 等待反馈挂播报）；显式落属性，
@@ -704,11 +712,13 @@ class DeviceRuntime:
     async def run(self) -> None:
         """进入主循环直至停机信号或音频源 EOF（mock 源语义）。"""
         self._install_signal_handlers()
-        from contextlib import AsyncExitStack
-
         stack = AsyncExitStack()
         try:
             await enter_hal_resources(self._hal, stack)
+            # IR 服务/学习管理在 HAL 进入后装配：此时 hal["ir"] 已是真实资源
+            # 或降级 Mock（R9 端到端生效，见 __init__ 注）
+            self.ir_service = IRService(self.store, self._hal["ir"])
+            self.learning = LearningManager(self.ir_service)
             if self._cfg.sync.ws_url:
                 self.spawn_companion(self._run_sync())
             else:

@@ -28,6 +28,9 @@ hal:
   speaker_device: ""       # 板上: 一律 "pipewire"（经 PipeWire 默认汇=ES8388 card2）。
                            # ES8388 hw 直开 22050 被拒（ALSA -22），必须走插件做格式转换
   camera_device: ""        # 板上: OV13855@CAM1 → /dev/video0（M3 实测）
+  ir_host: ""              # 板上: BroadLink RM4 Mini 固定 IP（如 192.168.101.27；SETUP 2.6）
+  ir_mac: ""               # 板上: 与 ir_host 成对必填（如 ec:0b:ae:0c:74:e4）；
+                           # 任一为空 = IR 未配置，装配回退 Mock（发射只记录不生效）
 
 # U7：设备 Web UI（局域网浏览器访问；M7 起随主循环 in-process 挂载）
 ui:

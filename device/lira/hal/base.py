@@ -46,7 +46,7 @@ class _AsyncResource(ABC):
 
     #: open 失败时的降级工厂（可选资源语义，R9：如 IR 离线回退 Mock，
     # 家电控制不可用但主循环不受影响）；None = 失败即上抛（快速失败可见）。
-    fallback_factory: "Callable[[], _AsyncResource] | None" = None
+    fallback_factory: Callable[[], _AsyncResource] | None = None
 
     async def open(self) -> None:
         """申请硬件资源。默认无操作。"""

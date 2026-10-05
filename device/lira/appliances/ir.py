@@ -18,7 +18,7 @@ from dataclasses import dataclass
 
 from lira.appliances.models import ApplianceModel
 from lira.appliances.store import ApplianceStore
-from lira.hal.base import IrController
+from lira.hal.base import HalError, IrController
 
 __all__ = ["ApplianceError", "SceneStepResult", "IRService", "LearningManager"]
 
@@ -78,7 +78,11 @@ class IRService:
         logging.debug("IR 已发送: device=%s action=%s", device, action)
 
     async def run_scene(self, scene_name: str, *, confirmed: bool = False) -> list[SceneStepResult]:
-        """逐项回放场景步骤并逐项报告（R29）。单步失败不中断后续步骤。"""
+        """逐项回放场景步骤并逐项报告（R29）。单步失败不中断后续步骤。
+
+        业务闸失败（ApplianceError）与传输层故障（HalError）都只记该步失败：
+        场景播到一半的传输异常同样按步报告，不放弃剩余步骤。
+        """
         scene = self._store.get_scene(scene_name)
         if scene is None:
             raise ApplianceError("scene_not_found", f"场景未配置: {scene_name}")
@@ -87,10 +91,12 @@ class IRService:
             try:
                 await self.send_ir(step.device, step.action, confirmed=confirmed)
                 results.append(SceneStepResult(step.device, step.action, ok=True))
-            except ApplianceError as exc:
+            except (ApplianceError, HalError) as exc:
+                # HalError 无 kind（传输层异常），归一为 hal_error 供逐项报告
+                kind = getattr(exc, "kind", "hal_error")
                 logging.warning("场景步骤失败: scene=%s step=%s/%s kind=%s",
-                                scene_name, step.device, step.action, exc.kind)
-                results.append(SceneStepResult(step.device, step.action, ok=False, error_kind=exc.kind))
+                                scene_name, step.device, step.action, kind)
+                results.append(SceneStepResult(step.device, step.action, ok=False, error_kind=kind))
         return results
 
     # ---------- 学习（R32：后台发起 → 设备录一帧 → 入库） ----------

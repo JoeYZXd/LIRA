@@ -219,8 +219,13 @@ class Rig:
     ir: MockIrController
 
 
-def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int = 0, clock=None):
-    """整机替身装配（mock HAL + 假语音栈 + 假 LLM/OCR）。"""
+def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int = 0,
+             clock=None, ir=None):
+    """整机替身装配（mock HAL + 假语音栈 + 假 LLM/OCR）。
+
+    ir 可注入真实 HAL 资源（如会 open 失败的 BroadlinkIrController，F1 回归用），
+    默认 MockIrController。
+    """
     from lira.appliances.models import ApplianceModel
     from lira.appliances.store import ApplianceStore
     from lira.settings import DeviceSettings
@@ -236,7 +241,7 @@ def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int
         )
     )
     tts = FakeTts()
-    ir = MockIrController()
+    ir = MockIrController() if ir is None else ir
     source = SilenceSource()
     hal = {"camera": FakeCamera(), "audio": source, "ir": ir, "display": MockDisplay()}
     settings = DeviceSettings()
@@ -583,10 +588,12 @@ class TestAssemblyHelpers:
         hal = build_board_hal(cfg)  # 构造不触网（open 时才连）
         assert isinstance(hal["ir"], BroadlinkIrController)
 
-    async def test_enter_hal_resources_ir_failure_degrades_to_mock(self, caplog):
+    async def test_enter_hal_resources_ir_failure_degrades_to_mock(self, caplog, tmp_path):
         """R9 韧性：带 fallback_factory 的资源 open 失败（离线/锁定）降级 Mock，主循环不崩。"""
         from contextlib import AsyncExitStack
 
+        from lira.appliances import IRService
+        from lira.appliances.store import ApplianceStore
         from lira.hal.base import HalError
         from lira.hal.mock.ir import MockIrController
         from lira.main import enter_hal_resources
@@ -606,7 +613,40 @@ class TestAssemblyHelpers:
             await enter_hal_resources(hal, stack)
         assert isinstance(hal["ir"], MockIrController)
         assert any("ir 初始化失败" in r.message for r in caplog.records)
+        # 消费面（IRService 实际拿到 Mock）由
+        # test_ir_degrade_reaches_ir_service_via_runtime_run 钉住——在此手工构造
+        # IRService 只能证明构造器存参，对 F1 接线缺陷无回归力（testing-r2）
         await stack.aclose()
+
+    async def test_ir_degrade_reaches_ir_service_via_runtime_run(self, tmp_path):
+        """F1 回归（mutation 防御）：IR open 失败降级 Mock 必须到达 IRService——
+        用真实 BroadlinkIrController（factory 必超时）走完整 run() 装配路径，
+        断言 run() 在 enter_hal_resources 之后绑定的是降级 Mock。"""
+        from lira.hal.board.ir_broadlink import BroadlinkIrController
+        from lira.hal.mock.ir import MockIrController
+
+        async def timeout_factory(host, timeout):
+            raise type("NetworkTimeoutError", (Exception,), {})(-4000, "timeout")
+
+        ir = BroadlinkIrController("192.168.101.27", "ec:0b:ae:0c:74:e4",
+                                   device_factory=timeout_factory)
+        rig = make_rig(tmp_path, ir=ir)
+        task = asyncio.ensure_future(rig.runtime.run())
+        try:
+            # 轮询等待 run() 完成 HAL 进入与 IR 服务装配（构造期该属性不存在）
+            service = None
+            for _ in range(200):
+                service = getattr(rig.runtime, "ir_service", None)
+                if service is not None:
+                    break
+                await asyncio.sleep(0.02)
+            assert service is not None, "run() 未在 HAL 进入后装配 ir_service"
+            assert isinstance(service._ir, MockIrController)
+            assert service._ir is not ir, "IRService 仍绑定降级前的 Broadlink 控制器"
+            assert rig.runtime.learning is not None
+        finally:
+            rig.source.push_eof()
+            await asyncio.wait_for(task, timeout=5.0)
 
     async def test_enter_hal_resources_non_ir_failure_raises(self):
         """无 fallback_factory 的资源失败仍快速上抛（致命可见，不吞）。"""

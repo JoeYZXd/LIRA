@@ -153,7 +153,16 @@ class BroadlinkIrController(IrController):
         loop = asyncio.get_running_loop()
         deadline = loop.time() + timeout_seconds
         while True:
-            data = await device.check_data()
+            try:
+                data = await device.check_data()
+            except Exception as exc:  # noqa: BLE001
+                # RM4 固件怪癖：未录到码时部分设备回 -5 StorageError 而非空载荷
+                # （按"还没录到"续等；Home Assistant 集成同此处理，见
+                # python-broadlink#698/#650）。其他异常照常上抛。
+                if "Storage" in type(exc).__name__:
+                    data = b""
+                else:
+                    raise
             if data:
                 return base64.b64encode(bytes(data)).decode("ascii")
             if loop.time() >= deadline:

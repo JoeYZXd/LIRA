@@ -12,7 +12,7 @@
 - 阅读中断和缓存恢复已完成；整理重复逻辑后，主机完整回归 **505 项通过（113.53 秒）**。语法编译及差异检查通过；项目没有配置独立 lint 或 typecheck 命令。
 - 最终边界修复后完整回归 **509 项通过（115.06 秒）**；语法编译和差异检查通过。
 - Code review: skipped (ce-code-review unavailable)。独立代理因额度限制终止；主执行者人工复核及修复见 `reviews/2026-10-05-voice-continuity-review.md`。设备检查尚未完成。
-- 尚未部署本次连续交互版本，真人声学验收尚未开始。
+- 已部署 `8b7b9db` 连续交互版本并启动受控试运行，真人声学验收尚未开始。
 - 设备原有服务正常，部署前备份位于 `/home/orangepi/lira/deploy-backups/voice-continuity-20261005`。
 
 ## 部署后的第一轮真人测试
@@ -42,6 +42,8 @@
 
 ## 部署和恢复证据
 
-待补充应用版本、确切音频路由、服务健康、自动测试结果和成对恢复步骤。受控试运行通过后仍需完成上述声学验收，方可宣布正式发布成功。
+2026-10-05 16:05（北京时间）：应用版本 `8b7b9db`，用户服务 active，进程 28208，重启计数 0；状态接口显示 audio/ocr 均就绪、standby。实际音频图确认 USB → lira_echo_capture，以及 lira_echo_playback → ES8388；零音频输出双向检查确认 lira_echo_source → ALSA Capture、ALSA Playback → lira_echo_sink，专用 PCM 的输入输出均可打开。PipeWire 刚重启时首次物理连接检查失败，图完成连接后复查通过。以上证明路由与启动，不能证明实际声学消回声效果。
+
+激活前新增 `preactivation.tar.gz`，与原备份同目录，包含完整应用和配置。恢复顺序为停止 LIRA、还原此应用与配置备份、移除本次新增的 `.asoundrc` 和 `90-lira-echo-cancel.conf`（保留后来新增的其他配置）、重启用户 PipeWire/WirePlumber，再启动并检查 LIRA。受控试运行通过后仍需完成上述声学验收，方可宣布正式发布成功。
 
 部署前设备服务为 `active`，进程 24610，重启计数 0。备份包含应用与 `device/config.yaml`，并记录原来不存在 `.asoundrc`、用户 PipeWire 配置目录及服务覆盖目录；恢复时要处理本次新增配置，不能只恢复应用。当前代码仅证明输入交接和取消逻辑，能量型语音活动检测与消回声效果仍须真人验证。

@@ -126,6 +126,7 @@ class TestStateMachineEntries:
         assert _texts() == [
             "待机：持续等待唤醒中",
             "聆听：等待语音指令",
+            "正在理解指令",
             "指令执行中",
             "退出唤醒状态，回到待机，等待下次唤醒",
         ]

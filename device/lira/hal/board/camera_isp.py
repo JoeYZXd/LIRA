@@ -1,24 +1,22 @@
-"""板上相机 HAL（U10/M8）：RKISP 硬件管线（NV12 mainpath）→ 数字曝光补偿。
+"""Board camera: full sensor NV12, aligned denoising and color-preserving gain.
 
-取代裸 Bayer 路径（camera_raw.py）：板上实测裸路径满幅列条纹（MIPI 读出
-伪影，软件不可根治），而 **RKISP 管线内核默认链路已通**——/dev/media1
-(rkisp0-vir2) → rkisp_mainpath (/dev/video11) 直接输出 NV12，画面完全
-干净、细节锐利。
-
-曝光/增益说明：3A 需 rkaiq 守护进程（闭源，本镜像未带且无公开 deb），
-本实现以**数字曝光补偿**替代——按帧均值锚定目标亮度做 levels+gamma，
-干净帧上大力提亮可用。若后续装上 rkaiq（ispserver），可将补偿系数调小。
+The 4224x3136 mainpath keeps document proportions. Always decode the layout
+reported by the driver rather than assuming the requested size was accepted.
+Hardware 3A is unavailable on this image; dark captures receive bounded gain.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from lira.hal.base import Camera, HalError
+from lira.hal.board.nv12 import decode_nv12, parse_format, split_frames
 
 __all__ = ["V4l2IspCamera"]
 
@@ -30,7 +28,6 @@ _SENSOR_SUBDEV = "/dev/v4l-subdev2"  # M3：OV13855@CAM1 的传感器子设备
 
 #: 数字曝光目标：帧均值亮度锚定（0-255）。模拟增益打底后的轻量数字补偿。
 _TARGET_LUMA = 120.0
-_GAMMA = 2.0
 _GAIN_CAP = 3.0
 
 #: 传感器曝光/增益（板上实测）：增益 128-1984（模拟增益是最有效的亮度杠杆，
@@ -59,14 +56,33 @@ class V4l2IspCamera(Camera):
         #: 各异，由控制台调整并持久化（store meta）
         self.rotation = rotation
         self.hflip = hflip
+        self.color_gains = np.ones(3, dtype=np.float32)
+        self.calibration_path = Path(__file__).resolve().parents[3] / "data/camera-color.json"
 
     async def open(self) -> None:
         """探测 ISP mainpath 节点，切 15fps 档并把曝光固定到上限。"""
         if not Path(self.device).exists():
             raise HalError(f"ISP mainpath 节点不存在: {self.device}（检查相机 overlay）")
+        exposure, gain = _EXP_MAX, 1024
+        self.color_gains = np.ones(3, dtype=np.float32)
+        try:
+            try:
+                calibration = json.loads(self.calibration_path.read_text(encoding="utf-8"))
+            except FileNotFoundError:
+                calibration = None
+            if calibration is not None:
+                gains = np.asarray(calibration["gains_bgr"], dtype=np.float32)
+                if gains.shape != (3,) or not np.isfinite(gains).all() or np.any((gains < 0.25) | (gains > 4)):
+                    raise ValueError("Invalid white-reference gains")
+                exposure, gain = int(calibration["sensor_exposure"]), int(calibration["sensor_gain"])
+                if not 4 <= exposure <= _EXP_MAX or not 128 <= gain <= _GAIN_DARK:
+                    raise ValueError("Invalid calibration sensor controls")
+                self.color_gains = gains
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            raise HalError("白平衡校准文件无效或不可读") from exc
         await self._sensor_set("vertical_blanking", _VBLANK_15FPS)  # 失败则曝光被驱动钳回原上限，功能不损
-        await self._sensor_set("exposure", _EXP_MAX)
-        self._sensor_gain = 1024  # 自适应起点（暗室起步，亮场景首拍后下调）
+        await self._sensor_set("exposure", exposure)
+        self._sensor_gain = gain
 
     async def close(self) -> None:
         self._tmp.unlink(missing_ok=True)
@@ -77,7 +93,8 @@ class V4l2IspCamera(Camera):
         frames = await self._capture_batch_adaptive()
         merged, _aligned = _merge_frames(frames)
         merged = cv2.bilateralFilter(merged, 9, 50, 50)
-        best = _digital_exposure(merged)
+        balanced = _apply_color_gains(merged, self.color_gains)
+        best = _digital_exposure(balanced)
         ok, jpeg = cv2.imencode(".jpg", best, [cv2.IMWRITE_JPEG_QUALITY, 88])
         if not ok:
             raise HalError("JPEG 编码失败")
@@ -101,7 +118,10 @@ class V4l2IspCamera(Camera):
         frames = await self._capture_batch(gain, n)
         mean = self._luma_mean(frames[0])
         if mean < _LUMA_LOW and gain < _GAIN_DARK:
-            new_gain = min(int(gain * _LUMA_LOW / max(mean, 1.0)), _GAIN_DARK)
+            new_gain = min(
+                int(gain * _LUMA_LOW / max(mean, 1.0)), _GAIN_DARK,
+                int(gain * 235.0 / max(float(frames[0].max()), 1.0)),
+            )
             if new_gain > gain:
                 await self._sensor_set("analogue_gain", new_gain)
                 self._sensor_gain = new_gain
@@ -116,31 +136,41 @@ class V4l2IspCamera(Camera):
     async def _capture_batch(self, gain: int, n: int) -> list[np.ndarray]:
         """单次 v4l2-ctl 流抓 n 帧（NV12 → BGR，逐帧套用方向配置）。"""
         await self._sensor_set("analogue_gain", gain)
-        proc = await asyncio.create_subprocess_exec(
-            "v4l2-ctl",
-            "-d", self.device,
-            "--set-fmt-video=width=2688,height=3136,pixelformat=NV12",
-            "--stream-mmap", "--stream-count=%d" % n,
-            "--stream-to=%s" % self._tmp,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
+        # Verbose set-format also prints a layout. Keep it separate so the
+        # readback used for decoding is unambiguous.
+        await self._v4l2("--set-fmt-video=width=4224,height=3136,pixelformat=NV12")
+        stdout, stderr = await self._v4l2(
+            "--get-fmt-video", "--verbose", "--stream-mmap",
+            "--stream-count=%d" % n, "--stream-to=%s" % self._tmp,
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), _CAPTURE_TIMEOUT_S)
+        log = stdout.decode(errors="replace") + stderr.decode(errors="replace")
+        try:
+            fmt = parse_format(log)
+            sizes = [int(x) for x in re.findall(r"cap dqbuf:.*?bytesused:\s*(\d+)", log)]
+            payloads = split_frames(self._tmp.read_bytes(), sizes, n)
+            return [
+                _apply_orientation(decode_nv12(payload, fmt), self.rotation, self.hflip)
+                for payload in payloads
+            ]
+        except ValueError as exc:
+            raise HalError(f"ISP 帧布局不符: {exc}") from exc
+
+    async def _v4l2(self, *args: str) -> tuple[bytes, bytes]:
+        proc = await asyncio.create_subprocess_exec(
+            "v4l2-ctl", "-d", self.device, *args,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, stderr = await asyncio.wait_for(proc.communicate(), _CAPTURE_TIMEOUT_S)
+        except BaseException:
+            if proc.returncode is None:
+                proc.kill()
+            await proc.communicate()
+            raise
         if proc.returncode != 0:
             raise HalError(f"ISP 拍摄失败: {stderr.decode(errors='replace').strip()}")
+        return stdout, stderr
 
-        w, h = 2688, 3136
-        expected = w * h * 3 // 2
-        buf = np.fromfile(self._tmp, dtype=np.uint8)
-        got = min(len(buf) // expected, n)
-        if got == 0:
-            raise HalError("ISP 帧大小不符: %d 字节不足一帧" % len(buf))
-        frames = []
-        for i in range(got):
-            yuv = buf[i * expected : (i + 1) * expected].reshape((h * 3) // 2, w)
-            bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
-            frames.append(_apply_orientation(bgr, self.rotation, self.hflip))
-        return frames
 
 
 def _sharpness(bgr: np.ndarray) -> float:
@@ -191,27 +221,32 @@ def _apply_orientation(bgr: np.ndarray, rotation: int, hflip: bool) -> np.ndarra
 
 
 def _digital_exposure(bgr: np.ndarray) -> np.ndarray:
-    """数字曝光补偿：灰世界白平衡（去 LED 绿偏）+ 均值锚定 + levels + gamma。
+    """Only brighten dark inputs; preserve printed colors and bright-page contrast.
 
-    干净帧（ISP 去马赛克/降噪为硬件质量）上大幅提亮不会像裸帧那样放大
-    条纹；过曝保护用 99.5 分位做白点钳制。
+    Colorful books do not satisfy gray-world assumptions. Applying levels,
+    gamma and amplified chroma to an already bright page washes out its ink.
+    A shared per-pixel BGR gain preserves hue, with smooth highlight roll-off.
     """
-    from lira.hal.board.camera_raw import _gray_world_wb
+    mean = float(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).mean())
+    if mean >= _LUMA_LOW:
+        return bgr
+    gain = min(_TARGET_LUMA / max(mean, 1.0), _GAIN_CAP)
+    # Monotonic highlight roll-off keeps whites bounded while lifting shadows.
+    # Scale all channels of each pixel equally to retain hue.
+    peak = bgr.max(axis=2).astype(np.float32)
+    factors = gain / (1.0 + (gain - 1.0) * peak / 255.0)
+    adjusted = bgr.astype(np.float32)
+    adjusted *= factors[..., None]
+    np.rint(adjusted, out=adjusted)
+    np.clip(adjusted, 0, 255, out=adjusted)
+    return adjusted.astype(np.uint8)
 
-    bgr = _gray_world_wb(bgr, cap=2.5)
-    ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
-    y = ycrcb[..., 0].astype(np.float32)
-    mean = float(y.mean())
-    gain = min(max(_TARGET_LUMA / max(mean, 1.0), 1.0), _GAIN_CAP)
-    y2 = y * gain
-    lo, hi = np.percentile(y2, (0.5, 99.5))
-    if hi - lo >= 10:
-        y2 = np.clip((y2 - lo) * (255.0 / (hi - lo)), 0, 255)
-    lut = (np.linspace(0, 1, 256) ** (1.0 / _GAMMA) * 255).astype(np.uint8)
-    y2 = cv2.LUT(y2.astype(np.uint8), lut)
-    ycrcb[..., 0] = y2
-    # 色度随亮度增益轻提（欠曝帧色彩偏暗；钳制防过饱和）
-    for ch in (1, 2):
-        chf = (ycrcb[..., ch].astype(np.float32) - 128.0) * min(gain, 3.0) + 128.0
-        ycrcb[..., ch] = np.clip(chf, 0, 255)
-    return cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
+
+def _apply_color_gains(bgr: np.ndarray, gains: np.ndarray) -> np.ndarray:
+    """Apply measured white-reference gains; never infer them from page colors."""
+    if np.array_equal(gains, np.ones(3, dtype=np.float32)):
+        return bgr
+    adjusted = bgr.astype(np.float32)
+    adjusted *= gains
+    np.clip(adjusted, 0, 255, out=adjusted)
+    return adjusted.astype(np.uint8)

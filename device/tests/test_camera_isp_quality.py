@@ -2,6 +2,7 @@
 
 import cv2
 import numpy as np
+import pytest
 
 from lira.hal.board.camera_isp import _merge_frames, _sharpness
 
@@ -56,3 +57,146 @@ def test_single_frame_passthrough():
     merged, aligned = _merge_frames([f])
     assert aligned is False
     assert merged is f
+
+
+def test_bright_colored_page_keeps_printed_colors():
+    from lira.hal.board.camera_isp import _digital_exposure
+
+    # A colorful page is not a gray-world calibration target.
+    image = np.full((40, 60, 3), (80, 190, 160), dtype=np.uint8)
+    image[10:30, 20:40] = (170, 215, 220)  # pale yellow artwork
+    assert np.array_equal(_digital_exposure(image), image)
+
+
+def test_dark_page_brightening_preserves_channel_ratios():
+    from lira.hal.board.camera_isp import _digital_exposure
+
+    image = np.full((20, 30, 3), (20, 40, 60), dtype=np.uint8)
+    result = _digital_exposure(image)
+    pixel = result[0, 0].astype(float)
+    assert pixel[0] > 20
+    assert abs(pixel[1] / pixel[0] - 2) < 0.05
+    assert abs(pixel[2] / pixel[0] - 3) < 0.05
+
+
+def test_capture_decodes_negotiated_stride_and_frame_boundaries(tmp_path):
+    import asyncio
+    from lira.hal.board.camera_isp import V4l2IspCamera
+
+    # Driver accepts a different width and pads rows. Keep chroma neutral.
+    width, height, stride = 4, 4, 6
+    payloads = []
+    for luma in (60, 100, 140):
+        raw = np.full((height * 3 // 2, stride), 128, dtype=np.uint8)
+        raw[:height, :width] = luma
+        raw[:, width:] = 255  # padding must never become picture pixels
+        payloads.append(raw.tobytes())
+    path = tmp_path / "stream.nv12"
+    path.write_bytes(b"".join(payloads))
+    fmt = """Format Video Capture Multiplanar:
+Width/Height : 4/4
+Pixel Format : 'NV12'
+Number of planes : 1
+Field : None
+Bytes per Line : 6
+Size Image : 36
+"""
+    calls = []
+
+    class Camera(V4l2IspCamera):
+        async def _sensor_set(self, ctrl, value):
+            return True
+
+        async def _v4l2(self, *args):
+            calls.append(args)
+            if "--get-fmt-video" in args:
+                return fmt.encode(), b"cap dqbuf: bytesused: 36\n" * 3
+            # Verbose set-format output is deliberately NOT part of readback.
+            return fmt.encode(), b""
+
+    camera = Camera()
+    camera._tmp = path
+    frames = asyncio.run(camera._capture_batch(1024, 3))
+    assert len(frames) == 3
+    for frame, payload in zip(frames, payloads):
+        packed = np.frombuffer(payload, np.uint8).reshape(6, 6)[:, :4].copy()
+        expected = cv2.cvtColor(packed, cv2.COLOR_YUV2BGR_NV12)
+        assert frame.shape == (4, 4, 3)
+        np.testing.assert_array_equal(frame, expected)
+    assert "--get-fmt-video" not in calls[0]
+    assert not any(arg.startswith("--set-fmt") for arg in calls[1])
+
+
+def test_measured_white_balance_keeps_yellow_artwork_yellow():
+    from lira.hal.board.camera_isp import _apply_color_gains
+
+    image = np.array([[[60, 100, 50], [40, 100, 60]]], dtype=np.uint8)
+    result = _apply_color_gains(image, np.array([100/60, 1, 2], np.float32))
+    np.testing.assert_array_equal(result[0, 0], [100, 100, 100])
+    assert result[0, 1, 0] < result[0, 1, 1] < result[0, 1, 2]
+
+
+def test_dark_gain_does_not_clip_bright_paper_details():
+    from lira.hal.board.camera_isp import _digital_exposure
+
+    image = np.full((100, 100, 3), 20, np.uint8)
+    image[0, 0] = [200, 220, 240]
+    image[0, 1] = [180, 200, 220]
+    result = _digital_exposure(image)
+    assert result[0, 0, 0] < result[0, 0, 1] < result[0, 0, 2]
+    assert result[0, 1, 2] < result[0, 0, 2]
+
+
+@pytest.mark.parametrize("content", ["{", "{}", '{"gains_bgr":"bad","sensor_exposure":3200,"sensor_gain":384}'])
+def test_invalid_calibration_is_hal_error(tmp_path, content):
+    import asyncio
+    from lira.hal.base import HalError
+    from lira.hal.board.camera_isp import V4l2IspCamera
+
+    node = tmp_path / "video"
+    node.touch()
+    camera = V4l2IspCamera(str(node))
+    camera.calibration_path = tmp_path / "color.json"
+    camera.calibration_path.write_text(content)
+    with pytest.raises(HalError, match="校准"):
+        asyncio.run(camera.open())
+
+
+def test_removed_calibration_resets_gains_on_reopen(tmp_path):
+    import asyncio
+    from lira.hal.board.camera_isp import V4l2IspCamera
+
+    node = tmp_path / "video"
+    node.touch()
+
+    class Camera(V4l2IspCamera):
+        async def _sensor_set(self, ctrl, value):
+            return True
+
+    camera = Camera(str(node))
+    camera.calibration_path = tmp_path / "missing.json"
+    camera.color_gains = np.array([1.6, 1, 1.7], np.float32)
+    asyncio.run(camera.open())
+    np.testing.assert_array_equal(camera.color_gains, [1, 1, 1])
+
+
+def test_adaptive_gain_protects_small_bright_reference_patch():
+    import asyncio
+    from lira.hal.board.camera_isp import V4l2IspCamera
+
+    image = np.full((100, 100, 3), 20, np.uint8)
+    image[:5, :5] = 200
+    gains = []
+
+    class Camera(V4l2IspCamera):
+        async def _sensor_set(self, ctrl, value):
+            return True
+
+        async def _capture_batch(self, gain, n):
+            gains.append(gain)
+            return [image] * n
+
+    camera = Camera()
+    asyncio.run(camera._capture_batch_adaptive())
+    assert len(gains) == 2
+    assert 1024 < gains[1] <= int(1024 * 235 / 200)

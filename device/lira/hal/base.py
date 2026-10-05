@@ -10,9 +10,11 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 
 __all__ = [
     "HalError",
+    "parse_mac",
     "Camera",
     "AudioIO",
     "IrController",
@@ -24,8 +26,27 @@ class HalError(Exception):
     """HAL 层统一异常类型（System-Wide Impact：硬件层异常 → 状态机转话术）。"""
 
 
+def parse_mac(mac: str) -> bytes:
+    """MAC 字符串转 6 字节。接受 ``ec:0b:ae:0c:74:e4`` / 连字符 / 裸 12 位十六进制。
+
+    配置校验（config.py）与板上实现（ir_broadlink）共用此唯一实现，规则漂移
+    即两侧失配，故上收到 HAL 基础层。
+    """
+    text = mac.strip().replace(":", "").replace("-", "").lower()
+    if len(text) != 12:
+        raise HalError(f"MAC {mac!r} 非法（应为 6 字节十六进制，如 ec:0b:ae:0c:74:e4）。")
+    try:
+        return bytes.fromhex(text)
+    except ValueError as exc:
+        raise HalError(f"MAC {mac!r} 含非十六进制字符。") from exc
+
+
 class _AsyncResource(ABC):
     """共享的 async 上下文管理器骨架：子类实现 open()/close()。"""
+
+    #: open 失败时的降级工厂（可选资源语义，R9：如 IR 离线回退 Mock，
+    # 家电控制不可用但主循环不受影响）；None = 失败即上抛（快速失败可见）。
+    fallback_factory: "Callable[[], _AsyncResource] | None" = None
 
     async def open(self) -> None:
         """申请硬件资源。默认无操作。"""

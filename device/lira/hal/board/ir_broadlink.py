@@ -27,7 +27,8 @@ import binascii
 import logging
 import sys
 
-from lira.hal.base import HalError, IrController
+from lira.hal.mock.ir import MockIrController
+from lira.hal.base import HalError, IrController, parse_mac  # parse_mac: 再导出（配置/CLI 用）
 
 __all__ = ["BroadlinkIrController", "parse_mac", "DEFAULT_LEARN_POLL_INTERVAL"]
 
@@ -35,18 +36,7 @@ __all__ = ["BroadlinkIrController", "parse_mac", "DEFAULT_LEARN_POLL_INTERVAL"]
 DEFAULT_LEARN_POLL_INTERVAL = 0.3
 
 
-def parse_mac(mac: str) -> bytes:
-    """MAC 字符串转 6 字节。接受 ``ec:0b:ae:0c:74:e4`` / 连字符 / 裸 12 位十六进制。"""
-    text = mac.strip().replace(":", "").replace("-", "").lower()
-    if len(text) != 12:
-        raise HalError(f"ir_mac={mac!r} 非法（应为 6 字节十六进制，如 ec:0b:ae:0c:74:e4）。")
-    try:
-        return bytes.fromhex(text)
-    except ValueError as exc:
-        raise HalError(f"ir_mac={mac!r} 含非十六进制字符。") from exc
-
-
-async def _default_factory(host: str, mac: str, hello_timeout: float):
+async def _default_factory(host: str, hello_timeout: float):
     """默认设备工厂：经 hello(ip) 获取正确设备类型（含 devtype→类映射与锁定标志）。"""
     from broadlink import hello  # 延迟导入：x86 开发/单测环境无此依赖（见模块注）
 
@@ -70,9 +60,12 @@ class BroadlinkIrController(IrController):
     """RM4 Mini 红外控制器：hello 发现 → auth 建会话 → send_data / enter_learning。
 
     Attributes:
-        device_factory: ``(host, mac, timeout) -> Device`` 协程，测试注入 fake 用；
-            默认经 broadlink.hello 发现。
+        device_factory: ``(host, timeout) -> Device`` 协程，测试注入 fake 用；
+            默认经 broadlink.hello 发现（MAC 核对由 open() 在返回后执行）。
     """
+
+    #: R9：open 失败（RM4 离线/锁定）降级 Mock——家电控制不可用但主循环不崩
+    fallback_factory = MockIrController
 
     def __init__(
         self,
@@ -96,20 +89,19 @@ class BroadlinkIrController(IrController):
     async def open(self) -> None:
         """发现设备并认证。失败一律 HalError（带解锁/在线指引），不抛裸异常。"""
         try:
-            device = await self._factory(self._host, self._mac, self._hello_timeout)
-            # MAC 核对在控制器层（factory 注入路径同样过闸）：
-            # 换设备/配置过期时 fail-closed，拒绝把红外码发进别的设备
-            reported = bytes(device.mac)
-            if reported != self._mac_bytes:
-                raise HalError(
-                    f"BroadLink 设备 MAC 不符: hello 报告 {reported.hex(':')}，"
-                    f"配置为 {self._mac}。检查配置是否过期或接了别的设备。"
-                )
+            device = await self._factory(self._host, self._hello_timeout)
             await device.auth()
-        except HalError:
-            raise
         except Exception as exc:  # 上游异常统一转 HalError（HAL 约定）
             raise _translate_open_error(exc) from exc
+        # MAC 核对（factory 注入路径同样过闸）：换设备/配置过期时 fail-closed，
+        # 拒绝把红外码发进别的设备
+        reported = bytes(device.mac)
+        if reported != self._mac_bytes:
+            raise HalError(
+                f"BroadLink 设备 MAC 不符: hello 报告 {reported.hex(':')}，"
+                f"配置为 {self._mac}。检查配置是否过期或接了别的设备。"
+            )
+        self._device = device
         self._device = device
         logging.info(
             "BroadLink IR 就绪: host=%s devtype=%s model=%s locked=%s",
@@ -157,8 +149,10 @@ class BroadlinkIrController(IrController):
                 data = await device.check_data()
             except Exception as exc:  # noqa: BLE001
                 # RM4 固件怪癖：未录到码时部分设备回 -5 StorageError（偶尔 -6
-                # ReadError 空码）而非空载荷——按"还没录到"续等；Home Assistant
-                # 集成同此处理（python-broadlink#698/#650）。其他异常照常上抛。
+                # ReadError 空码）而非空载荷——按"还没录到"续等（HA 集成同此
+                # 处理，python-broadlink#698/#650）。按类名匹配而非 isinstance：
+                # x86 单测注入同名 fake 即可覆盖（broadlink 不装 x86），且依赖
+                # 版本锁定 ==1.0.6，异常分类无漂移风险。其他异常照常上抛。
                 name = type(exc).__name__
                 if "Storage" in name or "Read" in name:
                     data = b""

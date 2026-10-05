@@ -21,6 +21,8 @@ from typing import Any, Mapping
 
 import yaml
 
+from lira.hal.base import HalError, parse_mac
+
 # device/lira/config.py -> device/lira -> device -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG_PATH = REPO_ROOT / "device" / "config.yaml"
@@ -266,7 +268,8 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
         raise ConfigError(
             f"hal.backend={config['hal']['backend']!r} 非法，可选值: {HAL_BACKENDS}。"
         )
-    # M5：IR 配置须成对，MAC 格式在此把关（运行期校验在 HAL 层）
+    # M5：IR 配置须成对，MAC 格式在此把关（parse_mac 唯一实现在 hal.base，
+    # 运行期核对复用同一规则）
     ir_host = str(hal["ir_host"]).strip()
     ir_mac = str(hal["ir_mac"]).strip()
     if ir_host and not ir_mac:
@@ -277,15 +280,10 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
     if not ir_host and ir_mac:
         raise ConfigError("hal.ir_mac 已配置但 hal.ir_host 为空。请同时配置设备固定 IP。")
     if ir_mac:
-        text = ir_mac.replace(":", "").replace("-", "").lower()
-        if len(text) != 12:
-            raise ConfigError(
-                f"hal.ir_mac={ir_mac!r} 非法（应为 6 字节十六进制，如 ec:0b:ae:0c:74:e4）。"
-            )
         try:
-            bytes.fromhex(text)
-        except ValueError as exc:
-            raise ConfigError(f"hal.ir_mac={ir_mac!r} 含非十六进制字符。") from exc
+            parse_mac(ir_mac)
+        except HalError as exc:
+            raise ConfigError(f"hal.ir_mac={ir_mac!r} {exc}") from exc
     if not config["db_path"]:
         raise ConfigError("db_path 为空。请设置本地家电配置库路径（如 data/device.db）。")
     if config["sync"]["heartbeat_seconds"] <= 0:

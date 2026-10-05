@@ -58,7 +58,7 @@ class FakeBroadlinkDevice:
 def make_factory(device: FakeBroadlinkDevice):
     """device_factory 注入桩：记录 host/timeout 传参。"""
 
-    async def factory(host: str, mac: str, timeout: float):
+    async def factory(host: str, timeout: float):
         device.seen_host = host
         device.seen_timeout = timeout
         return device
@@ -106,7 +106,7 @@ class TestOpen:
         assert "安全锁" in str(ei.value)
 
     async def test_discovery_timeout_translates_offline_hint(self):
-        async def factory(host, mac, timeout):
+        async def factory(host, timeout):
             raise type("NetworkTimeoutError", (Exception,), {})(-4000, "timeout")
 
         ctrl = BroadlinkIrController("192.168.101.27", MAC_STR, device_factory=factory)

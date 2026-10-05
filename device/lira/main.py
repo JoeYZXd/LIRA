@@ -199,25 +199,24 @@ def build_board_hal(cfg: AppConfig) -> dict[str, object]:
 async def enter_hal_resources(hal: dict[str, object], stack) -> None:
     """逐个进入 HAL 上下文并打就绪日志。
 
-    IR 专属韧性降级（R9）：RM4 Mini 断电/离线/锁定导致 open 失败时，回退
-    MockIrController——家电控制不可用但语音/阅读照常，服务不进崩溃循环；
-    ERROR 日志带修复指引。其余 HAL 失败照旧上抛（致命，快速失败可见）。
+    带 ``fallback_factory`` 的资源（可选语义，R9）open 失败时降级其 fallback——
+    对应功能不可用但主循环不受影响（如 IR 离线回退 Mock）；无 fallback 的资源
+    照旧上抛（致命，快速失败可见）。
     """
-    for name, resource in list(hal.items()):
+    for name, resource in hal.items():
         try:
             await stack.enter_async_context(resource)
         except Exception:
-            if name != "ir":
+            fallback_factory = getattr(resource, "fallback_factory", None)
+            if fallback_factory is None:
                 raise
             logging.exception(
-                "IR 初始化失败：回退 MockIrController（家电控制不可用，语音/阅读不受影响）；"
-                "检查 RM4 Mini 供电/网络/安全锁后重启服务"
+                "HAL 资源 %s 初始化失败：降级 fallback（对应功能不可用，其余不受影响）",
+                name,
             )
-            from lira.hal.mock.ir import MockIrController
-
-            fallback = MockIrController()
+            fallback = fallback_factory()
             await stack.enter_async_context(fallback)
-            hal["ir"] = fallback
+            hal[name] = fallback
         logging.info("HAL 资源已就绪: %s", name)
 
 

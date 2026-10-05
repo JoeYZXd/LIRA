@@ -584,7 +584,7 @@ class TestAssemblyHelpers:
         assert isinstance(hal["ir"], BroadlinkIrController)
 
     async def test_enter_hal_resources_ir_failure_degrades_to_mock(self, caplog):
-        """R9 韧性：IR open 失败（离线/锁定）回退 Mock，主循环不崩。"""
+        """R9 韧性：带 fallback_factory 的资源 open 失败（离线/锁定）降级 Mock，主循环不崩。"""
         from contextlib import AsyncExitStack
 
         from lira.hal.base import HalError
@@ -592,6 +592,8 @@ class TestAssemblyHelpers:
         from lira.main import enter_hal_resources
 
         class FailingIr:
+            fallback_factory = MockIrController  # BroadlinkIrController 同款声明
+
             async def __aenter__(self):
                 raise HalError("BroadLink 认证被拒")
 
@@ -603,11 +605,11 @@ class TestAssemblyHelpers:
         with caplog.at_level(logging.ERROR):
             await enter_hal_resources(hal, stack)
         assert isinstance(hal["ir"], MockIrController)
-        assert any("IR 初始化失败" in r.message for r in caplog.records)
+        assert any("ir 初始化失败" in r.message for r in caplog.records)
         await stack.aclose()
 
     async def test_enter_hal_resources_non_ir_failure_raises(self):
-        """非 IR HAL 失败仍快速上抛（致命可见，不吞）。"""
+        """无 fallback_factory 的资源失败仍快速上抛（致命可见，不吞）。"""
         from contextlib import AsyncExitStack
 
         from lira.hal.base import HalError

@@ -29,6 +29,7 @@ _SENSOR_SUBDEV = "/dev/v4l-subdev2"  # M3：OV13855@CAM1 的传感器子设备
 #: 数字曝光目标：帧均值亮度锚定（0-255）。模拟增益打底后的轻量数字补偿。
 _TARGET_LUMA = 120.0
 _GAIN_CAP = 3.0
+_WARMUP_FRAMES = 5
 
 #: 传感器曝光/增益（板上实测）：增益 128-1984（模拟增益是最有效的亮度杠杆，
 #: 也是最大的噪声源——压噪优先拉长曝光而非抬增益）
@@ -65,6 +66,7 @@ class V4l2IspCamera(Camera):
             raise HalError(f"ISP mainpath 节点不存在: {self.device}（检查相机 overlay）")
         exposure, gain = _EXP_MAX, 1024
         self.color_gains = np.ones(3, dtype=np.float32)
+        self._gain_limit = _GAIN_DARK
         try:
             try:
                 calibration = json.loads(self.calibration_path.read_text(encoding="utf-8"))
@@ -77,6 +79,10 @@ class V4l2IspCamera(Camera):
                 exposure, gain = int(calibration["sensor_exposure"]), int(calibration["sensor_gain"])
                 if not 4 <= exposure <= _EXP_MAX or not 128 <= gain <= _GAIN_DARK:
                     raise ValueError("Invalid calibration sensor controls")
+                gain_limit = int(calibration.get("sensor_gain_limit", _GAIN_DARK))
+                if not 128 <= gain <= gain_limit <= _GAIN_DARK:
+                    raise ValueError("Invalid calibration gain limit")
+                self._gain_limit = gain_limit
                 self.color_gains = gains
         except (OSError, ValueError, KeyError, TypeError) as exc:
             raise HalError("白平衡校准文件无效或不可读") from exc
@@ -117,9 +123,10 @@ class V4l2IspCamera(Camera):
         gain = getattr(self, "_sensor_gain", 1024)
         frames = await self._capture_batch(gain, n)
         mean = self._luma_mean(frames[0])
-        if mean < _LUMA_LOW and gain < _GAIN_DARK:
+        gain_limit = getattr(self, "_gain_limit", _GAIN_DARK)
+        if mean < _LUMA_LOW and gain < gain_limit:
             new_gain = min(
-                int(gain * _LUMA_LOW / max(mean, 1.0)), _GAIN_DARK,
+                int(gain * _LUMA_LOW / max(mean, 1.0)), gain_limit,
                 int(gain * 235.0 / max(float(frames[0].max()), 1.0)),
             )
             if new_gain > gain:
@@ -141,13 +148,13 @@ class V4l2IspCamera(Camera):
         await self._v4l2("--set-fmt-video=width=4224,height=3136,pixelformat=NV12")
         stdout, stderr = await self._v4l2(
             "--get-fmt-video", "--verbose", "--stream-mmap",
-            "--stream-count=%d" % n, "--stream-to=%s" % self._tmp,
+            "--stream-count=%d" % (n + _WARMUP_FRAMES), "--stream-to=%s" % self._tmp,
         )
         log = stdout.decode(errors="replace") + stderr.decode(errors="replace")
         try:
             fmt = parse_format(log)
             sizes = [int(x) for x in re.findall(r"cap dqbuf:.*?bytesused:\s*(\d+)", log)]
-            payloads = split_frames(self._tmp.read_bytes(), sizes, n)
+            payloads = split_frames(self._tmp.read_bytes(), sizes, n + _WARMUP_FRAMES)[_WARMUP_FRAMES:]
             return [
                 _apply_orientation(decode_nv12(payload, fmt), self.rotation, self.hflip)
                 for payload in payloads

@@ -92,7 +92,7 @@ def test_capture_decodes_negotiated_stride_and_frame_boundaries(tmp_path):
         raw[:, width:] = 255  # padding must never become picture pixels
         payloads.append(raw.tobytes())
     path = tmp_path / "stream.nv12"
-    path.write_bytes(b"".join(payloads))
+    path.write_bytes(payloads[0] * 5 + b"".join(payloads))
     fmt = """Format Video Capture Multiplanar:
 Width/Height : 4/4
 Pixel Format : 'NV12'
@@ -110,7 +110,7 @@ Size Image : 36
         async def _v4l2(self, *args):
             calls.append(args)
             if "--get-fmt-video" in args:
-                return fmt.encode(), b"cap dqbuf: bytesused: 36\n" * 3
+                return fmt.encode(), b"cap dqbuf: bytesused: 36\n" * 8
             # Verbose set-format output is deliberately NOT part of readback.
             return fmt.encode(), b""
 
@@ -200,3 +200,41 @@ def test_adaptive_gain_protects_small_bright_reference_patch():
     asyncio.run(camera._capture_batch_adaptive())
     assert len(gains) == 2
     assert 1024 < gains[1] <= int(1024 * 235 / 200)
+
+
+def test_capture_waits_for_sensor_settling(tmp_path):
+    import asyncio
+    from lira.hal.board.camera_isp import V4l2IspCamera
+
+    fmt = "Width/Height : 4/4\nPixel Format : 'NV12'\nNumber of planes : 1\nField : None\nBytes per Line : 4\nSize Image : 24\n"
+    frames = [bytes([16] * 16 + [128] * 8)] * 5 + [bytes([100] * 16 + [128] * 8)] * 3
+    camera = V4l2IspCamera()
+    camera._tmp = tmp_path / "capture.raw"
+    camera._tmp.write_bytes(b"".join(frames))
+    async def sensor(*args): return True
+    async def ctl(*args):
+        if "--get-fmt-video" in args:
+            return fmt.encode(), b"cap dqbuf: bytesused: 24\n" * 8
+        return b"", b""
+    camera._sensor_set = sensor
+    camera._v4l2 = ctl
+    result = asyncio.run(camera._capture_batch(512, 3))
+    assert len(result) == 3
+    assert result[0].mean() > 80
+
+
+def test_scene_gain_limit_prevents_noise_escalation():
+    import asyncio
+    from lira.hal.board.camera_isp import V4l2IspCamera
+
+    calls = []
+    class Camera(V4l2IspCamera):
+        async def _capture_batch(self, gain, n):
+            calls.append(gain)
+            return [np.full((20, 20, 3), 20, np.uint8)] * n
+        async def _sensor_set(self, *args): return True
+    camera = Camera()
+    camera._sensor_gain = 512
+    camera._gain_limit = 512
+    asyncio.run(camera._capture_batch_adaptive())
+    assert calls == [512]

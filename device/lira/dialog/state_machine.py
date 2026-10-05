@@ -21,13 +21,13 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import logging
 from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Protocol
 
 from lira.dialog import phrasebook as pb
+from lira.dialog.callbacks import invoke_callback as _invoke
 from lira.dialog.context import ConversationHistory
 from lira.dialog.intents import (
     Intent,
@@ -140,18 +140,6 @@ class _PendingConfirm:
 class OperationOwner:
     epoch: int
     operation_id: int
-
-
-def _invoke(callback, *args, **kwargs):
-    """Keep legacy callback adapters usable while ownership-aware ones migrate.
-
-    Production callbacks implement every keyword. Filtering explicit signatures
-    avoids swallowing a TypeError raised inside a callback.
-    """
-    parameters = inspect.signature(callback).parameters
-    if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
-        kwargs = {key: value for key, value in kwargs.items() if key in parameters}
-    return callback(*args, **kwargs)
 
 
 class DialogEngine:
@@ -347,8 +335,11 @@ class DialogEngine:
         if not t or not self._input_current(generation):
             return
         if self.state is not State.STANDBY and (is_cancel(t) or t == "结束聊天"):
-            if self.state is State.READING and t != "结束聊天":
-                self._cb.playback_stop()
+            if self.state is State.READING:
+                if t == "结束聊天":
+                    self._cb.playback_pause()
+                else:
+                    self._cb.playback_stop()
             self._enter_standby()
             return
         self._speech_active = self._awaiting_endpoint = False
@@ -374,6 +365,14 @@ class DialogEngine:
             self._capture_fails = 0
             self._capture_task = None  # 已完成，句柄作废
             self._transition(State.READING)
+            return
+        facts = getattr(self._cb, "reading_task_facts", lambda: None)()
+        if facts is not None and facts.resumable:
+            # OCR succeeded and cached its text; a cue failure must not recapture
+            # a page the user may already have removed from the camera.
+            self._capture_task = None
+            self._speak_answer("已经识别并保存了内容，但播报失败。请说继续来重试。",
+                               owner=self._owner, user_text=self._request_text)
             return
         self._capture_fails += 1
         if self._capture_fails <= self.MAX_CAPTURE_RETRIES:
@@ -530,15 +529,7 @@ class DialogEngine:
         if not is_playback_command(text):
             logging.debug("READING 态忽略白名单外文本（朗读内容不进意图通道）")
             return
-        playback_call = {
-            "暂停": self._cb.playback_pause,
-            "继续": self._cb.playback_resume,
-            "停止": self._cb.playback_stop,
-            "再读一遍": self._cb.playback_read_again,
-            "大声点": self._cb.playback_volume_up,
-            "小声点": self._cb.playback_volume_down,
-        }[text]
-        playback_call()
+        self._playback_control(text)
         if text == "停止":
             self._enter_standby()
 
@@ -568,8 +559,20 @@ class DialogEngine:
             self._disarm()
             self._capture_task = _invoke(self._cb.start_capture, owner=self._owner)
         elif intent.kind is IntentKind.PLAYBACK:
-            # 白名单命令只在 READING 态有效（见 _on_asr_reading），此处不应到达
-            self._enter_standby()
+            facts = getattr(self._cb, "reading_task_facts", lambda: None)()
+            if facts is None or not facts.resumable:
+                self._speak_answer("没有可以继续的阅读内容，请先让我读书。", owner=self._owner,
+                                   user_text=self._request_text)
+                return
+            self._playback_control(intent.text)
+            if intent.text in ("继续", "再读一遍"):
+                self._disarm()
+                self._transition(State.READING)
+            elif intent.text == "停止":
+                self._enter_standby()
+            else:
+                self._begin_listening(replay=False)
+                self._arm(self.FOLLOWUP_WINDOW_SECONDS)
         elif intent.kind is IntentKind.APPLIANCE:
             self._dispatch_appliance(intent)
 
@@ -594,6 +597,14 @@ class DialogEngine:
         self._finish_command()
 
     # ---------- 内部机制 ----------
+
+    def _playback_control(self, text: str) -> None:
+        controls = {
+            "暂停": self._cb.playback_pause, "继续": self._cb.playback_resume,
+            "停止": self._cb.playback_stop, "再读一遍": self._cb.playback_read_again,
+            "大声点": self._cb.playback_volume_up, "小声点": self._cb.playback_volume_down,
+        }
+        controls[text]()
 
     def _recognition_failure(self, misheard: str) -> None:
         """R24：说出误解内容 + 示例引导；最多 2 次后礼貌回待机，绝不静默丢弃。"""

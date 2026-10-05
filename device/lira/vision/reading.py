@@ -2,7 +2,7 @@
 
 结构（计划 U4 Approach）：
   - `ReadingSession`：持有分块后的文本与游标，逐块经注入的 `BlockSpeaker` 播报；
-    支持暂停/继续（块边界生效）、再读一遍（R22：重复当前块，绝不重新拍摄）、
+    支持暂停/继续（立即停止当前块，恢复时重读未完成块）、再读一遍（R22：重复当前块，绝不重新拍摄）、
     停止、seek 到块边界、音量增减。自然读完触发 `on_finished`（状态机据此回待机）；
     "停止"由状态机直接回待机，不触发 `on_finished`。
   - `ReadingPipeline`：R4 拍摄语音引导 → 拍摄 → OCR → 版面排序 → 分块 → 开播；
@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from dataclasses import dataclass
+from lira.dialog.context import ReadingTaskFacts, ReadingTaskStatus
 from typing import Awaitable, Callable, Protocol, Sequence
 
 import cv2
@@ -89,112 +91,143 @@ class TtsBlockSpeaker:
         self.volume: float = 1.0
         self.speed: float = speed
 
+    def cancel(self, owner) -> None:
+        self._tts.cancel_owner(owner)
+
     async def play(self, text: str, *, owner=None) -> None:
-        done = self._tts.speak(text, volume=self.volume, speed=self.speed, owner=owner)  # type: ignore[attr-defined]
-        await done.wait()
-        if getattr(done, "status", "success") == "cancelled":
-            raise asyncio.CancelledError
-        if getattr(done, "status", "success") != "success":
-            raise HalError("阅读播报失败")
+        if owner is None:
+            raise ValueError("Reading playback requires an owner")
+        done = self._tts.speak(text, volume=self.volume, speed=self.speed, owner=owner)
+        try:
+            await done.wait()
+            if getattr(done, "status", "success") == "cancelled":
+                raise asyncio.CancelledError
+            if getattr(done, "status", "success") != "success":
+                raise HalError("阅读播报失败")
+        except asyncio.CancelledError:
+            self._tts.cancel_owner(owner)
+            await self._tts.stop(owner)
+            raise
+
+
+@dataclass(frozen=True)
+class ReadingAudioOwner:
+    task_id: object
+    generation: int
 
 
 class ReadingSession:
-    """单次阅读会话：块序列 + 游标 + 播放控制（R22）。全部方法可在控制回调中同步调用。"""
-
-    def __init__(
-        self,
-        blocks: Sequence[str],
-        speaker: BlockSpeaker,
-        *,
-        on_finished: Callable[[], None] | None = None,
-    ) -> None:
+    """A retained reading task; only completed output advances its cursor."""
+    def __init__(self, blocks, speaker, *, on_finished=None, task_id=None):
         self.blocks = list(blocks)
         self._speaker = speaker
         self._on_finished = on_finished
+        self.task_id = task_id or object()
         self._cursor = 0
+        self._last_completed = None
+        self._active_block = None
+        self._generation = 0
+        self._audio_owner = None
+        self._play_task = None
         self._resume_gate = asyncio.Event()
         self._resume_gate.set()
-        self._replay_requested = False
         self._stopped = False
-        self._task: asyncio.Task | None = None
+        self._task = None
+        self.failed = False
 
-    # ---------- 生命周期 ----------
+    def start(self):
+        if self._task is None or self._task.done():
+            self._task = asyncio.create_task(self.run())
 
-    def start(self) -> None:
-        if self._task is None:
-            self._task = asyncio.get_running_loop().create_task(self.run())
+    def _interrupt(self):
+        self._generation += 1
+        if self._audio_owner is not None and isinstance(self._speaker, TtsBlockSpeaker):
+            self._speaker.cancel(self._audio_owner)
+        if self._play_task is not None and not self._play_task.done():
+            self._play_task.cancel()
 
-    async def run(self) -> None:
-        """逐块播报直至读完（自然结束触发 on_finished）或被 stop()。"""
+    async def run(self):
         try:
             while self._cursor < len(self.blocks):
                 await self._resume_gate.wait()
                 if self._stopped:
                     return
-                await self._speaker.play(self.blocks[self._cursor])
+                self._active_block = self._cursor
+                generation = self._generation
+                self._audio_owner = ReadingAudioOwner(self.task_id, generation)
+                if isinstance(self._speaker, TtsBlockSpeaker):
+                    play = self._speaker.play(self.blocks[self._cursor], owner=self._audio_owner)
+                else:
+                    play = self._speaker.play(self.blocks[self._cursor])
+                self._play_task = asyncio.create_task(play)
+                try:
+                    await self._play_task
+                except asyncio.CancelledError:
+                    if self._stopped:
+                        return
+                    if generation != self._generation:
+                        continue
+                    raise
                 if self._stopped:
                     return
-                if self._replay_requested:
-                    # R22：再读一遍——重复当前块，游标不动、不重新拍摄
-                    self._replay_requested = False
+                if generation != self._generation:
                     continue
+                self._last_completed = self._cursor
                 self._cursor += 1
-            if self._on_finished is not None:
+                self._active_block = None
+            if not self._stopped and self._on_finished is not None:
                 self._on_finished()
         except asyncio.CancelledError:
+            self._interrupt()
             raise
-        except Exception:  # noqa: BLE001 - 播放故障不得拖垮主循环
-            logging.exception("朗读会话异常终止")
-            # F3：终局播放故障也必须触发 on_finished——否则状态机收不到
-            # 回执，永久卡在 READING。游标不动（故障块不前进）。
+        except Exception:
+            logging.exception("朗读会话播放失败")
+            self.failed = True
+            self._resume_gate.clear()
             if self._on_finished is not None:
                 self._on_finished()
 
-    # ---------- 播放控制（R21/R22 白名单命令的落点） ----------
-
-    def pause(self) -> None:
-        """暂停：当前块播完后停住（块粒度，x86 TTS 全块播报的语义边界）。"""
+    def pause(self):
         self._resume_gate.clear()
+        self._interrupt()
 
-    def resume(self) -> None:
-        """继续：从暂停处接着读（暂停时当前块已播完，继续读下一块）。"""
+    def resume(self):
+        if self._stopped:
+            return
+        self.failed = False
+        self._resume_gate.set()
+        self.start()
+
+    def stop(self):
+        self._stopped = True
+        self._interrupt()
         self._resume_gate.set()
 
-    def stop(self) -> None:
-        """停止：终止会话（不触发 on_finished，状态机自行回待机）。"""
-        self._stopped = True
-        self._resume_gate.set()  # 唤醒可能停在 gate 上的 run
-
-    def read_again(self) -> None:
-        """R22：重复当前块（若恰在块间，则把即将播放的块播两遍）。
-
-        F8：暂停态（gate 未放行）时游标已停在"刚听完那块"的下一块上——
-        此时"再读一遍"语义是重听刚播完的那块，把游标退回一块即可（恢复后
-        自然重播），不再置 replay 标记（否则会错误重复下一块）。
-        """
-        if self.is_paused and self._cursor > 0:
-            self._cursor -= 1
+    def read_again(self):
+        if self._stopped:
             return
-        self._replay_requested = True
+        target = self._active_block if self._active_block is not None else self._last_completed
+        if target is not None:
+            self._cursor = target
+        self._interrupt()
 
-    def seek(self, block_index: int) -> None:
-        """seek 到块边界（0 ≤ index ≤ len）。"""
+    def seek(self, block_index):
         self._cursor = max(0, min(block_index, len(self.blocks)))
+        self._active_block = None
+        self._interrupt()
 
-    def volume_up(self) -> None:
+    def volume_up(self):
         self._speaker.volume = min(self._speaker.volume + _VOLUME_STEP, _VOLUME_MAX)
 
-    def volume_down(self) -> None:
+    def volume_down(self):
         self._speaker.volume = max(self._speaker.volume - _VOLUME_STEP, _VOLUME_MIN)
 
-    # ---------- 观测（测试/装配图用） ----------
-
     @property
-    def cursor(self) -> int:
+    def cursor(self):
         return self._cursor
 
     @property
-    def is_paused(self) -> bool:
+    def is_paused(self):
         return not self._resume_gate.is_set()
 
 
@@ -233,11 +266,15 @@ class ReadingPipeline:
         self._block_chars = block_chars
         self._text_polisher = text_polisher
         self._session: ReadingSession | None = None
+        self.raw_text: tuple[str, ...] = ()
+        self._task_id = None
+        self._cue_complete = False
+        self._recovery_task = None
         #: 播放控制方法（main.py 直接绑到 DialogCallbacks 的六个占位）
         self.playback_pause = self._with_session(lambda s: s.pause())
-        self.playback_resume = self._with_session(lambda s: s.resume())
-        self.playback_stop = self._with_session(lambda s: s.stop())
-        self.playback_read_again = self._with_session(lambda s: s.read_again())
+        self.playback_resume = self._resume
+        self.playback_stop = self._stop
+        self.playback_read_again = self._repeat
         self.playback_volume_up = self._with_session(lambda s: s.volume_up())
         self.playback_volume_down = self._with_session(lambda s: s.volume_down())
 
@@ -254,8 +291,11 @@ class ReadingPipeline:
         """
         notify = on_capture_done or self._on_capture_done
         created_session = None
+        capture_id = object()
+        self._stop()
+        self._task_id = capture_id
         def check():
-            if not is_valid():
+            if not is_valid() or self._task_id is not capture_id:
                 raise asyncio.CancelledError
         async def play(text):
             check()
@@ -286,29 +326,28 @@ class ReadingPipeline:
             if not raw_text:
                 notify(False)
                 return
-            # OCR 已结束，先明确告知可以移开材料，再加工或朗读缓存文本。
-            await play(OCR_COMPLETE)
+            # Publish cached text only while capture still owns this task.
             text = raw_text if read_original else await self._polish(raw_text)
             check()
+            self.raw_text = tuple(raw_text)
             blocks = chunk_lines(text, self._block_chars)
             def finished():
-                if self._session is created_session:
-                    self._session = None
+                if self._session is created_session and self._task_id is capture_id:
                     callback = on_reading_finished or self._on_reading_finished
                     if callback is not None:
                         callback()
-            created_session = ReadingSession(
-                blocks,
-                self._speaker,
-                on_finished=finished,
-            )
+            created_session = ReadingSession(blocks, self._speaker, on_finished=finished,
+                                             task_id=capture_id)
+            created_session.pause()
             self._session = created_session
+            await play(OCR_COMPLETE)
+            self._cue_complete = True
+            check()
             notify(True)
-            self._session.start()
+            created_session.resume()
         except asyncio.CancelledError:
             if created_session is not None and self._session is created_session:
-                created_session.stop()
-                self._session = None
+                self._stop()
             raise
         except Exception:  # noqa: BLE001 - 拍摄/引导非预期故障也必须回执（评审：CAPTURING 卡死防线）
             # F3 同款纪律：状态机 CAPTURING 无计时器（拍摄开始即 disarm），协程若
@@ -353,10 +392,51 @@ class ReadingPipeline:
 
         return call
 
-    def _handle_finished(self) -> None:
+    def _stop(self):
+        if self._session is not None:
+            self._session.stop()
+        if self._recovery_task is not None:
+            self._recovery_task.cancel()
         self._session = None
-        if self._on_reading_finished is not None:
-            self._on_reading_finished()
+        self.raw_text = ()
+        self._task_id = None
+        self._cue_complete = False
+
+    def _resume(self):
+        session = self._session
+        if session is None:
+            return
+        if self._cue_complete:
+            session.resume()
+        elif self._recovery_task is None or self._recovery_task.done():
+            async def recover():
+                try:
+                    if isinstance(self._speaker, TtsBlockSpeaker):
+                        await self._speaker.play(OCR_COMPLETE, owner=ReadingAudioOwner(session.task_id, -1))
+                    else:
+                        await self._speaker.play(OCR_COMPLETE)
+                    if self._session is session:
+                        self._cue_complete = True
+                        session.resume()
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    logging.exception("阅读完成提示重试失败")
+            self._recovery_task = asyncio.create_task(recover())
+
+    def _repeat(self):
+        if self._session is not None:
+            self._session.read_again()
+            self._resume()
+
+    def task_facts(self):
+        session = self._session
+        if session is None:
+            return None
+        status = (ReadingTaskStatus.FAILED if session.failed or not self._cue_complete
+                  else ReadingTaskStatus.COMPLETED if session.cursor >= len(session.blocks)
+                  else ReadingTaskStatus.PAUSED if session.is_paused else ReadingTaskStatus.READING)
+        return ReadingTaskFacts(status, resumable=bool(session.blocks))
 
     @property
     def session(self) -> ReadingSession | None:

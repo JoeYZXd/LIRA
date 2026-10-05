@@ -11,12 +11,12 @@
 from __future__ import annotations
 
 import logging
-import inspect
 from dataclasses import dataclass
 from enum import Enum
 from typing import Awaitable, Callable, Iterable
 
 from lira.dialog.intents import Appliance, Intent, match_local
+from lira.dialog.callbacks import invoke_callback
 from lira.dialog.context import ContextSnapshot
 
 __all__ = ["RouterTier", "RouteResult", "Router", "LlmHandler"]
@@ -88,8 +88,4 @@ class Router:
 
     @staticmethod
     async def _call_llm(handler, text, context, on_wait_feedback):
-        parameters = inspect.signature(handler).parameters
-        kwargs = {"context": context, "on_wait_feedback": on_wait_feedback}
-        if not any(p.kind is inspect.Parameter.VAR_KEYWORD for p in parameters.values()):
-            kwargs = {key: value for key, value in kwargs.items() if key in parameters}
-        return await handler(text, **kwargs)
+        return await invoke_callback(handler, text, context=context, on_wait_feedback=on_wait_feedback)

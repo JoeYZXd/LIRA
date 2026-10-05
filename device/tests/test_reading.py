@@ -147,8 +147,8 @@ class TestReadingSession:
         await asyncio.wait_for(finished.wait(), 5)
         assert speaker.played == ["甲", "乙"]
 
-    async def test_pause_during_block_halts_at_boundary_then_resumes(self):
-        """Test scenario 4（前半）: 朗读中"暂停"→ 当前块播完停住；"继续"→ 接着读。"""
+    async def test_pause_during_block_interrupts_then_restarts_unfinished_block(self):
+        """Test scenario 4（前半）: 朗读中"暂停"→ 当前块立即停止；"继续"→ 重读未完成块。"""
         speaker = RecordingSpeaker()
         session = ReadingSession(["第一块", "第二块", "第三块"], speaker)
         finished = asyncio.Event()
@@ -167,11 +167,11 @@ class TestReadingSession:
                 break
         assert session.is_paused
         await settle(20)  # 让当前块播完、run 停在 gate 上
-        assert speaker.played == ["第一块", "第二块"], "暂停应停在块边界"
+        assert speaker.played == ["第一块", "第二块"], "暂停应停止当前块输出"
 
         session.resume()
         await asyncio.wait_for(finished.wait(), 5)
-        assert speaker.played == ["第一块", "第二块", "第三块"], "恢复后不得跳块或重播"
+        assert speaker.played == ["第一块", "第二块", "第二块", "第三块"], "恢复应重读未完成块"
 
     async def test_read_again_repeats_current_block_without_advancing(self):
         """R22: "再读一遍" 重复当前块；游标不前进。"""
@@ -303,7 +303,9 @@ class TestReadingPipeline:
         assert captured["done"] == [True]
         assert speaker.played[0] == CAPTURE_GUIDANCE, "R4 拍摄语音引导"
         await settle(20)  # 等朗读任务推进
-        assert speaker.played[1:] == chunk_lines(["第一段", "第二段"])
+        from lira.dialog.phrasebook import OCR_COMPLETE
+        assert speaker.played[1] == OCR_COMPLETE
+        assert speaker.played[2:] == chunk_lines(["第一段", "第二段"])
         assert camera.capture_count == 1
         await settle(20)
         assert captured.get("finished"), "自然读完应触发 on_reading_finished（状态机回待机）"
@@ -315,6 +317,87 @@ class TestReadingPipeline:
         await asyncio.wait_for(pipeline.run_capture(), 5)
         assert captured["done"] == [False]
         assert speaker.played == [CAPTURE_GUIDANCE], "未检出不得开始朗读"
+
+    async def test_original_reading_skips_polisher_and_announces_before_text(self):
+        from lira.dialog.phrasebook import OCR_COMPLETE
+        _, speaker, captured, pipeline = self._build(
+            FakeEngine([line(0, 0, "书本原文")]), tiny_png()
+        )
+
+        async def polish(text):
+            pytest.fail("读书核对原文时不得调用大模型改写")
+
+        pipeline._text_polisher = polish
+        await pipeline.run_capture(read_original=True)
+        await settle(20)
+        assert speaker.played == [CAPTURE_GUIDANCE, OCR_COMPLETE, "书本原文"]
+        assert captured["done"] == [True]
+
+    async def test_cancel_during_completion_announcement_does_not_read(self):
+        from lira.dialog.phrasebook import OCR_COMPLETE
+        _, speaker, captured, pipeline = self._build(
+            FakeEngine([line(0, 0, "书本原文")]), tiny_png()
+        )
+        announcing = asyncio.Event()
+        release = asyncio.Event()
+
+        async def hook(text):
+            if text == OCR_COMPLETE:
+                announcing.set()
+                await release.wait()
+
+        speaker.on_play = hook
+        task = asyncio.create_task(pipeline.run_capture(read_original=True))
+        await asyncio.wait_for(announcing.wait(), 5)
+        assert pipeline.session is not None
+        assert pipeline.session.is_paused
+        assert captured == {}
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert pipeline.session is None
+        assert speaker.played == [CAPTURE_GUIDANCE, OCR_COMPLETE]
+
+    async def test_failed_completion_cue_retains_cache_and_continue_retries_without_camera(self):
+        from lira.dialog.phrasebook import OCR_COMPLETE
+        camera, speaker, captured, pipeline = self._build(
+            FakeEngine([line(0, 0, "书本缓存原文")]), tiny_png())
+        async def fail_cue(text):
+            if text == OCR_COMPLETE:
+                raise HalError("speaker unavailable")
+        speaker.on_play = fail_cue
+        await pipeline.run_capture(read_original=True)
+        assert captured["done"] == [False]
+        assert pipeline.raw_text == ("书本缓存原文",)
+        assert pipeline.session.cursor == 0 and pipeline.session.is_paused
+        assert "书本缓存原文" not in speaker.played
+        speaker.on_play = None
+        pipeline.playback_resume()
+        await settle(30)
+        assert speaker.played[-2:] == [OCR_COMPLETE, "书本缓存原文"]
+        assert camera.capture_count == 1
+        pipeline.playback_stop()
+        assert pipeline.raw_text == () and pipeline.session is None
+
+    async def test_old_finished_callback_cannot_clear_replacement_cache(self):
+        _, speaker, _, pipeline = self._build(FakeEngine([line(0, 0, "旧内容")]), tiny_png())
+        await pipeline.run_capture(read_original=True)
+        old = pipeline.session
+        pipeline._engine.results = [line(0, 0, "新内容")]
+        await pipeline.run_capture(read_original=True)
+        current = pipeline.session
+        old._on_finished()
+        assert pipeline.session is current
+        assert pipeline.raw_text == ("新内容",)
+        pipeline.playback_stop()
+
+    async def test_whitespace_ocr_does_not_announce_success(self):
+        _, speaker, captured, pipeline = self._build(
+            FakeEngine([line(0, 0, "  ")]), tiny_png()
+        )
+        await pipeline.run_capture()
+        assert captured["done"] == [False]
+        assert speaker.played == [CAPTURE_GUIDANCE]
 
     async def test_camera_error_signals_failure(self):
         engine = FakeEngine([])

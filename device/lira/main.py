@@ -41,7 +41,6 @@ from lira.audio._paths import (
     WAKEWORD_KEYWORDS_FILE,
 )
 from lira.config import AppConfig, ConfigError, load_config
-from lira.dialog import phrasebook as pb
 from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
 from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
@@ -392,9 +391,15 @@ class DeviceCallbacks:
                 read_original=self._rt.engine.read_original, owner=owner,
                 is_valid=lambda: self._rt.engine.is_current(owner),
                 on_capture_done=lambda ok: self._rt.spawn(self._rt.engine.on_capture_done(ok, owner=owner)),
-                on_reading_finished=lambda: self._rt.spawn(self._rt.engine.on_reading_finished(owner=owner)),
+                on_reading_finished=lambda: self._rt.spawn(self._reading_finished(self._rt.pipeline.session)),
             )
         )
+
+    async def _reading_finished(self, session) -> None:
+        # Check task identity when the scheduled callback executes, rather than
+        # only when the final block completes: a successor may already exist.
+        if session is not None and self._rt.pipeline.session is session:
+            await self._rt.engine.on_reading_finished()
 
     def send_ir(self, device: str, action: str, *, owner=None, confirmed=False):
         # 状态机已完成高危确认 -> 装配层以 confirmed=True 过第二道闸
@@ -414,19 +419,15 @@ class DeviceCallbacks:
                             getattr(exc, "kind", type(exc).__name__))
 
     def reading_task_facts(self) -> ReadingTaskFacts | None:
-        session = self._rt.pipeline.session
-        if session is not None:
-            status = ReadingTaskStatus.PAUSED if session.is_paused else ReadingTaskStatus.READING
-            return ReadingTaskFacts(status, resumable=True)
+        facts = self._rt.pipeline.task_facts()
+        if facts is not None:
+            return facts
         if self._rt.engine.state is State.CAPTURING:
             return ReadingTaskFacts(ReadingTaskStatus.CAPTURING, resumable=False)
         return None
 
     def playback_pause(self) -> None:
         self._rt.pipeline.playback_pause()
-        # Invalidate current legacy reading entries before successor feedback.
-        if self._rt.tts is not None:
-            self._rt.tts.cancel_owner(None)
 
     def playback_resume(self) -> None:
         self._rt.pipeline.playback_resume()

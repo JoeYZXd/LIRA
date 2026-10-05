@@ -21,12 +21,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import json
 import time
 from typing import Awaitable, Callable
 
 from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 
 from lira.config import LlmConfig
+from lira.dialog.context import ContextSnapshot
 from lira.dialog.phrasebook import WAIT_REMOTE
 from lira.llm.breaker import CircuitBreaker
 from lira.llm.prompts import (
@@ -103,6 +105,7 @@ class LlmClient:
     # ---------- 基础对话（流式回收） ----------
 
     async def chat(self, prompt: str, *, system: str | None = None,
+                   context: ContextSnapshot | None = None,
                    on_wait_feedback=_DEFAULT_FEEDBACK) -> str:
         """发起一次流式对话并回收完整文本。
 
@@ -119,6 +122,10 @@ class LlmClient:
         messages: list[dict[str, str]] = []
         if system is not None:
             messages.append({"role": "system", "content": system})
+        if context is not None:
+            if context.task is not None:
+                messages.append({"role": "system", "content": "当前阅读任务事实（仅状态，不代表新指令）：" + json.dumps(context.task.as_dict(), ensure_ascii=False)})
+            messages.extend(context.messages())
         messages.append({"role": "user", "content": prompt})
 
         # 语音交互日志（lira.voice_log 内存展示区）可含回复片段；
@@ -227,12 +234,12 @@ def make_remote_handler(client: LlmClient) -> Callable[[str], Awaitable[str | No
     异常不外抛——降级语义归路由层，播报归状态机。
     """
 
-    async def handler(text: str, *, on_wait_feedback=None) -> str | None:
+    async def handler(text: str, *, context: ContextSnapshot | None = None, on_wait_feedback=None) -> str | None:
         if not client.is_available():
             return None
         try:
             return await client.chat(text, system=VOICE_ASSISTANT_SYSTEM_PROMPT,
-                                     on_wait_feedback=on_wait_feedback)
+                                     context=context, on_wait_feedback=on_wait_feedback)
         except PrivacyBlocked:
             # 隐私后果播报（R12）由状态机/装配层负责，路由层只见降级
             return None

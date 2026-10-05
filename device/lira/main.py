@@ -45,7 +45,7 @@ from lira.dialog import phrasebook as pb
 from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
 from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
-from lira.dialog.state_machine import AudioRoute, DialogEngine
+from lira.dialog.state_machine import AudioRoute, DialogEngine, State
 from lira.hal.base import HalError
 from lira.hal.mock import (
     IMAGE_SUFFIXES,
@@ -64,6 +64,7 @@ from lira.llm.client import make_text_polisher
 from lira.sync import SyncClient, make_snapshot_announcer
 from lira.sync_ws import WsSyncTransport
 from lira.voice_log import VOICE_LOG
+from lira.dialog.context import ReadingTaskFacts, ReadingTaskStatus
 from lira.vision.reading import ReadingPipeline, TtsBlockSpeaker
 
 __all__ = [
@@ -411,6 +412,15 @@ class DeviceCallbacks:
         except Exception as exc:  # noqa: BLE001 - IR 故障不拖垮主循环
             logging.warning("IR 发送失败 device=%s action=%s kind=%s", device, action,
                             getattr(exc, "kind", type(exc).__name__))
+
+    def reading_task_facts(self) -> ReadingTaskFacts | None:
+        session = self._rt.pipeline.session
+        if session is not None:
+            status = ReadingTaskStatus.PAUSED if session.is_paused else ReadingTaskStatus.READING
+            return ReadingTaskFacts(status, resumable=True)
+        if self._rt.engine.state is State.CAPTURING:
+            return ReadingTaskFacts(ReadingTaskStatus.CAPTURING, resumable=False)
+        return None
 
     def playback_pause(self) -> None:
         self._rt.pipeline.playback_pause()

@@ -28,6 +28,7 @@ from enum import Enum
 from typing import Callable, Protocol
 
 from lira.dialog import phrasebook as pb
+from lira.dialog.context import ConversationHistory
 from lira.dialog.intents import (
     Intent,
     IntentKind,
@@ -35,6 +36,8 @@ from lira.dialog.intents import (
     classify_confirmation,
     find_alias_hits,
     is_cancel,
+    is_book_fragment,
+    match_local,
     is_playback_command,
 )
 from lira.dialog.router import Router, RouterTier
@@ -50,6 +53,7 @@ class State(Enum):
     PROCESSING = "processing"
     SPEAKING = "speaking"
     FOLLOWUP = "followup"
+    CLARIFYING = "clarifying"
     CONFIRMING = "confirming"
     CAPTURING = "capturing"
     READING = "reading"
@@ -70,6 +74,7 @@ _ROUTE_BY_STATE: dict[State, AudioRoute] = {
     State.PROCESSING: AudioRoute.LISTEN,
     State.SPEAKING: AudioRoute.LISTEN,
     State.FOLLOWUP: AudioRoute.LISTEN,
+    State.CLARIFYING: AudioRoute.LISTEN,
     State.CONFIRMING: AudioRoute.LISTEN,
     State.CAPTURING: AudioRoute.LISTEN,
     State.READING: AudioRoute.PLAYBACK,
@@ -188,6 +193,9 @@ class DialogEngine:
         self._restate_done = False
         self._capture_fails = 0
         self._pending: _PendingConfirm | None = None
+        self._pending_reading: OperationOwner | None = None
+        self._history = ConversationHistory()
+        self._request_text = ""
         #: 在途拍摄任务句柄（start_capture 回调返回值；F1 取消中止用）
         self._capture_task: object | None = None
         self._epoch = 0
@@ -210,7 +218,7 @@ class DialogEngine:
     def tick(self, now: float) -> None:
         """虚拟时钟推进：处理 LISTENING/CONFIRMING 超时（编排器周期调用）。"""
         self.now = now
-        if self.state in (State.LISTENING, State.FOLLOWUP, State.CONFIRMING) and self._awaiting_endpoint:
+        if self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING, State.CONFIRMING) and self._awaiting_endpoint:
             stalled = now - self._last_audio_progress >= self.INPUT_STALL_SECONDS
             endpoint_stalled = (not self._speech_active and
                                 now - self._last_speech_progress >= self.INPUT_STALL_SECONDS)
@@ -227,7 +235,7 @@ class DialogEngine:
             return
         if now < self._deadline:
             return
-        if self.state in (State.LISTENING, State.FOLLOWUP):
+        if self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING):
             self._enter_standby()
         elif self.state is State.CONFIRMING:
             # R23：10s 超时一律不执行（fail-closed）
@@ -295,7 +303,7 @@ class DialogEngine:
         return generation == self._listening_generation and self._wake_allowed()
 
     def on_speech_started(self, generation: int) -> None:
-        if self._input_current(generation) and self.state in (State.LISTENING, State.FOLLOWUP, State.CONFIRMING):
+        if self._input_current(generation) and self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING, State.CONFIRMING):
             self._speech_active = self._awaiting_endpoint = True
             self._last_audio_progress = self._last_speech_progress = self.now
             self._deadline = None
@@ -309,7 +317,7 @@ class DialogEngine:
 
     def on_empty_endpoint(self, generation: int) -> None:
         """Wake-only/noise endpoints must not extend the original idle window."""
-        if self._input_current(generation) and self.state in (State.LISTENING, State.FOLLOWUP, State.CONFIRMING):
+        if self._input_current(generation) and self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING, State.CONFIRMING):
             self._speech_active = self._awaiting_endpoint = False
             self._deadline = self._idle_deadline
 
@@ -320,7 +328,7 @@ class DialogEngine:
                 self._last_speech_progress = self.now
 
     async def on_input_error(self) -> None:
-        if self.state in (State.LISTENING, State.FOLLOWUP, State.CONFIRMING):
+        if self.state in (State.LISTENING, State.FOLLOWUP, State.CLARIFYING, State.CONFIRMING):
             self._speak(pb.INPUT_NOT_HEARD)
             self._begin_listening(replay=False)
             self._arm(self.LISTEN_WINDOW_SECONDS)
@@ -350,6 +358,7 @@ class DialogEngine:
             State.FOLLOWUP: self._on_asr_listening,
             State.PROCESSING: self._on_asr_ignored,
             State.SPEAKING: self._on_asr_ignored,
+            State.CLARIFYING: self._on_asr_clarifying,
             State.CONFIRMING: self._on_asr_confirming,
             State.READING: self._on_asr_reading,
             State.EXECUTING: self._on_asr_ignored,
@@ -393,6 +402,9 @@ class DialogEngine:
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()
             return
+        if is_book_fragment(text):
+            self._start_reading_clarification()
+            return
         # G12（U6 接线）：家电别名命中多台 → 不猜、请求澄清（留在聆听态，可换说法）
         if len(find_alias_hits(text, self._router.appliances)) > 1:
             self._speak(pb.APPLIANCE_AMBIGUOUS)
@@ -404,12 +416,15 @@ class DialogEngine:
             self._finish_command()
             return
         owner = self._new_operation()
+        self._request_text = text
+        facts = getattr(self._cb, "reading_task_facts", lambda: None)()
+        context = self._history.snapshot(task=facts)
         self._transition(State.PROCESSING)
         self._disarm()
         self._route_task = asyncio.current_task()
         try:
             result = await self._router.route(
-                text, on_wait_feedback=lambda: self.speak_progress(owner, pb.WAIT_REMOTE))
+                text, context=context, on_wait_feedback=lambda: self.speak_progress(owner, pb.WAIT_REMOTE))
         except asyncio.CancelledError:
             return
         except Exception:
@@ -427,10 +442,53 @@ class DialogEngine:
         if result.tier is RouterTier.LOCAL_RULE and result.intent is not None:
             self._dispatch(result.intent)
         elif result.reply:
-            self._speak_answer(result.reply, owner=owner)
+            self._speak_answer(result.reply, owner=owner, user_text=text)
         else:
             # 规则与 LLM 均无结果 → R24 识别失败引导
             self._recognition_failure(text)
+
+    def _start_reading_clarification(self) -> None:
+        owner = self._new_operation()
+        self._begin_listening(replay=False)
+        self._pending_reading = owner
+        self._transition(State.CLARIFYING)
+        self._disarm()
+        completion = self._speak("您是要我读这本书吗？")
+        def finished():
+            if not self.is_current(owner) or self.state is not State.CLARIFYING:
+                return
+            if completion is not None and getattr(completion, "status", "success") != "success":
+                self._enter_standby()
+                return
+            self._idle_deadline = self.now + self.FOLLOWUP_WINDOW_SECONDS
+            if not self._awaiting_endpoint:
+                self._deadline = self._idle_deadline
+        if completion is None or completion.is_set():
+            finished()
+        else:
+            async def wait():
+                await completion.wait()
+                finished()
+            self._track_completion(wait())
+
+    async def _on_asr_clarifying(self, text: str) -> None:
+        if self._pending_reading != self._owner:
+            self._enter_standby()
+            return
+        answer = text.strip().rstrip("。！？!?，,")
+        verdict = ("confirm" if answer in ("是", "是的", "对", "好", "好的", "读吧", "确认") else
+                   "reject" if answer in ("不", "不是", "不要", "不对", "不用", "不是的") else None)
+        if verdict == "confirm":
+            self._new_operation()
+            self._dispatch(Intent(kind=IntentKind.READ, text="读这本书"))
+        elif verdict == "reject":
+            self._new_operation()
+            self._begin_listening(replay=False)
+            self._arm(self.LISTEN_WINDOW_SECONDS)
+        elif match_local(text, self._router.appliances) is not None:
+            await self._on_asr_listening(text)
+        else:
+            self._start_reading_clarification()
 
     async def _on_asr_confirming(self, text: str) -> None:
         assert self._pending is not None
@@ -501,7 +559,7 @@ class DialogEngine:
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()
         elif intent.kind is IntentKind.HELP:
-            self._speak_answer(pb.HELP_TEXT, owner=self._owner)
+            self._speak_answer(pb.HELP_TEXT, owner=self._owner, user_text=self._request_text)
         elif intent.kind is IntentKind.READ:
             self._capture_fails = 0
             # 读书用于边听边核对，整次会话（含重拍）保留原文模式。
@@ -567,6 +625,8 @@ class DialogEngine:
     def _enter_standby(self) -> None:
         self._invalidate_operation()
         self._epoch += 1
+        self._history.clear()
+        self._pending_reading = None
         self._pending = None
         self._confirmed_ir = None
         self._speech_active = self._awaiting_endpoint = False
@@ -604,6 +664,7 @@ class DialogEngine:
 
     def _invalidate_operation(self) -> None:
         old, self._owner = self._owner, None
+        self._pending_reading = None
         self._pending = None
         self._restate_done = False
         self._abort_capture()
@@ -631,6 +692,7 @@ class DialogEngine:
     def _new_operation(self, *, new_session=False) -> OperationOwner:
         self._invalidate_operation()
         if new_session:
+            self._history.clear()
             self._epoch += 1
         self._operation_id += 1
         self._owner = OperationOwner(self._epoch, self._operation_id)
@@ -658,7 +720,7 @@ class DialogEngine:
         self._completion_tasks.add(task)
         task.add_done_callback(self._completion_tasks.discard)
 
-    def _speak_answer(self, text: str, *, owner: OperationOwner) -> None:
+    def _speak_answer(self, text: str, *, owner: OperationOwner, user_text: str) -> None:
         self._transition(State.SPEAKING)
         self._disarm()
         completion = self._speak(text)
@@ -666,6 +728,7 @@ class DialogEngine:
             if not self.is_current(owner) or self.state is not State.SPEAKING:
                 return
             if completion is None or getattr(completion, "status", "success") == "success":
+                self._history.record_completed(user_text, text)
                 self._begin_listening(replay=False)
                 self._transition(State.FOLLOWUP)
                 self._arm(self.FOLLOWUP_WINDOW_SECONDS)
@@ -700,6 +763,7 @@ _STATE_VOICE_LABELS = {
     State.PROCESSING: "正在理解指令",
     State.SPEAKING: "回答播放中",
     State.FOLLOWUP: "等待本轮追问",
+    State.CLARIFYING: "等待确认阅读这本书",
     State.CONFIRMING: "高危设备：等待语音确认",
     State.CAPTURING: "拍摄取书中",
     State.READING: "朗读中",

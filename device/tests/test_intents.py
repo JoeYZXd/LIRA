@@ -149,9 +149,19 @@ class TestLocalRules:
     def test_no_match_returns_none(self):
         assert match_local("今天天气怎么样", make_appliances()) is None
 
-    def test_playback_command_is_not_local_command(self):
-        """白名单命令不进会话意图通道（只在 READING 态由白名单 KWS 处理）。"""
-        assert match_local("暂停", make_appliances()) is None
+    def test_playback_command_precedes_read_trigger(self):
+        """恢复阅读命令在新聆听窗口仍属播放控制，不触发新的拍摄。"""
+        for word in PLAYBACK_COMMANDS:
+            intent = match_local(word, make_appliances())
+            assert intent is not None and intent.kind is IntentKind.PLAYBACK
+
+    def test_bare_book_fragment_requires_local_clarification(self):
+        from lira.dialog.intents import is_book_fragment
+
+        for text in ("这本书", "这本书。", "这一页", "这页文字"):
+            assert is_book_fragment(text)
+        for text in ("帮我读下这本书", "这本书讲什么", "打开台灯", "再读一遍"):
+            assert not is_book_fragment(text)
 
 
 # ---------- 白名单 KWS 关键词文件（sherpa KWS 约定） ----------

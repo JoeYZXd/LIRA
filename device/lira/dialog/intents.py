@@ -8,7 +8,7 @@
 匹配纪律：
   - 确认/拒绝/取消/播放白名单一律**精确匹配**（fail-closed，模糊变体不生效）；
   - 家电别名命中多个设备时不猜（G12），返回 None（澄清话术由 U6 补）；
-  - 播放白名单命令不进会话意图通道（R21/R11 结构性隔离的第一半）。
+  - 播放白名单优先于阅读触发词；是否有可恢复任务由状态机判定。
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ __all__ = [
     "classify_confirmation",
     "is_cancel",
     "is_playback_command",
+    "is_book_fragment",
     "match_local",
     "find_alias_hits",
     "classify_appliance_miss",
@@ -104,6 +105,13 @@ def is_playback_command(text: str) -> bool:
     return text.strip() in PLAYBACK_COMMANDS
 
 
+def is_book_fragment(text: str) -> bool:
+    """Object-only book/page fragments need a local question before any action."""
+    return text.strip().rstrip("，,。.!！?？").strip() in {
+        "这本书", "这本", "这页", "这一页", "这页书", "这页文字", "这页内容",
+    }
+
+
 def classify_confirmation(text: str) -> str | None:
     """R23：返回 "confirm" / "reject" / None（None = 语义不明，fail-closed）。"""
     t = text.strip()
@@ -124,6 +132,8 @@ def match_local(text: str, appliances: tuple[Appliance, ...]) -> Intent | None:
         return None
     if is_cancel(t):
         return Intent(IntentKind.CANCEL, text=t)
+    if is_playback_command(t):
+        return Intent(IntentKind.PLAYBACK, text=t)
     if any(w in t for w in HELP_TRIGGER_WORDS):
         return Intent(IntentKind.HELP, text=t)
     if any(w in t for w in READ_TRIGGER_WORDS):

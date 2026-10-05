@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import wave
 from pathlib import Path
 
@@ -20,12 +21,17 @@ class MockAudioIO(AudioIO):
             按帧交出 PCM；读完返回 b""。
     """
 
-    def __init__(self, wav_path: Path) -> None:
+    def __init__(self, wav_path: Path, *, hold_playback: bool = False) -> None:
         self.wav_path = Path(wav_path)
         self._wave_file: wave.Wave_read | None = None
         self.sample_rate = 0
         self.channels = 0
         self.played: list[bytes] = []
+        self.hold_playback = hold_playback
+        self.playback_started = asyncio.Event()
+        self.playback_released = asyncio.Event()
+        self.playback_finished = asyncio.Event()
+        self.playback_finished.set()
 
     async def open(self) -> None:
         if not self.wav_path.is_file():
@@ -39,6 +45,7 @@ class MockAudioIO(AudioIO):
         self.played = []
 
     async def close(self) -> None:
+        await self.stop()
         if self._wave_file is not None:
             self._wave_file.close()
             self._wave_file = None
@@ -57,3 +64,15 @@ class MockAudioIO(AudioIO):
     async def play(self, data: bytes) -> None:
         """播放 = 记录到内存 `played` 列表（测试断言 TTS 播报副作用用）。"""
         self.played.append(bytes(data))
+        self.playback_finished.clear()
+        self.playback_released.clear()
+        self.playback_started.set()
+        try:
+            if self.hold_playback:
+                await self.playback_released.wait()
+        finally:
+            self.playback_finished.set()
+
+    async def stop(self) -> None:
+        self.playback_released.set()
+        await self.playback_finished.wait()

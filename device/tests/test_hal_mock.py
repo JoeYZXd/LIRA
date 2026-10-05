@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import wave
+import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -17,6 +19,16 @@ from lira.hal.mock import (
 )
 
 ASSETS = Path(__file__).resolve().parents[2] / "assets"
+
+
+def board_player_module(monkeypatch):
+    # Exercise the actual HAL thread/abort code without a host PortAudio library.
+    if "lira.hal.board.audio" not in sys.modules:
+        monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(
+            RawOutputStream=None, PortAudioError=type("PortAudioError", (Exception,), {}),
+        ))
+    import lira.hal.board.audio as audio
+    return audio
 
 
 def make_image_dir(tmp_path: Path, count: int = 2) -> Path:
@@ -106,6 +118,80 @@ class TestMockIr:
 
 
 class TestMockAudio:
+    async def test_held_output_stop_confirms_finished(self, tmp_path):
+        audio = MockAudioIO(make_wav(tmp_path), hold_playback=True)
+        task = asyncio.create_task(audio.play(b"\x01\x02"))
+        await audio.playback_started.wait()
+        assert not task.done()
+        await audio.stop()
+        await task
+        assert audio.playback_finished.is_set()
+
+    async def test_board_abort_stops_blocking_write_before_successor(self, monkeypatch):
+        import threading
+        board_audio = board_player_module(monkeypatch)
+        SoundDevicePlayer = board_audio.SoundDevicePlayer
+        streams = []
+        class Stream:
+            def __init__(self, **kwargs):
+                self.entered = threading.Event()
+                self.aborted = threading.Event()
+                self.writes = 0
+                streams.append(self)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def write(self, data):
+                self.writes += 1
+                self.entered.set()
+                if len(streams) == 1:
+                    assert self.aborted.wait(2)
+            def abort(self):
+                self.aborted.set()
+        monkeypatch.setattr(board_audio.sd, "RawOutputStream", Stream)
+        player = SoundDevicePlayer()
+        first = asyncio.create_task(player.play(b"\0\0" * 22050))
+        while not streams:
+            await asyncio.sleep(0)
+        assert await asyncio.to_thread(streams[0].entered.wait, 1)
+        await player.stop()
+        await first
+        assert streams[0].aborted.is_set()
+        assert streams[0].writes == 1
+        await player.play(b"\0\0" * 10)
+        assert streams[1].writes == 1
+        assert not streams[1].aborted.is_set()
+
+    async def test_board_stop_before_stream_is_ready_never_writes(self, monkeypatch):
+        import threading
+        board_audio = board_player_module(monkeypatch)
+        SoundDevicePlayer = board_audio.SoundDevicePlayer
+        entered, release = threading.Event(), threading.Event()
+        writes = []
+        class Stream:
+            def __init__(self, **kwargs):
+                entered.set()
+                assert release.wait(2)
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+            def write(self, data):
+                writes.append(data)
+            def abort(self):
+                pass
+        monkeypatch.setattr(board_audio.sd, "RawOutputStream", Stream)
+        player = SoundDevicePlayer()
+        play = asyncio.create_task(player.play(b"\0\0" * 100))
+        assert await asyncio.to_thread(entered.wait, 1)
+        stop = asyncio.create_task(player.stop())
+        await asyncio.sleep(0)
+        release.set()
+        await stop
+        await play
+        assert writes == []
+
     async def test_reads_pcm_chunks_from_wav(self, tmp_path):
         wav = make_wav(tmp_path, seconds=0.1)  # 1600 frames = 3200 bytes
         audio = MockAudioIO(wav)

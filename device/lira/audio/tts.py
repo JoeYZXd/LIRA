@@ -3,9 +3,9 @@
 要点（计划 U2 Approach / Key Decisions）：
   - rule FST（number/date/phone.fst）保证数字、日期、号码被正确读出
     （"2026年10月1日" 不读成 "二零二六年一零月一日"）。
-  - `speak(text, speed, volume)` 返回完成事件：事件 set 即播放结束。
-  - 半双工保护 hook：播放开始广播 occupied、结束广播 released，
-    供 U3 状态机关闭全量 ASR/唤醒 KWS、只留播放白名单 KWS（AE4 结构性保证）。
+  - `speak(text, speed, volume, owner=...)` 返回带状态的完成事件。
+  - 提示音与合成请求串行输出；取消所有者后停止当前硬件输出。
+  - occupied/released hook 只报告输出生命周期，不要求丢弃麦克风输入。
   - 播放经注入的 AudioIO（x86 无声卡测试用 MockAudioIO 记内存；
     实机/板上注入 SoundDevice 播放器）。
 """
@@ -14,6 +14,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
@@ -23,7 +25,33 @@ import sherpa_onnx
 from lira.audio._paths import DOWNLOAD_HINT, TTS_MODEL_DIR, VOCODER_ONNX
 from lira.hal import AudioIO
 
-__all__ = ["TtsEngine"]
+__all__ = ["TtsEngine", "PlaybackCompletion"]
+
+
+class PlaybackCompletion(asyncio.Event):
+    """Event-compatible completion, including the actual output outcome."""
+
+    def __init__(self, owner: object = None) -> None:
+        super().__init__()
+        self.owner = owner
+        self.status = "pending"
+        self.error: Exception | None = None
+
+    def finish(self, status: str, error: Exception | None = None) -> None:
+        if not self.is_set():
+            self.status, self.error = status, error
+            self.set()
+
+
+@dataclass
+class _PlaybackRequest:
+    done: PlaybackCompletion
+    text: str | None
+    speed: float
+    volume: float
+    cancelled: bool = False
+    playing: bool = False
+    abort: asyncio.Task | None = None
 
 #: 规则 FST 优先级顺序（后挂的先匹配会被前面的覆盖，号码放最前最具体）
 _RULE_FSTS = ("phone.fst", "date.fst", "number.fst")
@@ -80,6 +108,7 @@ class TtsEngine:
         self._on_released = on_released
         #: 正在播放标志（半双工：状态机可轮询；hook 回调同时广播）
         self.occupied = False
+        self._init_playback()
         logging.info(
             "TTS 已加载: %s + vocos (rule_fsts=%s, sr=%d)",
             model_dir.name,
@@ -92,29 +121,117 @@ class TtsEngine:
         audio = self.tts.generate(text, sid=0, speed=speed)
         return np.asarray(audio.samples, dtype=np.float32)
 
-    def speak(self, text: str, speed: float = 1.0, volume: float = 1.0) -> asyncio.Event:
-        """合成并播放（后台任务），返回完成事件（set 即播放结束）。
+    def _init_playback(self) -> None:
+        self._queue: deque[_PlaybackRequest] = deque()
+        self._worker: asyncio.Task | None = None
+        self._active: _PlaybackRequest | None = None
+        self._closed = False
 
-        合成在 to_thread 中执行，不阻塞事件循环；volume 为 int16 满幅的缩放系数。
-        """
-        done = asyncio.Event()
-        asyncio.get_running_loop().create_task(self._speak(text, speed, volume, done))
+    def speak(self, text: str, speed: float = 1.0, volume: float = 1.0,
+              *, owner: object = None) -> PlaybackCompletion:
+        return self._enqueue(text, speed, volume, owner)
+
+    def chime(self, *, owner: object = None, volume: float = 1.0) -> PlaybackCompletion:
+        """Short wake feedback through the same serialized output path."""
+        return self._enqueue(None, 1.0, volume, owner)
+
+    def _enqueue(self, text, speed, volume, owner) -> PlaybackCompletion:
+        done = PlaybackCompletion(owner)
+        if self._closed:
+            done.finish("cancelled")
+            return done
+        self._queue.append(_PlaybackRequest(done, text, speed, volume))
+        if self._worker is None or self._worker.done():
+            self._worker = asyncio.create_task(self._drain())
         return done
 
-    async def _speak(self, text: str, speed: float, volume: float, done: asyncio.Event) -> None:
-        try:
-            self.occupied = True
-            if self._on_occupied:
-                self._on_occupied()
-            samples = await asyncio.to_thread(self.generate, text, speed)
-            pcm = to_pcm16(samples, volume)
-            if self._player is not None:
-                await self._player.play(pcm)
-        finally:
-            self.occupied = False
-            if self._on_released:
-                self._on_released()
-            done.set()
+    def cancel_owner(self, owner: object) -> None:
+        """Invalidate now; active output is aborted before a successor can play."""
+        self._cancel_matching(lambda request: request.done.owner == owner)
+
+    def _cancel_matching(self, matches) -> None:
+        kept = deque()
+        for request in self._queue:
+            if matches(request):
+                request.cancelled = True
+                request.done.finish("cancelled")
+            else:
+                kept.append(request)
+        self._queue = kept
+        request = self._active
+        if request is not None and matches(request):
+            request.cancelled = True
+            if request.playing and request.abort is None:
+                request.abort = asyncio.create_task(self._abort_output(request))
+            elif not request.playing:
+                # Synthesis cannot be stopped, but it can no longer emit output.
+                request.done.finish("cancelled")
+
+    async def _abort_output(self, request: _PlaybackRequest) -> None:
+        if self._active is request and request.playing and self._player is not None:
+            try:
+                await self._player.stop()
+            except Exception as exc:
+                # Do not claim silence or let a successor play on unconfirmed stop.
+                request.done.finish("failed", exc)
+                raise
+
+    async def stop(self, owner: object = None) -> None:
+        """Invalidate selected requests and wait for actual output termination."""
+        request = self._active
+        self._cancel_matching(lambda item: owner is None or item.done.owner == owner)
+        if request is not None and (owner is None or request.done.owner == owner):
+            if request.abort is not None:
+                await asyncio.shield(request.abort)
+                await request.done.wait()
+
+    async def close(self) -> None:
+        self._closed = True
+        await self.stop()
+        if self._worker is not None:
+            await asyncio.shield(self._worker)
+        if self._player is not None:
+            await self._player.close()
+
+    async def _drain(self) -> None:
+        while self._queue:
+            request = self._active = self._queue.popleft()
+            try:
+                self.occupied = True
+                self._notify(self._on_occupied)
+                if request.text is None:
+                    t = np.arange(int(self.sample_rate * 0.08)) / self.sample_rate
+                    samples = (0.18 * np.sin(2 * np.pi * 880 * t)
+                               * np.sin(np.pi * np.arange(len(t)) / len(t)) ** 2)
+                else:
+                    samples = await asyncio.to_thread(self.generate, request.text, request.speed)
+                if not request.cancelled and self._player is not None:
+                    request.playing = True
+                    await self._player.play(to_pcm16(samples, request.volume))
+                if request.abort is not None:
+                    await request.abort
+                request.done.finish("cancelled" if request.cancelled else "success")
+            except Exception as exc:
+                logging.exception("Audio output failed")
+                request.done.finish("failed", exc)
+            finally:
+                # An abort must finish before a new request acquires the player.
+                if request.abort is not None:
+                    try:
+                        await request.abort
+                    except Exception as exc:
+                        request.done.finish("failed", exc)
+                self._active = None
+                self.occupied = False
+                self._notify(self._on_released)
+
+    @staticmethod
+    def _notify(callback: Callable[[], None] | None) -> None:
+        if callback is not None:
+            try:
+                callback()
+            except Exception:
+                logging.exception("Audio lifecycle callback failed")
 
 
 def to_pcm16(samples: np.ndarray, volume: float = 1.0) -> bytes:

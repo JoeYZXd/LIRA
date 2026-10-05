@@ -8,6 +8,7 @@ TTS 数字日期文本出音频+完成事件 / 麦克风分发双流无丢帧）
 from __future__ import annotations
 
 import asyncio
+import threading
 import wave
 from pathlib import Path
 
@@ -303,3 +304,148 @@ class TestLoadErrors:
     def test_missing_tts_model_dir_raises(self, tmp_path):
         with pytest.raises(FileNotFoundError, match="download_models"):
             TtsEngine(model_dir=tmp_path / "nope")
+
+
+def playback_engine(player, generate=None):
+    engine = TtsEngine.__new__(TtsEngine)
+    engine.sample_rate = 22050
+    engine._player = player
+    engine._on_occupied = None
+    engine._on_released = None
+    engine.occupied = False
+    engine.generate = generate or (lambda text, speed=1.0: np.ones(8, dtype=np.float32))
+    engine._init_playback()
+    return engine
+
+
+class HeldPlayer:
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.played = []
+        self.active = 0
+        self.max_active = 0
+
+    async def play(self, pcm):
+        self.active += 1
+        self.max_active = max(self.max_active, self.active)
+        self.played.append(pcm)
+        self.started.set()
+        await self.release.wait()
+        self.active -= 1
+
+    async def stop(self):
+        self.release.set()
+        while self.active:
+            await asyncio.sleep(0)
+
+    async def close(self):
+        await self.stop()
+
+
+class TestSerialPlayback:
+    async def test_failed_abort_reports_failure_without_starting_successor(self):
+        class AbortFailure(HeldPlayer):
+            async def stop(self):
+                raise RuntimeError("abort failed")
+        player = AbortFailure()
+        engine = playback_engine(player)
+        old = engine.speak("old", owner=1)
+        await player.started.wait()
+        new = engine.speak("new", owner=2)
+        with pytest.raises(RuntimeError, match="abort failed"):
+            await engine.stop(owner=1)
+        assert old.status == "failed"
+        assert len(player.played) == 1
+        assert not new.is_set()
+        player.release.set()
+        await asyncio.wait_for(new.wait(), 1)
+        # No active output remains; close won't call the failing stop method.
+        engine._player = None
+        await engine.close()
+
+    async def test_broken_lifecycle_callbacks_do_not_strand_completion(self):
+        engine = playback_engine(MockAudioIO(Path("/dev/null")))
+        def broken():
+            raise RuntimeError("observer failed")
+        engine._on_occupied = engine._on_released = broken
+        first, second = engine.speak("first"), engine.speak("second")
+        await asyncio.wait_for(second.wait(), 1)
+        assert first.status == second.status == "success"
+        assert not engine.occupied
+        await engine.close()
+
+    async def test_two_feedbacks_are_serial_with_real_mock_hal(self):
+        player = MockAudioIO(Path("/dev/null"), hold_playback=True)
+        engine = playback_engine(player)
+        first = engine.speak("first", owner=1)
+        second = engine.speak("second", owner=2)
+        await player.playback_started.wait()
+        assert len(player.played) == 1
+        player.playback_released.set()
+        await first.wait()
+        while len(player.played) < 2:
+            await asyncio.sleep(0)
+        assert not second.is_set()
+        player.playback_released.set()
+        await asyncio.wait_for(second.wait(), 1)
+        assert first.status == second.status == "success"
+        await engine.close()
+
+    async def test_owner_cancel_stops_output_removes_queue_and_allows_chime(self):
+        player = HeldPlayer()
+        engine = playback_engine(player)
+        first = engine.speak("first", owner=1)
+        stale = engine.speak("stale", owner=1)
+        await player.started.wait()
+        engine.cancel_owner(1)
+        reply = engine.chime(owner=2)
+        await engine.stop(owner=1)
+        assert player.active == 0
+        await asyncio.wait_for(reply.wait(), 1)
+        assert first.status == stale.status == "cancelled"
+        assert reply.status == "success"
+        assert len(player.played) == 2
+        assert player.max_active == 1
+        await engine.close()
+
+    async def test_cancelled_synthesis_never_plays_and_generation_stays_serial(self):
+        entered, release = threading.Event(), threading.Event()
+        calls = []
+        def generate(text, speed):
+            calls.append(text)
+            if text == "old":
+                entered.set()
+                release.wait(2)
+            return np.ones(8, dtype=np.float32)
+        player = MockAudioIO(Path("/dev/null"))
+        engine = playback_engine(player, generate)
+        old = engine.speak("old", owner=1)
+        await asyncio.to_thread(entered.wait, 1)
+        engine.cancel_owner(1)
+        new = engine.speak("new", owner=2)
+        await engine.stop(owner=1)
+        assert calls == ["old"]
+        release.set()
+        await asyncio.wait_for(new.wait(), 1)
+        assert old.status == "cancelled"
+        assert new.status == "success"
+        assert len(player.played) == 1
+        await engine.close()
+
+    async def test_failure_releases_output_and_queue_continues(self):
+        class FailingPlayer(MockAudioIO):
+            async def play(self, pcm):
+                if not self.played:
+                    self.played.append(pcm)
+                    raise RuntimeError("output failed")
+                await super().play(pcm)
+        engine = playback_engine(FailingPlayer(Path("/dev/null")))
+        failed = engine.speak("fail")
+        good = engine.speak("good")
+        await asyncio.wait_for(good.wait(), 1)
+        assert failed.status == "failed"
+        assert isinstance(failed.error, RuntimeError)
+        assert good.status == "success"
+        assert not engine.occupied
+        await engine.close()

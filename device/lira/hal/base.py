@@ -64,6 +64,10 @@ class AudioIO(_AsyncResource, ABC):
     async def play(self, data: bytes) -> None:
         """播放一段 PCM 音频，返回即代表播放完成（TTS 完成事件依赖此语义）。"""
 
+    async def stop(self) -> None:
+        """停止当前输出，返回时硬件已静音；只有输入的实现不支持此操作。"""
+        raise HalError("此音频接口不支持停止输出")
+
 
 class IrController(_AsyncResource, ABC):
     """红外收发接口。板上实现经 `ir-ctl -r/-s` 原始 pulse/space 码（LIRC 弃用）。"""

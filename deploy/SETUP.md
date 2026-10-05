@@ -334,15 +334,34 @@ gpio-ir/ir-ctl 路线，改用 **BroadLink RM4 Mini**（约 40~90 元）：USB �
 （备选 ESP32 自研桥方案可复用；`deploy/dt-overlays/gpio-ir-overlay.dts` 留档）。
 遗留物清理：`/boot/orangepiEnv.txt` 的 `overlays=` 移除 `gpio-ir`（保留 `ov13855-c1`）。
 
-**到货后步骤**：
-1. RM4 Mini USB 供电 → 官方 App 完成配网入家庭 WiFi → 路由器上**固定其 DHCP IP**
-2. 板上 `pip install python-broadlink` → 发现设备，记录 IP / MAC / 设备密钥
-3. 学习：后台发起 → 设备调用 broadlink 学习 API → 码值存本地库
-   （U6 的 store/意图链路不变，仅传输层换成 `lira/hal/board/ir_broadlink.py`）
-4. 验证：学习电视"音量+" → 语音/后台发送 → 电视有反应 = M5 ✅
+**到货后步骤**（2026-10-05 执行记录）：
+1. ✅ RM4 Mini USB 供电 → 官方 App 配网入家庭 WiFi → 路由器固定 DHCP IP。
+   发现探测（板上）：`ip=192.168.101.27 mac=ec:0b:ae:0c:74:e4 devtype=0x653a
+   model='RM4 mini' name='智能遥控'`（0x653a 为 1.0.6 支持表内 RM4 mini 变体，
+   自动映射 rm4mini 类）。
+2. ✅ 板上安装（**版本锁定 ==1.0.6**）：
+   ```bash
+   .venv/bin/pip install --ignore-requires-python 'python-broadlink==1.0.6'
+   ```
+   上游 1.0.x 元数据要求 py>=3.13 且旧版 0.18.x 已从 PyPI 全部下架；实测 1.0.6
+   在板上 py3.11 发现/认证全链路正常（asyncio 原生重写，无 3.13 专属语法），
+   `--ignore-requires-python` 为元数据绕行。**不入 pyproject**（x86 开发/单测
+   不需要此依赖；升级前必须重跑实机学习/回放冒烟）。发现探测命令：
+   `python -m lira.hal.board.ir_broadlink`。
+3. ✅ 传输层实现（`lira/hal/board/ir_broadlink.py`，feat/ir-broadlink 分支）：
+   hello 发现 + MAC 核对 + auth 建会话；`send`=直发 base64 载荷，`learn`=进入
+   学习模式轮询取码；错误统一转带修复指引的 HalError。U6 的 store/意图链路不变
+   （码值为不透明字符串，直接换传输层）。板上 config.yaml 已加
+   `hal.ir_host/ir_mac`。**IR open 失败（离线/锁定）自动降级 Mock**：家电控制
+   不可用但语音/阅读照常，不进崩溃循环（R9）。
+4. ⏳ 待设备解锁后冒烟：**锁定是 auth -1 的头号原因**——新固件设备默认锁到云
+   账户（App 发现探测可见 `is_locked=True`）。官方 App → 设备 → 设置 → 关闭
+   「安全锁/Lock Device」→ 服务重启后日志应现 `BroadLink IR 就绪`；学习电视
+   "音量+" → 语音/后台发送 → 电视有反应 = M5 ✅
 
-**韧性注记**：R9 的"断网"指外网——RM4 走局域网，外网断不影响；家庭 AP 故障则 IR 失效，
-作为已知限制随本节记录（最终形态若不可接受，备选 ESP32+LC 模块有线桥）。
+**韧性注记**：R9 的"断网"指外网——RM4 走局域网，外网断不影响；家庭 AP 故障则 IR 失效
+（open 失败自动降级 Mock，主循环不受影响），作为已知限制随本节记录（最终形态若不可接受，
+备选 ESP32+LC 模块有线桥）。
 
 ### 2.7 M6：本地喇叭（2026-10-03 完成）
 
@@ -416,8 +435,10 @@ dev_console:
 
 - 预期：打印装配图 → HAL 逐个就绪日志 → "LIRA 运行中"；说唤醒词 → "我在听" →
   "读一下" → 拍摄引导 + 朗读；后台下发配置 → 设备播报（新禁用家电）。
-- IR 板上实现待 M5（BroadLink 到货）：当前装配 `MockIrController`，主循环启动时
-  有明确告警日志，家电控制不可用（语音会答"指令已发出"但**不发射**——冒烟时跳过 2.9 第 2/3 项）。
+- IR 板上传输层已交付（M5，`lira/hal/board/ir_broadlink.py`）：`hal.ir_host/ir_mac`
+  已配置 → 装配 `BroadlinkIrController`（auth 失败自动降级 Mock 并 ERROR 告警）；
+  未配置 → 回退 `MockIrController` 并告警（发射只记录不生效，冒烟跳过 2.9 第 2/3 项）。
+  设备解锁与学习/回放冒烟见 2.6 第 4 步。
 - 后台库重建/epoch 迁移：`python -m lira.sync reset-sync data/device.db`（SETUP.md 1.4）。
 - systemd 化 + 存量纪律：`deploy/system/`（log2ram、journald `Storage=volatile`、
   fstab `noatime`、无 swap、thermal governor——R18 介质寿命）；`ExecStart` 以
@@ -460,7 +481,7 @@ dev_console:
 | M2 | 蓝牙音频链路延迟（主观） | A2DP 通（智能音箱 Pro-2639，MAC 50:FE:39:F8:83:8B，trust 已设）；aplay 全链路出声；延迟主观可接受（TTS 场景） | 2026-10-02 |
 | M3 | 摄像头节点 / 抓帧格式与分辨率 | OV13855@CAM1（overlay `ov13855-c1`，sensor 7-0036）；ISP mainpath `/dev/video11` **2688×3136** NV12（4224 请求被 rkcif 驱动钳宽），HAL 走 ISP 管线+软件 3A（`hal/board/camera_isp.py`，2026-10-03 打通；CIF 裸 RAW 路径已退役）；链路 rkcif→sditf→rkisp0-vir2 经 media1 确认 ENABLED | 2026-10-02/04 |
 | M4 | 麦阵 / 采集验证 | FY-SP003U 双麦（USB，card 3），`plughw:3,0` 16k/S16LE/stereo 录音 ✓；回放经蓝牙音箱 ✓。板载 ES8388 = card 2（3.5mm 口，M6 本地喇叭用） | 2026-10-02 |
-| M5 | 红外学习/回放 | 待 BroadLink RM4 Mini 到货（2026-10-03 改道，见 2.6） | — |
+| M5 | 红外学习/回放 | 传输层已交付（RM4 mini @192.168.101.27，1.0.6 锁定安装，见 2.6）；**待设备解锁（is_locked=True）后学习/回放冒烟** | — |
 | M6 | 本地喇叭出声 | USB 有源音箱（3.5mm AUX）← 板载 ES8388 card 2 ✓；软音量经 PipeWire；PAM8403 方案取消 | 2026-10-03 |
 | M7 | 唤醒→对话链路实机 + 常驻 | systemd user unit 常驻（Linger 开机自启、Restart=always）、音频设备号钉死 `pipewire` 子串；真麦 唤醒→ASR→GLM（200 OK/1~3s）→TTS 全链路 ✓；UI 200；详见 2.8 ④ | 2026-10-04 |
 | KWS | 唤醒词误触/漏触（实机 10 分钟） | 夹具 0.1~0.25 四档阈值全命中、负样本零误触（2026-10-03）；**实机 soak：待机态唤醒 4/4 漏触 0、误触 0**——背景为持续大音量外来语视频语音（峰值削波），每次命中均完成唤醒→指令→GLM 回复全链路；另 2 次对话态重复唤醒被状态机按设计抑制（离线复核检出、实时正确不响应） | 2026-10-04 |

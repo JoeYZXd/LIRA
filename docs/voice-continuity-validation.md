@@ -69,3 +69,18 @@
 `:boost #threshold`）或移词后重生成；勿扰负载不达标 → 触发计划预置降级预案
 评审（逃生舱退化为仅唤醒前缀计数）并回需求文档修订。调参后重跑
 `device/scripts/check_commands_kws_load.py` 验证词文件可加载。
+
+## 语音机制部署证据（2026-10-07）
+
+部署版本 `758693c`（语音退出/勿扰/控制机制全量：提交 4899ac0..758693c）。流程按既有纪律：
+备份 `deploy-backups/voice-mechanisms-20261007/`（应用+config.yaml 单独快照）→ rsync 代码与
+词文件（board config.yaml 未触碰）→ 板端 venv 安装 pypinyin 0.55.0 → `check_commands_kws_load.py`
+加载验证 → `--dry-run` 装配校验通过 → `deploy/start-lira.sh` 重启。
+
+重启后核验：服务 active；三路 KWS 全部加载（wakeword / playback_whitelist / **commands.txt**）；
+ASR/TTS/RKNN 就绪；Broadlink IR 控制器装配；采集已启动 @ pipewire；UI 200；新进程零错误
+（journal 仅存量 RKNN 静态模型提示，属旧进程）。dev 控制台新增观测：status 的 dnd/volume 字段。
+
+**待办**：声学验收（上文 U10 清单）需用户在场——朗读中喊停、勿扰进出、逃生舱换说法、
+裸说零误触关机、三路 RTF/温度 30 分钟 soak。注意部署后首次声学项先复查再定论
+（PipeWire 重启后音频图完成前的检查可能假失败）。

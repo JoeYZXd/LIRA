@@ -16,6 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
+from typing import Literal
 
 __all__ = [
     "CONFIRM_WORDS",
@@ -122,11 +123,14 @@ VOLUME_DOWN_WORDS = ("声音小点", "声音小一点")
 #: R15：追问窗内重复上答
 REPEAT_WORDS = ("再说一遍", "再说一次", "没听清", "没听清楚")
 
-#: R17：状态自查话题词根（文本含任一词根即视为状态询问；封闭词根集，
-#: 勿扰中豁免可答）。单字「网」过宽不入表。
+#: R17：状态自查话题词根（封闭词根集，勿扰中豁免可答）。单字「网」过宽不入表。
 STATUS_QUERY_TOPIC_WORDS = (
     "网络", "上网", "连网", "联网", "云端", "麦克风", "信号", "wifi",
 )
+#: R17 疑问标记（ADV-02：仅话题词是 fail-open 劫持面——「帮我上网查一下天气」
+#: 会被抢成状态播报、勿扰中电视一句「信号不好」就触发设备夜里开口。话题词 +
+#: 疑问标记双条件恢复封闭集纪律）
+STATUS_QUERY_MARKERS = ("吗", "呢", "怎么样", "如何", "能不能", "可不可以", "好不好")
 
 #: 命令 KWS 声学子集（assets/keywords/commands.txt 的 @词全集，一致性由测试钉死）。
 #: 全部多音节高区分度短语；阈值逐词 :boost #threshold 参数（U10 板上定稿）。
@@ -244,7 +248,7 @@ def is_shutdown_phrase(text: str) -> bool:
     return _match_closed(text, SHUTDOWN_PHRASES) is not None
 
 
-def match_dnd_phrase(text: str) -> str | None:
+def match_dnd_phrase(text: str) -> Literal["enter", "exit", "query"] | None:
     """R8/R11/R12：返回 "enter" / "exit" / "query" / None（候选集间互斥，
     依次判定 enter → exit → query）。"""
     if _match_closed(text, DND_ENTER_PHRASES):
@@ -256,7 +260,7 @@ def match_dnd_phrase(text: str) -> str | None:
     return None
 
 
-def match_volume_word(text: str) -> str | None:
+def match_volume_word(text: str) -> Literal["up", "down"] | None:
     """R16：返回 "up" / "down" / None。"""
     if _match_closed(text, VOLUME_UP_WORDS):
         return "up"
@@ -271,11 +275,14 @@ def is_repeat_word(text: str) -> bool:
 
 
 def is_status_query(text: str) -> bool:
-    """R17：状态自查询问（封闭词根集子串命中）。"""
+    """R17：状态自查询问 = 话题词根 **且** 疑问标记双条件命中（ADV-02：单条件
+    子串会把「帮我上网查一下天气」劫持成播报、勿扰中环境语音误触发开口）。"""
     t = text.strip().lower()
     if not t:
         return False
-    return any(topic in t for topic in STATUS_QUERY_TOPIC_WORDS)
+    has_topic = any(topic in t for topic in STATUS_QUERY_TOPIC_WORDS)
+    has_marker = any(marker in t for marker in STATUS_QUERY_MARKERS)
+    return has_topic and has_marker
 
 
 # ---------- 本地规则匹配（Tier 1） ----------

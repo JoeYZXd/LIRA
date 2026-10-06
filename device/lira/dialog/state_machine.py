@@ -24,7 +24,7 @@ import asyncio
 import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Callable, Protocol
+from typing import Callable, Literal, Protocol
 
 from lira.dialog import phrasebook as pb
 from lira.dialog.callbacks import invoke_callback as _invoke
@@ -47,10 +47,17 @@ from lira.dialog.intents import (
     match_local,
     is_playback_command,
 )
+from lira.dialog.context import StatusFacts
 from lira.dialog.router import Router, RouterTier
 from lira.voice_log import VOICE_LOG
 
 __all__ = ["State", "AudioRoute", "DialogCallbacks", "DialogEngine", "OperationOwner"]
+
+
+def _log_task_failure(task: asyncio.Task) -> None:
+    """后台任务统一异常留痕（GC 静默失败防线；main.py spawn 同款纪律）。"""
+    if not task.cancelled() and task.exception() is not None:
+        logging.error("dialog event=task_failed", exc_info=task.exception())
 
 
 class State(Enum):
@@ -91,7 +98,9 @@ _ROUTE_BY_STATE: dict[State, AudioRoute] = {
 class DialogCallbacks(Protocol):
     """状态机对外的全部副作用接口（main.py 装配；测试用 Recorder 注入）。"""
 
-    def speak(self, text: str, *, owner=None) -> object: ...
+    def speak(self, text: str, *, owner=None, exempt: bool = False) -> object:
+        """exempt=True：勿扰豁免播报（装配层勿扰门放行；KP-04/M-1：契约显式化，
+        勿靠 invoke_callback 签名嗅探静默传递）。"""
 
     def chime(self, *, owner=None) -> object: ...
 
@@ -135,6 +144,9 @@ class DialogCallbacks(Protocol):
     def adjust_volume(self, delta: float) -> None:
         """R16：全局音量调整（装配层夹取 + 持久化）。"""
 
+    def status_facts(self) -> StatusFacts:
+        """R17：状态自查事实（可选注入语义已收编入协议；缺失实现=旧替身）。"""
+
 
 @dataclass
 class _PendingConfirm:
@@ -153,7 +165,7 @@ class _PendingConfirm:
 class _DndEscape:
     """勿扰逃生舱两阶段问答状态（R10；对齐 _PendingConfirm 惯例）。"""
 
-    stage: str  # "exit"（询问是否退出勿扰）| "exec"（询问是否执行指令）
+    stage: Literal["exit", "exec"]  # "exit"=询问是否退出勿扰；"exec"=询问是否执行指令
     cmd: tuple[str, str]  # (device, action)
     appliance: Appliance | None
 
@@ -225,6 +237,7 @@ class DialogEngine:
         self._operation_id = 0
         self._owner: OperationOwner | None = None
         self._route_task: asyncio.Task | None = None
+        self._shutdown_task: asyncio.Task | None = None
         self._completion_tasks: set[asyncio.Task] = set()
         self._listening_generation = 0
         self._speech_active = False
@@ -281,6 +294,11 @@ class DialogEngine:
         if not self._wake_allowed():
             logging.info("唤醒事件被唤醒门拦截 event=wake_blocked reason=privacy")
             return
+        # ADV-01：唤醒即接管——逃生舱两阶段对话随新会话作废（否则 exit 阶段
+        # 拒绝腿会把聆听窗 disarm 成永久开放会话；exec 阶段他人口语「开吧」
+        # 会在新会话发射 IR；前缀关机短语被逃生舱劫持吞掉）
+        self._dnd_escape = None
+        self._disarm()
         if self.state in (State.READING, State.CAPTURING):
             self._cb.playback_pause()
         old_owner = self._owner
@@ -555,7 +573,8 @@ class DialogEngine:
         「退出勿扰模式」应答 = 同意退出且跳过执行问句；拒绝/无关 → 静默回勿扰、
         计数清零；超时 → 回勿扰、计数保持（tick 处理）。"""
         verdict = classify_confirmation(text)
-        if match_dnd_phrase(text) == "exit":
+        dnd_exit_reply = match_dnd_phrase(text) == "exit"
+        if dnd_exit_reply:
             verdict = "confirm"
         if verdict != "confirm":
             self._dnd_escape = None
@@ -568,7 +587,7 @@ class DialogEngine:
         self._reset_dnd_counter()
         # 勿扰待机期 _owner 为 None——后续效果发射/会话需要有效 owner
         self._new_operation()
-        if match_dnd_phrase(text) == "exit":
+        if dnd_exit_reply:
             # 「退出勿扰模式」应答 = 同意退出且跳过执行问句（裁定 6）
             self._dnd_escape = None
             self._speak(pb.DND_EXIT_ACK)
@@ -623,7 +642,8 @@ class DialogEngine:
         direction = match_volume_word(text)
         if direction is not None:
             self._cb.adjust_volume(self.VOLUME_STEP if direction == "up" else -self.VOLUME_STEP)
-            self._speak_answer(pb.VOLUME_ACK, owner=self._owner, user_text=text)
+            # ADV-04：罐头确认不入史（否则「再说一遍」永远重播「好的」）
+            self._speak_answer(pb.VOLUME_ACK, owner=self._owner, user_text=text, record=False)
             return
         if is_cancel(text):
             self._speak(pb.SESSION_CANCELLED)
@@ -800,9 +820,8 @@ class DialogEngine:
         else:
             self._speak_answer(text, owner=self._owner, user_text=user_text)
 
-    def _get_status_facts(self) -> dict:
-        """R17 状态事实经可选回调注入（reading_task_facts 同款模式）；
-        回调缺失时返回空 facts（播报降级表述，不阻塞）。"""
+    def _get_status_facts(self) -> StatusFacts:
+        """R17 状态事实（协议方法；旧替身缺失时降级空 facts，播报不阻塞）。"""
         getter = getattr(self._cb, "status_facts", None)
         return getter() if getter is not None else {}
 
@@ -813,7 +832,7 @@ class DialogEngine:
         仍照常触发——调度脱离 owner 代次（挂 _track_completion 会被
         _invalidate_operation 取消，与「截断不影响关机」相悖）。按新会话处理：
         挂起高危确认/在途效果一律不执行（_new_operation 清理链）。勿扰中直接
-        生效（清 dnd，告别语经豁免标记出声）。
+        生效：先清 dnd，告别语经常规 speak 出声（不走豁免标记）。
         """
         self.dnd = False
         self._new_operation()
@@ -821,14 +840,25 @@ class DialogEngine:
         completion = self._speak(pb.SHUTDOWN_FAREWELL)
 
         async def commit():
-            if completion is not None:
-                try:
-                    await asyncio.wait_for(completion.wait(), timeout=15.0)
-                except (asyncio.TimeoutError, asyncio.CancelledError):
-                    pass  # 截断/超时不影响关机提交
-            _invoke(self._cb.poweroff)
+            try:
+                if completion is not None:
+                    try:
+                        await asyncio.wait_for(completion.wait(), timeout=15.0)
+                    except asyncio.TimeoutError:
+                        pass  # 告别语超时不影响关机提交
+                _invoke(self._cb.poweroff)
+            except asyncio.CancelledError:
+                # 进程收尾期被取消：loop 即将关闭，spawn 子进程不可靠；
+                # 记日志留痕（systemd stop 属用户显式操作，交其裁定）
+                logging.warning("dialog event=poweroff_commit_cancelled")
+                raise
+            except Exception:
+                logging.exception("dialog event=poweroff_commit_failed")
 
-        asyncio.create_task(commit())
+        # KP-01/REL-001：持强引用 + done 回调记异常——loop 对 task 仅持弱引用，
+        # 15s 等待窗内 GC 可致关机静默丢失
+        self._shutdown_task = asyncio.create_task(commit())
+        self._shutdown_task.add_done_callback(_log_task_failure)
         self._finish_command()
 
     def _dispatch(self, intent: Intent) -> None:

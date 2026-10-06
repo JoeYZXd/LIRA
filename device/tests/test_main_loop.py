@@ -935,3 +935,39 @@ class TestStatusFactsWiring:
         assert isinstance(facts["network"], bool)
         assert facts["mic_on"] is True, "隐私关 → 麦克风开"
         assert facts["cloud"] in (True, False, None)
+
+
+class TestReviewFixesWiring:
+    async def test_persist_debounce_async_path_and_flush(self, tmp_path):
+        """REL-002/TST-004. 事件循环内去抖：未到期不落盘、到期落盘、停机冲刷立即落盘。"""
+        from lira.appliances.store import ApplianceStore
+        from lira.main import build_settings_with_persistence
+
+        store = ApplianceStore(tmp_path / "s.db")
+        settings = build_settings_with_persistence(store, persist_delay=0.1)
+        settings.set_volume(1.4)
+        assert store.get_meta("volume") is None, "去抖窗口内不落盘"
+        await asyncio.sleep(0.25)
+        assert store.get_meta("volume") == "1.4", "到期落盘一次"
+        settings.set_volume(0.8)
+        settings.flush_persist()
+        assert store.get_meta("volume") == "0.8", "停机冲刷立即落盘"
+        store.close()
+
+    async def test_volume_floor_skips_pipeline_side(self, tmp_path):
+        """ADV-06. 全局下边界：白名单「小声点」夹取 no-op 时不得驱动会话侧变响。"""
+        from lira.settings import DeviceSettings
+
+        settings = DeviceSettings(volume=0.1)
+        rig = make_rig(tmp_path, settings=settings)
+        rt = rig.runtime
+        calls = []
+        rt.pipeline.playback_volume_down = lambda: calls.append("down")
+        rt.callbacks.playback_volume_down()
+        assert rt.settings.volume == 0.1, "全局已到底不调整"
+        assert calls == [], "夹取 no-op 不得驱动会话侧（下边界会说小反响）"
+
+    def test_status_reports_volume(self, tmp_path):
+        """agent-native：语音可变的持久音量进入 status 观测面。"""
+        rig = make_rig(tmp_path)
+        assert rig.runtime.status()["volume"] == 1.0

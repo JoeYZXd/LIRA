@@ -66,7 +66,8 @@ from lira.llm.client import make_text_polisher
 from lira.sync import SyncClient, make_snapshot_announcer
 from lira.sync_ws import WsSyncTransport
 from lira.voice_log import VOICE_LOG
-from lira.dialog.context import ReadingTaskFacts, ReadingTaskStatus
+from lira.dialog.context import ReadingTaskFacts, ReadingTaskStatus, StatusFacts
+from lira.dialog import phrasebook as pb
 from lira.vision.reading import ReadingPipeline, TtsBlockSpeaker
 
 __all__ = [
@@ -279,20 +280,28 @@ def build_settings_with_persistence(store, *, persist_delay: float = 2.0) -> Dev
     启动时从 store meta 恢复音量；语音词/白名单词/Web 三个调用点统一经
     set_* 落钩子写回（单一全局音量，三写点自动一致）。写盘去抖 persist_delay
     秒（store 提交是 synchronous=FULL，语音连调音量不应逐次 fsync 事件循环）；
-    无事件循环时同步落盘。
+    无事件循环时同步落盘。挂 settings.flush_persist 供停机前冲刷（REL-002：
+    去抖定时器不在停机取消扫描内，不 flush 则窗口内写入静默丢失）。
     """
     try:
         volume = float(store.get_meta("volume"))
     except (TypeError, ValueError):
         volume = 1.0
+    try:
+        tts_speed = float(store.get_meta("tts_speed"))
+    except (TypeError, ValueError):
+        tts_speed = 1.0
 
     pending: dict[str, float] = {}
     timer: list = [None]
 
     def flush() -> None:
-        for key, value in pending.items():
-            store.set_meta(key, str(value))
-        pending.clear()
+        try:
+            for key, value in pending.items():
+                store.set_meta(key, str(value))
+            pending.clear()
+        except Exception:  # noqa: BLE001 - 持久化失败留域日志，pending 保留待重试
+            logging.exception("settings event=persist_failed keys=%s", list(pending))
 
     def persist(key: str, value: float) -> None:
         pending[key] = float(value)
@@ -308,7 +317,9 @@ def build_settings_with_persistence(store, *, persist_delay: float = 2.0) -> Dev
             timer[0].cancel()
         timer[0] = loop.call_later(persist_delay, flush)
 
-    return DeviceSettings(volume=volume, on_change=persist)
+    settings = DeviceSettings(volume=volume, tts_speed=tts_speed, on_change=persist)
+    settings.flush_persist = flush  # 停机冲刷挂点（DeviceRuntime._shutdown 消费）
+    return settings
 
 
 def build_ocr(cfg: AppConfig):
@@ -454,13 +465,16 @@ class DeviceCallbacks:
 
     def poweroff(self) -> None:
         """R4：系统级关机。user unit Restart=always——只退进程数秒即被拉起，
-        必须走系统 poweroff；失败仅记日志（设备留在待机，不崩主循环）。"""
+        必须走系统 poweroff；失败播报告知（M7 残留 R1 模式防线：告别语已播、
+        设备仍在运行，用户必须知道关机没有发生）+ 留域日志。"""
         async def run():
             try:
                 proc = await asyncio.create_subprocess_exec("systemctl", "poweroff")
                 await proc.wait()
+                logging.info("dialog event=poweroff")
             except Exception:
                 logging.exception("dialog event=poweroff_failed")
+                self.speak(pb.POWEROFF_FAILED)
         self._rt.spawn(run())
 
     def input_generation(self) -> int:
@@ -522,7 +536,7 @@ class DeviceCallbacks:
             return ReadingTaskFacts(ReadingTaskStatus.CAPTURING, resumable=False)
         return None
 
-    def status_facts(self) -> dict:
+    def status_facts(self) -> StatusFacts:
         """R17：状态自查事实（老人能懂的话由 phrasebook 组装，这里只供事实）。
 
         network 复用既有缓存探针（10s 周期，播报不阻塞）；cloud 由 LLM 熔断器
@@ -531,6 +545,7 @@ class DeviceCallbacks:
         """
         breaker = getattr(self._rt._llm, "breaker", None)
         breaker_state = getattr(breaker, "state", None)
+        cloud: bool | None
         if breaker_state is BreakerState.CLOSED:
             cloud = True
         elif breaker_state is BreakerState.OPEN:
@@ -557,12 +572,18 @@ class DeviceCallbacks:
 
     def playback_volume_up(self) -> None:
         # R16 语义并轨：朗读白名单调音量同步写全局持久值（单一全局音量）
+        before = self._rt.settings.volume
         self.adjust_volume(DialogEngine.VOLUME_STEP)
-        self._rt.pipeline.playback_volume_up()
+        if self._rt.settings.volume != before:
+            # 全局已夹取顶格时跳过会话侧调整（ADV-06：两域夹取区间不同，
+            # 无条件双调会在下边界出现「说小声反而变响」）
+            self._rt.pipeline.playback_volume_up()
 
     def playback_volume_down(self) -> None:
+        before = self._rt.settings.volume
         self.adjust_volume(-DialogEngine.VOLUME_STEP)
-        self._rt.pipeline.playback_volume_down()
+        if self._rt.settings.volume != before:
+            self._rt.pipeline.playback_volume_down()
 
     def adjust_volume(self, delta: float) -> None:
         """R16：语音全局音量调整。夹取到合法区间（语音路径静默夹取，区别于
@@ -720,6 +741,7 @@ class DeviceRuntime:
             "route": self.route.value,
             "privacy_on": self.privacy.is_on,
             "dnd": bool(self.engine.dnd),
+            "volume": self.settings.volume,
             "sync": {
                 "session": self.sync_status.get("session", "unknown"),
                 "epoch": epoch,
@@ -1044,6 +1066,11 @@ class DeviceRuntime:
         取消引擎在途任务与伴随任务 -> 释放 HAL。幂等。"""
         self.engine.close()
         self.pipeline.playback_pause()
+        # REL-002/ADV-05：音量持久化去抖定时器不在任务取消扫描内——停机前
+        # flush，最后 2s 窗口内的音量调整不静默丢失（store.close 在其后）
+        flush_persist = getattr(self.settings, "flush_persist", None)
+        if flush_persist is not None:
+            flush_persist()
         if self._ui_server is not None:
             self._ui_server.should_exit = True
         if self._ui_task is not None and not self._ui_task.done():

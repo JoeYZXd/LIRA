@@ -101,6 +101,9 @@ class Recorder:
     def adjust_volume(self, delta: float) -> None:
         self.volume_deltas.append(delta)
 
+    def status_facts(self):
+        return {}
+
 
 def build_engine(rec: Recorder, **router_kwargs) -> DialogEngine:
     router = Router(appliances=APPLIANCES, **router_kwargs)
@@ -1283,3 +1286,108 @@ class TestStatusQuery:
         await sm.on_asr_text("你连上网了吗")
         assert "说不准" in rec.spoken[-1]
         assert sm.state is State.FOLLOWUP
+
+
+# ---------- Tier-2 评审修复回归（ADV-01/02/04、TST-001） ----------
+
+
+class TestDndEscapeHighRiskLegs(TestDndEscapeHatch):
+    """TST-001：高危折叠的拒绝/超时腿用高危设备钉死（低危版本见父类）。"""
+
+    async def test_exec_refuse_high_risk_no_ir(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        for text in ("打开取暖器", "把取暖器打开", "帮我打开取暖器"):
+            await sm.on_asr_text(text)
+        await sm.on_asr_text("确认")
+        await sm.on_asr_text("不要")
+        assert rec.ir == [], "高危折叠拒绝腿 fail-closed"
+        assert sm.state is State.STANDBY
+        assert sm.dnd is False
+
+    async def test_exec_timeout_high_risk_no_ir(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        for text in ("打开取暖器", "把取暖器打开", "帮我打开取暖器"):
+            await sm.on_asr_text(text)
+        await sm.on_asr_text("确认")
+        sm.tick(T0 + 10.1)
+        assert rec.ir == [], "高危折叠超时腿 fail-closed"
+        assert sm.state is State.STANDBY
+
+
+class TestReviewFixes(TestDndEscapeHatch):
+    async def test_wake_during_exit_prompt_cancels_escape(self):
+        """ADV-01A. 唤醒即接管：逃生对话作废（聆听窗正常武装可超时，不再永久开放）；
+        勿扰标志保持——静默聆听窗内指令仍按勿扰规则计数忽略（U5 规格）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_wake()
+        assert sm._dnd_escape is None
+        assert sm.state is State.LISTENING
+        assert sm.dnd is True
+        # 窗内指令仍按勿扰规则处理（不劫持），退出短语正常生效
+        await sm.on_asr_text("开吧")
+        assert rec.ir == []
+        await sm.on_asr_text("退出勿扰模式")
+        assert sm.dnd is False
+        assert sm.state is State.STANDBY
+
+    async def test_wake_during_exec_stage_abandons_command(self):
+        """ADV-01B. exec 阶段唤醒 → 放弃执行；他人口语「开吧」不发射 IR。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_asr_text("确认")
+        assert sm._dnd_escape is not None and sm._dnd_escape.stage == "exec"
+        await sm.on_wake()
+        assert sm._dnd_escape is None
+        await sm.on_asr_text("开吧")
+        assert rec.ir == [], "已放弃的逃生舱指令不得在新会话执行"
+
+    async def test_wake_prefixed_shutdown_not_hijacked_by_escape(self):
+        """ADV-01C. exec 阶段唤醒后「小丽拉立即去休息」→ 正常关机而非被逃生舱吞掉。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_asr_text("确认")
+        await sm.on_wake()
+        await sm.on_asr_text("立即去休息", wake_prefixed=True)
+        await asyncio.sleep(0)
+        assert rec.poweroffs == 1
+        assert any("休息" in s for s in rec.spoken)
+
+    async def test_status_query_requires_question_marker(self):
+        """ADV-02. 话题词无疑问标记不劫持（指令照常路由，状态播报不抢答）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("帮我上网查一下天气")
+        assert sm.state is State.LISTENING
+        assert not any("网络" in s for s in rec.spoken)
+        from lira.dialog.intents import is_status_query
+        assert not is_status_query("信号不好")
+        assert not is_status_query("帮我上网查一下")
+
+    async def test_dnd_ambient_topic_word_stays_silent(self):
+        """ADV-02. 勿扰中环境语音含话题词但无疑问标记 → 静默忽略不计数。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("这个信号不好")
+        assert rec.spoken == spoken_before
+        assert sm.dnd is True
+
+    async def test_volume_ack_not_recorded_into_history(self):
+        """ADV-04. 音量罐头确认不入史：「再说一遍」重报最近真实回答。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")
+        await sm.on_asr_text("声音大点")
+        await sm.on_asr_text("再说一遍")
+        assert rec.spoken[-1] == pb.HELP_TEXT, "重报真实回答而非「好的」"

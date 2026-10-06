@@ -315,3 +315,12 @@ class TestCommandsKeywordsFile:
         ]
         raw_words = {ln.rpartition("@")[2].strip() for ln in raw_lines}
         assert raw_words == set(COMMAND_KWS_WORDS)
+
+
+class TestPinyinKeyEdges:
+    def test_empty_and_punct_only_fail_closed(self):
+        """learnings#4：空串/纯标点归一为空键，一律不命中。"""
+        assert not is_exit_or_stop("。！？，")
+        assert not is_exit_or_stop("")
+        assert not is_shutdown_phrase("，。")
+        assert not is_status_query("。，")

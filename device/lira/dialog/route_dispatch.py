@@ -44,6 +44,10 @@ class RouteDispatch:
         self._wake_prefix_pending = False
         #: 命令 KWS 待机闸状态（进待机 reset 一次，出待机恢复喂流）
         self._command_gate_active = False
+        #: 唤醒前缀标记的采样窗上界：唤醒命中后 8 秒内的首条投递才算带前缀
+        #: （ADV-03：标记不绑话语会被下一条任意来源投递偷走——唤醒后他人/电视
+        #: 说出关机变体即无指令关机。8s 覆盖 replay + 自然接话节奏）
+        self._wake_prefix_until = 0
 
     @property
     def generation(self):
@@ -153,7 +157,10 @@ class RouteDispatch:
         """
         generation = self._generation
         if wake_prefixed is None:
-            wake_prefixed = self._wake_prefix_pending
+            # ADV-03：前缀标记绑定唤醒后采样窗——窗外首条投递（他人/环境语音）
+            # 不继承前缀，防无指令关机
+            wake_prefixed = (self._wake_prefix_pending
+                             and self._next_sample < self._wake_prefix_until)
             self._wake_prefix_pending = False
         async def deliver():
             if generation != self._generation:
@@ -204,6 +211,7 @@ class RouteDispatch:
         if hit and self._wakeword in hit and not self._wake_pending:
             self._wake_pending = True
             self._wake_prefix_pending = True
+            self._wake_prefix_until = start + 8 * _SAMPLE_RATE
             self._wake_ring_start = start
             VOICE_LOG.log("wake", f"收到语音唤醒（{self._wakeword}）")
             generation = self._generation

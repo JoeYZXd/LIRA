@@ -4,7 +4,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass
 from enum import Enum
-from typing import Literal
+from typing import Literal, TypedDict
 
 
 class ReadingTaskStatus(str, Enum):
@@ -33,6 +33,18 @@ class ConversationPair:
     @property
     def characters(self) -> int:
         return len(self.user) + len(self.assistant)
+
+
+class StatusFacts(TypedDict, total=False):
+    """R17 状态自查事实（KP-02：封闭三态形状，键缺省=未知降级）。
+
+    network：网络连通探针；cloud：LLM 熔断器推导（云端可达）；
+    mic_on：隐私门状态（非麦克风硬件健康——失聪看门狗是独立未立项）。
+    """
+
+    network: bool
+    cloud: bool
+    mic_on: bool
 
 
 @dataclass(frozen=True)

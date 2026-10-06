@@ -40,9 +40,11 @@ __all__ = [
 #: 单块朗读字符预算（块间停顿是白名单命令的接受窗口，块不宜过长；R22）
 DEFAULT_BLOCK_CHARS = 60
 
-#: 音量步进与上下限（大声点/小声点，TTS volume 为播放满幅系数）
+#: 音量步进与上下限（大声点/小声点，TTS volume 为播放满幅系数）。
+#: 下限与 DeviceSettings.VOLUME_RANGE 对齐 0.1（ADV-06：0.2 下限时 0.1 起步
+#: 的会话说「小声点」会被夹回 0.2 反而变响）。
 _VOLUME_STEP = 0.2
-_VOLUME_MIN = 0.2
+_VOLUME_MIN = 0.1
 _VOLUME_MAX = 2.0
 
 

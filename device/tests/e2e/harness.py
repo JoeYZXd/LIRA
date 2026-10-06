@@ -228,7 +228,7 @@ class _Callbacks:
         self._h = h
 
     # speak：记录断言面（真实设备为 TTS 播报；e2e 记文本 + 可选留档）
-    def speak(self, text: str, *, owner=None):
+    def speak(self, text: str, *, owner=None, exempt: bool = False):
         if owner is not None and not self._h.engine.is_current(owner):
             return None
         self._h.speak_log.append(text)
@@ -236,6 +236,10 @@ class _Callbacks:
         done.status = "success"
         done.set()
         return done
+
+    def status_facts(self):
+        """R17：e2e 事实面（网络未知=缺键降级、云端未知、麦克风随隐私门）。"""
+        return {"mic_on": not self._h.privacy.is_on}
 
     def chime(self, *, owner=None):
         done = asyncio.Event()

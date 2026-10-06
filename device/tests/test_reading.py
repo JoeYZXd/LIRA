@@ -286,7 +286,7 @@ class TestReadingSession:
         assert speaker.volume == pytest.approx(2.0)
         for _ in range(10):
             session.volume_down()
-        assert speaker.volume == pytest.approx(0.2)
+        assert speaker.volume == pytest.approx(0.1)  # 下限与 DeviceSettings 对齐（ADV-06）
 
     async def test_play_failure_fires_on_finished_once_and_cursor_stays(self):
         """F3: 播放故障（TTS 异常）→ on_finished 恰好触发一次（状态机回待机恢复，

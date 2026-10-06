@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from lira.dialog.context import StatusFacts
+
 __all__ = [
     "WAKE_ACK",
     "INPUT_NOT_HEARD",
@@ -44,6 +46,7 @@ __all__ = [
     "PRIVACY_ON",
     "PRIVACY_OFF",
     "SHUTDOWN_FAREWELL",
+    "POWEROFF_FAILED",
     "DND_EXIT_ACK",
     "DND_STATUS_ON",
     "DND_STATUS_OFF",
@@ -144,6 +147,8 @@ PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫�
 # ---------- 真关机（R4，2026-10-06 计划 U4） ----------
 
 SHUTDOWN_FAREWELL = "好的，我休息了。您也早点休息，再见。"
+#: R4 失败反馈（M7 残留 R1 模式防线：不可逆动作失败必须可感知，不得只进日志）
+POWEROFF_FAILED = "不好意思，我没有关掉。请让家人看看设备，或者再叫我试一次。"
 
 # ---------- 勿扰模式（R8-R12，2026-10-06 计划 U5） ----------
 #
@@ -177,7 +182,7 @@ STATUS_CLOUD_BAD = "云端服务暂时连不上，读书认字不受影响。"
 STATUS_MIC_OFF = "麦克风已经关闭，听不见您说话。"
 
 
-def status_report_text(facts: dict) -> str:
+def status_report_text(facts: StatusFacts) -> str:
     """状态自查播报文案。facts 键：network/cloud/mic_on（True/False/None）。"""
     parts = []
     network = facts.get("network")

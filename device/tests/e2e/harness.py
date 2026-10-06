@@ -278,6 +278,14 @@ class _Callbacks:
             )
         )
 
+    def poweroff(self) -> None:
+        """R4：e2e 无系统副作用，记录断言面。"""
+        self._h.poweroff_called = True
+
+    def adjust_volume(self, delta: float) -> None:
+        """R16：e2e 记录调整量断言面（全局音量装配与持久化由 main_loop 单测覆盖）。"""
+        self._h.volume_deltas.append(delta)
+
     async def _reading_finished(self, session):
         if session is not None and self._h.pipeline.session is session:
             await self._h.engine.on_reading_finished()
@@ -328,6 +336,9 @@ class DeviceHarness:
         self.ir = MockIrController()
         self.ir_service = IRService(self.store, self.ir)
         self.speak_log: list[str] = []
+        #: U4/U8 断言面：poweroff 调用与音量调整记录（e2e 无系统/设置副作用）
+        self.poweroff_called = False
+        self.volume_deltas: list[float] = []
         self.ir_sent: list[tuple[str, str]] = []
         self.ir_errors: list[tuple[str, str, str]] = []
         self.route = AudioRoute.WAKE

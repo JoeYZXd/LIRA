@@ -231,8 +231,13 @@ class TestShutdownPhrase:
         assert is_shutdown_phrase("立即去休息。")
 
     def test_fail_closed(self):
-        for t in ("马上休息", "休息一下", "休息休息", "该休息了"):
+        for t in ("休息一下", "休息休息", "该休息了", "不想休息"):
             assert not is_shutdown_phrase(t), t
+
+    def test_asr_variant_candidates(self):
+        """e2e 实测变体入候选集（真实 ASR 转写「立即去休息」→「一起去休息」）。"""
+        assert is_shutdown_phrase("一起去休息")
+        assert is_shutdown_phrase("立即休息")
 
 
 class TestDndPhrases:

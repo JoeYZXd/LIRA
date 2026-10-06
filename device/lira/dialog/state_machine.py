@@ -557,6 +557,9 @@ class DialogEngine:
             self.dnd = False
             self._transition(State.STANDBY)  # 路由回 WAKE（dispatcher clear）
             self._dnd_last_cmd, self._dnd_cmd_count = None, 0
+            # 勿扰待机期 _owner 为 None——执行阶段的效果发射需要有效 owner
+            # （admit_ir/is_current 门），此处开新操作承接执行问句会话
+            self._new_operation()
             self._dnd_escape = {"stage": "exec", "cmd": esc["cmd"], "appliance": esc["appliance"]}
             self._begin_listening(replay=False)
             self._arm(self.CONFIRM_WINDOW_SECONDS)

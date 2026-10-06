@@ -3,7 +3,7 @@
 与 `ocr_x86.OnnxOcrEngine` 同一 `OcrEngine` 接口，预处理/后处理逐环节对齐
 rknn_model_zoo 板上路径：
   - det：输入为**原始 0-255**（ImageNet mean/std 已在转换时烘入模型），固定
-    480x480 拉伸，NHWC；输出 (1,480,480,1) 概率图 → DB 最小后处理（与 x86 同参）；
+    480x480，NHWC；整页加重叠局部图块检测，输出概率图 → DB 后处理；
   - rec：转换未烘 mean/std（零均值单位方差），输入归一化与 U4 onnx 路径一致：
     (x/255 - 0.5)/0.5、右侧补 -1 至 320px，NHWC；输出 (1,T,C) → CTC 贪心解码；
   - NPU 核绑定：det→core0、rec→core1（计划 U10 Approach）；绑定失败自动降级为
@@ -27,6 +27,7 @@ from rknnlite.api import RKNNLite
 from shapely.geometry import Polygon
 
 from lira.vision.engine import OcrEngine
+from lira.vision.detection_tiles import detect_document
 
 __all__ = ["RknnOcrEngine", "DET_RKNN", "REC_RKNN", "REC_DICT", "OCR_MODEL_HINT"]
 
@@ -45,7 +46,7 @@ OCR_MODEL_HINT = (
 class RknnOcrEngine(OcrEngine):
     """OcrEngine 的板上 RKNNLite 实现（det i8@core0 + rec fp16@core1）。"""
 
-    #: det 静态输入（与 .rknn 转换约定一致：整图拉伸到固定尺寸）
+    #: det 静态输入：整页与每个局部视图分别缩放到模型固定尺寸。
     DET_SIZE = (480, 480)  # (h, w)
     #: 与 x86 后端同参（U4 定值，两侧同步维护）
     DET_THRESH = 0.3
@@ -75,6 +76,10 @@ class RknnOcrEngine(OcrEngine):
     # ---------- OcrEngine 接口 ----------
 
     def detect(self, image: np.ndarray) -> list[np.ndarray]:
+        """Full-page plus overlapping detail views, in original coordinates."""
+        return detect_document(image, self._detect_single)
+
+    def _detect_single(self, image: np.ndarray) -> list[np.ndarray]:
         """det：文本行四点多边形（原图坐标 float32 (4,2)，tl→tr→br→bl）。"""
         src_h, src_w = image.shape[:2]
         rh, rw = self.DET_SIZE

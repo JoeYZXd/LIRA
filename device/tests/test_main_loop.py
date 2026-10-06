@@ -376,7 +376,9 @@ class TestDialogWiring:
         assert rt.camera.capture_calls == 1
         assert rt.engine.state.value == "standby"
 
-    async def test_cleaned_input_is_received_during_prompt_playback(self, tmp_path):
+    async def test_prompt_playback_and_settle_suppress_asr_then_recover(self, tmp_path):
+        # 自说自话修复：提示语播放期间（AEC 残余）不得进识别流；
+        # 释放沿后的静默窗吞弃延迟尾音，窗口过后恢复正常接收。
         rig = make_rig(tmp_path)
         rt = rig.runtime
         await rt.engine.on_wake()
@@ -385,8 +387,12 @@ class TestDialogWiring:
         received = []
         rt.asr_stream.feed = lambda samples: received.append(len(samples))
         rt._gate.feed(np.zeros(1600, dtype=np.float32))
-        assert received == [1600]
+        assert received == []
         rt.tts.occupied = False
+        rt._gate.feed(np.zeros(11200, dtype=np.float32))
+        assert received == []
+        rt._gate.feed(np.zeros(1600, dtype=np.float32))
+        assert received == [1600]
         rt.engine.tick(rt.engine.now + 8)
         assert rt.engine.state.value == "standby"
 

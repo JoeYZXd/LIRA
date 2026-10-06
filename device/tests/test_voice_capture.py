@@ -31,7 +31,7 @@ class Stream:
         return bool(self.result)
 
 
-def rig():
+def rig(*, settle_seconds=0.0):
     events = []
     async def asr(text):
         events.append(text)
@@ -43,9 +43,11 @@ def rig():
         else:
             events.append(event)
     holder = SimpleNamespace(route=AudioRoute.WAKE, wake_stream=Stream(),
-        asr_stream=Stream(), playback_stream=Stream(), tts=SimpleNamespace(occupied=True),
+        asr_stream=Stream(), playback_stream=Stream(), tts=SimpleNamespace(occupied=False),
         engine=SimpleNamespace(on_wake=wake, on_asr_text=asr))
-    return holder, RouteDispatch(streams=holder, wakeword="小丽拉", spawn=spawn), events
+    dispatch = RouteDispatch(streams=holder, wakeword="小丽拉", spawn=spawn,
+                             settle_seconds=settle_seconds)
+    return holder, dispatch, events
 
 
 def test_delayed_wake_replays_chronologically_once_even_during_tts():
@@ -92,7 +94,7 @@ def test_activity_onset_and_silence_end_are_distinct_from_asr_result():
 
 
 def test_recognition_progress_requires_new_command_text_not_wake_or_noise():
-    holder, dispatch, _ = rig()
+    holder, dispatch, _ = rig(settle_seconds=0)
     progress = []
     holder.engine.on_recognition_progress = lambda generation: progress.append(generation)
     holder.asr_stream.is_endpoint = lambda: False
@@ -121,6 +123,80 @@ def test_preroll_is_bounded_to_three_seconds():
     holder.route = AudioRoute.LISTEN
     dispatch.begin_listening()
     assert len(holder.asr_stream.samples) == 48000
+
+
+def test_tts_playback_suppresses_asr_but_not_wake():
+    holder, dispatch, events = rig()
+    holder.route = AudioRoute.LISTEN
+    holder.tts.occupied = True
+    holder.asr_stream.result = "您的吗"
+    dispatch.feed(np.full(1600, 0.03, dtype=np.float32))
+    assert holder.asr_stream.samples == []
+    holder.wake_stream.hit = "小丽拉"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["wake"]
+    dispatch.begin_listening(replay=False)  # 模拟 on_wake 的聆听交接
+    holder.tts.occupied = False
+    holder.asr_stream.result = "打开台灯"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["wake", "打开台灯"]
+
+
+def test_ignored_states_suppress_asr_feed():
+    from lira.dialog.state_machine import State
+
+    holder, dispatch, events = rig()
+    holder.route = AudioRoute.LISTEN
+    for state in (State.SPEAKING, State.PROCESSING, State.EXECUTING):
+        holder.engine.state = state
+        holder.asr_stream.result = "您的吗"
+        dispatch.feed(np.zeros(1600, dtype=np.float32))
+        assert holder.asr_stream.samples == [], str(state)
+    holder.engine.state = State.LISTENING
+    holder.asr_stream.result = "打开台灯"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["打开台灯"]
+
+
+def test_tts_release_opens_settle_window_for_aec_tail():
+    holder, dispatch, events = rig(settle_seconds=0.1)
+    holder.route = AudioRoute.LISTEN
+    holder.tts.occupied = True
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    holder.tts.occupied = False
+    # 释放后窗口内的音频（AEC 延迟尾音）不进识别流、不产生投递
+    holder.asr_stream.result = "您的吗"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert holder.asr_stream.samples == []
+    assert events == []
+    # 窗口过后恢复正常投递
+    holder.asr_stream.result = "打开台灯"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["打开台灯"]
+
+
+def test_begin_listening_without_replay_arms_settle():
+    holder, dispatch, events = rig(settle_seconds=0.1)
+    holder.route = AudioRoute.LISTEN
+    dispatch.begin_listening(replay=False)
+    holder.asr_stream.result = "您的吗"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert holder.asr_stream.samples == []
+    assert events == []
+    holder.asr_stream.result = "打开台灯"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["打开台灯"]
+
+
+def test_wake_replay_excludes_audio_before_wake_hit():
+    holder, dispatch, _ = rig()
+    dispatch.feed(np.array([1, 2], dtype=np.float32))
+    holder.wake_stream.hit = "小丽拉"
+    dispatch.feed(np.array([3, 4], dtype=np.float32))
+    holder.route = AudioRoute.LISTEN
+    dispatch.begin_listening()
+    dispatch.feed(np.array([5, 6], dtype=np.float32))
+    assert holder.asr_stream.samples == [3, 4, 5, 6]
 
 
 def test_aec_resolver_rejects_override_and_missing_nodes(monkeypatch):

@@ -30,6 +30,7 @@ from lira.dialog import phrasebook as pb
 from lira.dialog.callbacks import invoke_callback as _invoke
 from lira.dialog.context import ConversationHistory
 from lira.dialog.intents import (
+    Appliance,
     Intent,
     IntentKind,
     classify_appliance_miss,
@@ -148,6 +149,15 @@ class _PendingConfirm:
         return f"{self.action}{self.device}"
 
 
+@dataclass
+class _DndEscape:
+    """勿扰逃生舱两阶段问答状态（R10；对齐 _PendingConfirm 惯例）。"""
+
+    stage: str  # "exit"（询问是否退出勿扰）| "exec"（询问是否执行指令）
+    cmd: tuple[str, str]  # (device, action)
+    appliance: Appliance | None
+
+
 @dataclass(frozen=True)
 class OperationOwner:
     epoch: int
@@ -192,12 +202,12 @@ class DialogEngine:
         #: 勿扰模式（R8-R14，2026-10-06 计划 U5）：识别常开、语音反馈静默
         #: （豁免集除外）。不持久化——引擎生命周期内标志，重启即正常模式。
         self.dnd = False
-        #: R10 逃生舱：同义指令计数（最后一条可归一指令 + 连续次数）与两阶段
-        #: 询问对话状态（{"stage": "exit"|"exec", "cmd": (device, action),
-        #: "appliance": Appliance|None}）。不可归一话语不累加不清零（裁定 12）。
+        #: R10 逃生舱：同义指令计数（最后一条可归一指令 + 其 Appliance 对象 +
+        #: 连续次数）与两阶段询问对话状态。不可归一话语不累加不清零（裁定 12）。
         self._dnd_last_cmd: tuple[str, str] | None = None
+        self._dnd_last_appliance: Appliance | None = None
         self._dnd_cmd_count = 0
-        self._dnd_escape: dict | None = None
+        self._dnd_escape: _DndEscape | None = None
         self.transitions: list[str] = []
         self._deadline: float | None = None
         self._idle_deadline: float | None = None
@@ -219,8 +229,6 @@ class DialogEngine:
         self._listening_generation = 0
         self._speech_active = False
         self._awaiting_endpoint = False
-        #: 当前投递是否带唤醒前缀（route_dispatch 标记；SHUTDOWN 前缀门控读）
-        self._delivery_wake_prefixed = False
         self._last_audio_progress = 0.0
         self._last_speech_progress = 0.0
         self._last_recognition_progress = 0.0
@@ -386,7 +394,11 @@ class DialogEngine:
                 self._rearm_listening()
             if not self._input_current(generation):
                 return
-        self._delivery_wake_prefixed = wake_prefixed
+        # R10 逃生舱应答优先（仅在勿扰中被置位、_enter_standby 清空——
+        # 先于一切全局意图， escape 期间的应答不被词表劫持）
+        if self._dnd_escape is not None:
+            self._handle_escape_answer(t)
+            return
         # R1/R6 态前统一退出分支：取消词 + 结束聊天 + 统一退出∪喊停词集
         # （含「关机」——R5 语义为结束会话，永不触发真关机）。任何非待机态命中
         # 即停播/停动作回待机，不等超时；待机不监听（R3）。CONFIRMING 中命中
@@ -404,16 +416,14 @@ class DialogEngine:
             self._enter_standby()
             return
         # R8/R11/R12 勿扰短语（任何会话态可达；勿扰待机 STANDBY 同样经此处理）。
-        # 进入零提示音；询问勿扰内外皆答（勿扰中走豁免通道）；退出裸说生效。
+        # 进入零提示音；询问/自查应答统一经 _answer_gated（勿扰走豁免通道）。
         verdict = match_dnd_phrase(t)
         if verdict == "enter":
             self._enter_dnd()
             return
         if verdict == "query":
-            if self.dnd:
-                self._speak_dnd(pb.DND_STATUS_ON)
-            else:
-                self._speak_answer(pb.DND_STATUS_OFF, owner=self._owner, user_text=t)
+            self._answer_gated(pb.DND_STATUS_ON if self.dnd else pb.DND_STATUS_OFF,
+                               user_text=t)
             return
         if verdict == "exit" and self.dnd:
             self.dnd = False
@@ -421,19 +431,19 @@ class DialogEngine:
             self._speak(pb.DND_EXIT_ACK)
             return
         # R17：状态自查——勿扰内外皆可问（裁定 9：A2 电话排障依赖路径）。
-        # 勿扰中经豁免通道应答（完成不迁移态）；正常模式走回答链回 FOLLOWUP。
         if is_status_query(t):
-            facts = self._get_status_facts()
-            if self.dnd:
-                self._speak_dnd(pb.status_report_text(facts))
-            else:
-                self._speak_answer(pb.status_report_text(facts), owner=self._owner, user_text=t)
+            self._answer_gated(pb.status_report_text(self._get_status_facts()), user_text=t)
             return
         self._speech_active = self._awaiting_endpoint = False
         # R4：真关机仅唤醒前缀投递提交（裸说「立即去休息」按普通指令处理，
-        # 落识别失败引导）；前缀标记由 on_asr_text 随投递存于 _delivery_wake_prefixed
-        if self._delivery_wake_prefixed and is_shutdown_phrase(t):
+        # 落识别失败引导）；前缀标记由 route_dispatch 随投递携带
+        if wake_prefixed and is_shutdown_phrase(t):
             self._shutdown()
+            return
+        # R8/R10：勿扰中普通文本 → 计数（逃生舱）且忽略不出声
+        # （勿扰短语/关机已在上方处理）
+        if self.dnd:
+            self._note_dnd_command(t)
             return
         handler = {
             State.STANDBY: self._on_asr_standby,
@@ -485,22 +495,16 @@ class DialogEngine:
         logging.debug("态 %s 忽略 ASR 文本", self.state.value)
 
     async def _on_asr_standby(self, text: str) -> None:
-        if self.dnd:
-            if self._dnd_escape is not None:
-                self._handle_escape_answer(text)
-                return
-            # R8：勿扰待机识别常开——文本直达勿扰处理（豁免口/计数忽略）
-            await self._on_asr_dnd(text)
-            return
-        # 会话已关闭；待机态不响应未带唤醒词的语音。
+        # 会话已关闭；待机态不响应未带唤醒词的语音（勿扰待机的识别常开文本
+        # 已在 on_asr_text 态前分支处理：豁免口/计数忽略）。
         logging.debug("STANDBY 忽略 ASR 文本（需先唤醒）")
 
-    async def _on_asr_dnd(self, text: str) -> None:
-        """勿扰待机的普通文本（退出/询问/进入/前缀关机已在态前分支处理）：
-        计数（U6 逃生舱）且忽略不出声。"""
-        self._note_dnd_command(text)
-
     # ---------- 勿扰三次逃生舱（R10，2026-10-06 计划 U6） ----------
+
+    def _reset_dnd_counter(self) -> None:
+        self._dnd_last_cmd = None
+        self._dnd_last_appliance = None
+        self._dnd_cmd_count = 0
 
     def _note_dnd_command(self, text: str) -> None:
         """勿扰中普通指令计数：本地规则层可归一指令（设备+动作）连续同义 3 次
@@ -509,19 +513,22 @@ class DialogEngine:
         norm = self._dnd_normalize(text)
         if norm is None:
             return
-        if norm != self._dnd_last_cmd:
-            self._dnd_last_cmd, self._dnd_cmd_count = norm, 1
+        key, appliance = norm
+        if key != self._dnd_last_cmd:
+            self._dnd_last_cmd, self._dnd_last_appliance = key, appliance
+            self._dnd_cmd_count = 1
             return
         self._dnd_cmd_count += 1
         if self._dnd_cmd_count >= self.DND_ESCAPE_THRESHOLD:
             self._trigger_escape()
 
-    def _dnd_normalize(self, text: str) -> tuple[str, str] | None:
+    def _dnd_normalize(self, text: str) -> tuple[tuple[str, str], Appliance] | None:
         """「相同意思」本地等价判定：设备别名+动作触发词归一（既有本地规则结构）。
+        返回 (比较键, Appliance 对象)——对象随计数保留，触发时不再按名反查。
         LLM 层指令因勿扰不上云约束无法本地判等 → 不计入（origin Dependencies）。"""
         intent = match_local(text, self._router.appliances)
         if intent is not None and intent.kind is IntentKind.APPLIANCE:
-            return (intent.appliance.name, intent.action)
+            return (intent.appliance.name, intent.action), intent.appliance
         return None
 
     def _trigger_escape(self) -> None:
@@ -530,54 +537,66 @@ class DialogEngine:
         计数不清零保持饱和：退出询问超时回勿扰后，下一次同义指令立即重问
         （裁定 6——被困兜底的本意，不要求重新攒三次）。"""
         device, action = self._dnd_last_cmd
-        appliance = next((a for a in self._router.appliances if a.name == device), None)
-        self._dnd_escape = {"stage": "exit", "cmd": (device, action), "appliance": appliance}
+        self._dnd_escape = _DndEscape(stage="exit", cmd=(device, action),
+                                      appliance=self._dnd_last_appliance)
         self._arm(self.CONFIRM_WINDOW_SECONDS)
         self._speak_dnd(pb.dnd_escape_prompt_text(f"{action}{device}"))
 
     def _handle_escape_answer(self, text: str) -> None:
-        """逃生舱应答语法（裁定 2/6/8）：
-        exit 阶段——确认 → 退出并进入执行问句（高危折叠为 R21 具名确认）；
-        「退出勿扰模式」应答 = 同意退出且跳过执行问句；拒绝/无关 → 静默回勿扰、
-        计数清零；超时 → 回勿扰、计数保持（tick 处理）。
-        exec 阶段——确认 → 执行；拒绝/超时/无关 → 正常待机不执行（已同意退出，
-        勿扰不回）。"""
+        """逃生舱应答按阶段分派（裁定 2/6/8，语义见各阶段方法）。"""
         esc = self._dnd_escape
+        if esc.stage == "exit":
+            self._escape_exit_answer(esc, text)
+        else:
+            self._escape_exec_answer(esc, text)
+
+    def _escape_exit_answer(self, esc: _DndEscape, text: str) -> None:
+        """exit 阶段：确认 → 退出并进入执行问句（高危折叠为 R21 具名确认）；
+        「退出勿扰模式」应答 = 同意退出且跳过执行问句；拒绝/无关 → 静默回勿扰、
+        计数清零；超时 → 回勿扰、计数保持（tick 处理）。"""
         verdict = classify_confirmation(text)
-        if esc["stage"] == "exit" and match_dnd_phrase(text) == "exit":
-            verdict = "confirm"  # 「退出勿扰模式」应答 = 同意退出且跳过执行问句
-        if esc["stage"] == "exit":
-            if verdict != "confirm":
-                # 拒绝/无关应答 → 静默回勿扰、计数清零（老人已听到提示）
-                self._dnd_escape = None
-                self._dnd_last_cmd, self._dnd_cmd_count = None, 0
-                self._disarm()
-                return
-            device, action = esc["cmd"]
-            self.dnd = False
-            self._transition(State.STANDBY)  # 路由回 WAKE（dispatcher clear）
-            self._dnd_last_cmd, self._dnd_cmd_count = None, 0
-            # 勿扰待机期 _owner 为 None——执行阶段的效果发射需要有效 owner
-            # （admit_ir/is_current 门），此处开新操作承接执行问句会话
-            self._new_operation()
-            self._dnd_escape = {"stage": "exec", "cmd": esc["cmd"], "appliance": esc["appliance"]}
-            self._begin_listening(replay=False)
-            self._arm(self.CONFIRM_WINDOW_SECONDS)
-            appliance = esc["appliance"]
-            if appliance is not None and appliance.is_high_risk:
-                # R21：高危折叠为具名确认——一问完成双确认，fail-closed 不跳过
-                self._speak(pb.confirm_prompt_text(f"{action}{device}"))
-            else:
-                self._speak(pb.DND_EXEC_PROMPT)
+        if match_dnd_phrase(text) == "exit":
+            verdict = "confirm"
+        if verdict != "confirm":
+            self._dnd_escape = None
+            self._reset_dnd_counter()
+            self._disarm()
             return
-        # exec 阶段
+        device, action = esc.cmd
+        self.dnd = False
+        self._transition(State.STANDBY)  # 路由回 WAKE（dispatcher clear）
+        self._reset_dnd_counter()
+        # 勿扰待机期 _owner 为 None——后续效果发射/会话需要有效 owner
+        self._new_operation()
+        if match_dnd_phrase(text) == "exit":
+            # 「退出勿扰模式」应答 = 同意退出且跳过执行问句（裁定 6）
+            self._dnd_escape = None
+            self._speak(pb.DND_EXIT_ACK)
+            return
+        self._dnd_escape = _DndEscape(stage="exec", cmd=esc.cmd, appliance=esc.appliance)
+        self._begin_listening(replay=False)
+        self._arm(self.CONFIRM_WINDOW_SECONDS)
+        if esc.appliance is not None and esc.appliance.is_high_risk:
+            # R21：高危折叠为具名确认——一问完成双确认，fail-closed 不跳过
+            self._speak(pb.confirm_prompt_text(f"{action}{device}"))
+        else:
+            self._speak(pb.dnd_exec_prompt_text(f"{action}{device}"))
+
+    def _escape_exec_answer(self, esc: _DndEscape, text: str) -> None:
+        """exec 阶段：确认 → 执行（enabled 门与 admit_ir 闸与既有路径对齐）；
+        拒绝/超时/无关 → 正常待机不执行（已同意退出，勿扰不回，裁定 8）。"""
         self._dnd_escape = None
         self._disarm()
-        if verdict != "confirm":
-            self._enter_standby()  # 拒绝/无关：正常待机不执行，勿扰不回（裁定 8）
+        if classify_confirmation(text) != "confirm":
+            self._enter_standby()
             return
-        device, action = esc["cmd"]
-        appliance = esc["appliance"]
+        device, action = esc.cmd
+        appliance = esc.appliance
+        if appliance is not None and not appliance.enabled:
+            # R7/AE3 enabled 门与 _dispatch_appliance 对齐（逃生舱执行不绕过禁用）
+            self._speak(pb.DEVICE_DISABLED)
+            self._enter_standby()
+            return
         owner = self._owner
         if appliance is not None and appliance.is_high_risk:
             # 与既有高危确认同闸：admit_ir 校验 _confirmed_ir（fail-closed）
@@ -589,13 +608,6 @@ class DialogEngine:
         self._finish_command()
 
     async def _on_asr_listening(self, text: str) -> None:
-        if self._dnd_escape is not None:
-            self._handle_escape_answer(text)
-            return
-        if self.dnd:
-            # 勿扰聆听窗内的普通指令：计数（U6 逃生舱）且忽略不出声
-            self._note_dnd_command(text)
-            return
         # R15：追问窗内「再说一遍」→ 原文重报上一条成功回答（不重新生成、
         # 不重复入史；引导话术不入史故重报对象恒为最近成功回答）。窗内不限次数，
         # 每次重报后重开追问窗。无历史成功回答 → 按普通指令路由。
@@ -764,7 +776,7 @@ class DialogEngine:
         含 _abort_capture 的 F1 纪律——迟到拍摄完成不得在勿扰中出声）；零提示音
         （R8 有意设计，R12 询问提供验证出口）。逃生舱计数清零（R10）。"""
         self.dnd = True
-        self._dnd_last_cmd, self._dnd_cmd_count = None, 0
+        self._reset_dnd_counter()
         self._enter_standby()
 
     def _rearm_listening(self) -> None:
@@ -779,6 +791,14 @@ class DialogEngine:
         """勿扰豁免播报：exempt 标记过装配层勿扰门；完成后不迁移态
         （勿扰待机即终点，R9 完成路由裁定——绝不进 FOLLOWUP）。"""
         _invoke(self._cb.speak, text, owner=self._owner, exempt=True)
+
+    def _answer_gated(self, text: str, *, user_text: str) -> None:
+        """勿扰门控应答收口：勿扰中走豁免通道（完成不迁移态）；否则走回答链
+        （完成回 FOLLOWUP）。新增全局意图应答一律经此，防分叉漂移。"""
+        if self.dnd:
+            self._speak_dnd(text)
+        else:
+            self._speak_answer(text, owner=self._owner, user_text=user_text)
 
     def _get_status_facts(self) -> dict:
         """R17 状态事实经可选回调注入（reading_task_facts 同款模式）；

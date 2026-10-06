@@ -42,6 +42,8 @@ class RouteDispatch:
         #: 唤醒前缀标记：唤醒命中后置位，下一次 ASR 文本投递消费（SHUTDOWN 等
         #: 前缀门控分支区分裸说/带前缀投递；2026-10-06 计划 U2/U4）
         self._wake_prefix_pending = False
+        #: 命令 KWS 待机闸状态（进待机 reset 一次，出待机恢复喂流）
+        self._command_gate_active = False
 
     @property
     def generation(self):
@@ -59,8 +61,10 @@ class RouteDispatch:
         self._discard_until = 0
         self._tts_was_occupied = False
         self._wake_prefix_pending = False
+        self._command_gate_active = False
         for stream in (self._streams.asr_stream, self._streams.wake_stream,
-                       self._streams.playback_stream):
+                       self._streams.playback_stream,
+                       getattr(self._streams, "command_stream", None)):
             if stream is not None and hasattr(stream, "reset"):
                 stream.reset()
 
@@ -156,10 +160,9 @@ class RouteDispatch:
                 return
             engine = self._streams.engine
             if hasattr(engine, "listening_generation"):
-                if wake_prefixed:
-                    await engine.on_asr_text(text, generation=generation, wake_prefixed=True)
-                else:
-                    await engine.on_asr_text(text, generation=generation)
+                # U2 起引擎签名带 wake_prefixed（与 listening_generation 门同批判定）
+                await engine.on_asr_text(text, generation=generation,
+                                         wake_prefixed=wake_prefixed)
             else:
                 await engine.on_asr_text(text)
         self._spawn(deliver())
@@ -209,20 +212,23 @@ class RouteDispatch:
                     await rt.engine.on_wake()
             self._spawn(wake())
             return
-        # 常驻命令 KWS（2026-10-06 计划 U2）：全路由常喂（与唤醒 KWS 同理，不受
-        # 三闸门约束），承载退出∪喊停高区分度声学子集——播报中喊停的唯一活通道
-        # （ASR 在 SPEAKING 被闸门关闭）。STANDBY 命中丢弃（无可停之物；勿扰待机
-        # 的退出走 ASR 文本通道）。唤醒命中块提前 return，同块命令投递让位唤醒
-        # （单块丢失，量级无害——计划 Deferred to Implementation 已记）。
+        # 常驻命令 KWS（2026-10-06 计划 U2）：承载退出∪喊停高区分度声学子集——
+        # 播报中喊停的唯一活通道（ASR 在 SPEAKING 被闸门关闭）。STANDBY（含勿扰
+        # 待机——其退出走 ASR 文本通道）不喂不解码：命中结果一律被丢弃，白烧
+        # 流式解码算力；进待机时 reset 丢弃跨墙解码态。唤醒命中块提前 return，
+        # 同块命令投递让位唤醒（单块丢失，量级无害——计划已记）。
         command_stream = getattr(rt, "command_stream", None)
         if command_stream is not None:
-            cmd_hit = command_stream.feed_and_poll(samples)
-            if cmd_hit:
-                word = next((w for w in COMMAND_KWS_WORDS if w in cmd_hit), None)
-                if word is not None:
-                    if getattr(rt.engine, "state", None) is State.STANDBY:
-                        VOICE_LOG.log("command", f"待机丢弃命令命中：{word}")
-                    else:
+            if getattr(rt.engine, "state", None) is State.STANDBY:
+                if not self._command_gate_active:
+                    command_stream.reset()
+                    self._command_gate_active = True
+            else:
+                self._command_gate_active = False
+                cmd_hit = command_stream.feed_and_poll(samples)
+                if cmd_hit:
+                    word = next((w for w in COMMAND_KWS_WORDS if w in cmd_hit), None)
+                    if word is not None:
                         VOICE_LOG.log("command", f"命令通道命中：{word}")
                         self._deliver(word, wake_prefixed=False)
         if route is AudioRoute.LISTEN and not self._wake_pending:

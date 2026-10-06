@@ -47,6 +47,7 @@ from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
 from lira.hal.base import HalError
+from lira.llm.breaker import BreakerState
 from lira.hal.mock import (
     IMAGE_SUFFIXES,
     MockAudioIO,
@@ -272,21 +273,40 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
         return None
 
 
-def build_settings_with_persistence(store) -> "DeviceSettings":
+def build_settings_with_persistence(store, *, persist_delay: float = 2.0) -> DeviceSettings:
     """R16（2026-10-06 计划 U8）：带持久化钩子的运行时设置。
 
     启动时从 store meta 恢复音量；语音词/白名单词/Web 三个调用点统一经
-    set_* 落钩子写回（单一全局音量，三写点自动一致）。
+    set_* 落钩子写回（单一全局音量，三写点自动一致）。写盘去抖 persist_delay
+    秒（store 提交是 synchronous=FULL，语音连调音量不应逐次 fsync 事件循环）；
+    无事件循环时同步落盘。
     """
-    from lira.settings import DeviceSettings
-
     try:
         volume = float(store.get_meta("volume"))
     except (TypeError, ValueError):
         volume = 1.0
 
+    pending: dict[str, float] = {}
+    timer: list = [None]
+
+    def flush() -> None:
+        for key, value in pending.items():
+            store.set_meta(key, str(value))
+        pending.clear()
+
     def persist(key: str, value: float) -> None:
-        store.set_meta(key, str(float(value)))
+        pending[key] = float(value)
+        if persist_delay <= 0:
+            flush()
+            return
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            flush()
+            return
+        if timer[0] is not None:
+            timer[0].cancel()
+        timer[0] = loop.call_later(persist_delay, flush)
 
     return DeviceSettings(volume=volume, on_change=persist)
 
@@ -388,13 +408,17 @@ class DeviceCallbacks:
     def __init__(self, runtime: "DeviceRuntime") -> None:
         self._rt = runtime
 
+    def _dnd_muted(self) -> bool:
+        """R8 勿扰静默谓词：出声通道统一经此判断（新增通道勿忘接门）。"""
+        return self._rt.engine.dnd
+
     def speak(self, text: str, *, owner=None, exempt=False):
         if owner is not None and not self._rt.engine.is_current(owner):
             return None
         # 勿扰谓词门（R8/R9，2026-10-06 计划 U5）：豁免集 = 老人主动问询的直接
         # 应答（状态机 exempt 标记：勿扰应答/逃生舱/告别语/退出确认）；被动播报
         # 源（隐私开关公告、sync 快照公告）不带标记 → 勿扰中一律静音
-        if getattr(self._rt.engine, "dnd", False) and not exempt:
+        if self._dnd_muted() and not exempt:
             return None
         # 最近播报环形记录（内存，不落盘；dev 回放/状态区展示面）
         self._rt.recent_speaks.append(text)
@@ -414,7 +438,7 @@ class DeviceCallbacks:
         )
 
     def chime(self, *, owner=None):
-        if getattr(self._rt.engine, "dnd", False):
+        if self._dnd_muted():
             return None  # R8：勿扰中裸唤醒词不提示（勿扰形同虚设防线）
         if owner is not None and not self._rt.engine.is_current(owner):
             return None
@@ -502,11 +526,17 @@ class DeviceCallbacks:
         """R17：状态自查事实（老人能懂的话由 phrasebook 组装，这里只供事实）。
 
         network 复用既有缓存探针（10s 周期，播报不阻塞）；cloud 由 LLM 熔断器
-        推导（CLOSED=可用/OPEN=不可用/其它=未知）；mic_on 取隐私门状态。
+        枚举恒等推导（CLOSED=可用/OPEN=不可用/HALF_OPEN 等=未知）；mic_on 取
+        隐私门状态。
         """
         breaker = getattr(self._rt._llm, "breaker", None)
-        breaker_name = str(getattr(getattr(breaker, "state", None), "name", "") or "")
-        cloud = True if breaker_name == "CLOSED" else False if "OPEN" in breaker_name else None
+        breaker_state = getattr(breaker, "state", None)
+        if breaker_state is BreakerState.CLOSED:
+            cloud = True
+        elif breaker_state is BreakerState.OPEN:
+            cloud = False
+        else:
+            cloud = None
         return {
             "network": bool(self._rt._network_ok()),
             "cloud": cloud,
@@ -527,11 +557,11 @@ class DeviceCallbacks:
 
     def playback_volume_up(self) -> None:
         # R16 语义并轨：朗读白名单调音量同步写全局持久值（单一全局音量）
-        self.adjust_volume(0.2)
+        self.adjust_volume(DialogEngine.VOLUME_STEP)
         self._rt.pipeline.playback_volume_up()
 
     def playback_volume_down(self) -> None:
-        self.adjust_volume(-0.2)
+        self.adjust_volume(-DialogEngine.VOLUME_STEP)
         self._rt.pipeline.playback_volume_down()
 
     def adjust_volume(self, delta: float) -> None:
@@ -689,7 +719,7 @@ class DeviceRuntime:
             "engine": self.engine.state.value,
             "route": self.route.value,
             "privacy_on": self.privacy.is_on,
-            "dnd": bool(getattr(self.engine, "dnd", False)),
+            "dnd": bool(self.engine.dnd),
             "sync": {
                 "session": self.sync_status.get("session", "unknown"),
                 "epoch": epoch,
@@ -1134,7 +1164,6 @@ def main(argv: list[str] | None = None) -> int:
 
     # 真实运行：引擎装配（缺失 -> 明确报错退出，绝不静默残缺运行）
     from lira.appliances.store import ApplianceStore
-    from lira.settings import DeviceSettings
 
     store = None
     try:

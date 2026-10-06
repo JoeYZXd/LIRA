@@ -203,19 +203,23 @@ def classify_confirmation(text: str) -> str | None:
 
 _SOFT_PUNCT = set("，,.。!！?？、;；:：'\"“”‘’()（）[]【】 \t\n\r")
 
-_PINYIN_KEY_CACHE: dict[str, str] = {}
+#: 候选集拼音键缓存（封闭集合，有界）；输入话语开放词汇，现算不缓存
+#: （ASR 文本近乎不重复，缓存只增不减——嵌入式 24/7 进程慢性泄漏）
+_CANDIDATE_KEYS: dict[str, str] = {}
 
 
 def _pinyin_key(text: str) -> str:
     """无声调全拼连写归一。同音误转写归一后与正字全等（「别年了」==「别念了」）；
     容错边界即候选集拼音表，不做编辑距离放宽（fail-closed）。"""
-    cached = _PINYIN_KEY_CACHE.get(text)
-    if cached is not None:
-        return cached
     from pypinyin import lazy_pinyin  # 延迟导入：本模块是热路径，不背启动开销
 
-    key = "".join(lazy_pinyin("".join(ch for ch in text if ch not in _SOFT_PUNCT)))
-    _PINYIN_KEY_CACHE[text] = key
+    return "".join(lazy_pinyin("".join(ch for ch in text if ch not in _SOFT_PUNCT)))
+
+
+def _candidate_key(cand: str) -> str:
+    key = _CANDIDATE_KEYS.get(cand)
+    if key is None:
+        key = _CANDIDATE_KEYS[cand] = _pinyin_key(cand)
     return key
 
 
@@ -225,7 +229,7 @@ def _match_closed(text: str, candidates: tuple[str, ...]) -> str | None:
     if not key:
         return None
     for cand in candidates:
-        if key == _pinyin_key(cand):
+        if key == _candidate_key(cand):
             return cand
     return None
 

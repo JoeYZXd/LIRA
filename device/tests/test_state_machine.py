@@ -1017,7 +1017,7 @@ class TestDndEscapeHatch:
         for text in (f"{action}{word}", f"把{word}{action}", f"帮我{action}{word}"):
             await sm.on_asr_text(text)
         assert sm._dnd_escape is not None
-        assert sm._dnd_escape["stage"] == "exit"
+        assert sm._dnd_escape.stage == "exit"
         assert rec.spoken[-1] == pb.dnd_escape_prompt_text(f"{action}{word}")
 
     async def test_three_same_intent_triggers_prompt(self):
@@ -1058,7 +1058,7 @@ class TestDndEscapeHatch:
         await sm.on_asr_text("确认")
         assert sm.dnd is False
         assert sm.state is State.LISTENING
-        assert rec.spoken[-1] == pb.DND_EXEC_PROMPT
+        assert rec.spoken[-1] == pb.dnd_exec_prompt_text("打开台灯")
         await sm.on_asr_text("开吧")
         assert rec.ir == [("台灯", "打开")]
         assert any("已发出" in s for s in rec.spoken)
@@ -1164,7 +1164,7 @@ class TestRepeatLastAnswer:
         await sm.on_asr_text("再说一遍")
         assert rec.spoken[-1] == pb.HELP_TEXT, "原文重报"
         assert sm.state is State.FOLLOWUP, "重报后重开追问窗"
-        assert rec.spoken[spoken_before.__len__():].count(pb.HELP_TEXT) == 1, "恰重报一次"
+        assert rec.spoken[len(spoken_before):].count(pb.HELP_TEXT) == 1, "恰重报一次"
 
     async def test_repeat_twice_same_text_history_not_duplicated(self):
         """窗内连续重报同文；重报不写入历史（上下文不自污染）。"""

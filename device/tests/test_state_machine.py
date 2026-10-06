@@ -1001,3 +1001,145 @@ class TestDndMode:
         assert sm.dnd is True
         assert sm.state is State.STANDBY
         assert rec.spoken == spoken_before
+
+
+# ---------- 勿扰三次逃生舱（R10；2026-10-06 计划 U6） ----------
+
+
+class TestDndEscapeHatch:
+    async def _drive_to_prompt(self, sm: DialogEngine, rec: Recorder, word="台灯", action="打开") -> None:
+        """勿扰中同义指令×3（换说法）→ 主动开口询问（Covers AE6 触发侧）。"""
+        await enter_dnd(sm, rec)
+        for text in (f"{action}{word}", f"把{word}{action}", f"帮我{action}{word}"):
+            await sm.on_asr_text(text)
+        assert sm._dnd_escape is not None
+        assert sm._dnd_escape["stage"] == "exit"
+        assert rec.spoken[-1] == pb.dnd_escape_prompt_text(f"{action}{word}")
+
+    async def test_three_same_intent_triggers_prompt(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        assert sm.dnd is True and sm.state is State.STANDBY
+
+    async def test_different_command_resets_counter(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_asr_text("打开台灯")
+        await sm.on_asr_text("把台灯打开")
+        await sm.on_asr_text("关闭台灯")  # 不同意图 → 清零重计
+        assert sm._dnd_escape is None
+        await sm.on_asr_text("关闭台灯")
+        assert sm._dnd_escape is None, "仅 2 次，不得触发"
+        await sm.on_asr_text("把台灯关闭")
+        assert sm._dnd_escape is not None, "关闭台灯第 3 次触发"
+
+    async def test_unnormalizable_neither_counts_nor_resets(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_asr_text("打开台灯")
+        await sm.on_asr_text("今天天气怎么样")  # LLM 层：不累加不清零（裁定 12）
+        await sm.on_asr_text("把台灯打开")
+        assert sm._dnd_escape is None, "仅 2 次"
+        await sm.on_asr_text("帮我打开台灯")
+        assert sm._dnd_escape is not None, "闲聊不打断计数，第 3 次触发"
+
+    async def test_exit_agree_low_risk_then_executes(self):
+        """Covers AE6. 询问→确认→执行问句→开吧→执行 IR。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_asr_text("确认")
+        assert sm.dnd is False
+        assert sm.state is State.LISTENING
+        assert rec.spoken[-1] == pb.DND_EXEC_PROMPT
+        await sm.on_asr_text("开吧")
+        assert rec.ir == [("台灯", "打开")]
+        assert any("已发出" in s for s in rec.spoken)
+        assert sm.state is State.STANDBY
+
+    async def test_exit_agree_high_risk_folds_into_named_confirm(self):
+        """Covers R21. 高危折叠：执行问句直接用具名高危确认话术，确认后走同一闸。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        for text in ("打开取暖器", "把取暖器打开", "帮我打开取暖器"):
+            await sm.on_asr_text(text)
+        assert rec.spoken[-1] == pb.dnd_escape_prompt_text("打开取暖器")
+        await sm.on_asr_text("确认")
+        assert sm.dnd is False
+        assert rec.spoken[-1] == pb.confirm_prompt_text("打开取暖器"), "高危折叠为具名确认"
+        await sm.on_asr_text("确认")
+        assert rec.ir == [("取暖器", "打开")]
+        assert sm.state is State.STANDBY
+
+    async def test_exit_refuse_stays_dnd_and_resets_counter(self):
+        """Covers AE7. 答「不用」→ 静默回勿扰、计数清零（重攒三次才再问）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        spoken_after_prompt = list(rec.spoken)
+        await sm.on_asr_text("不用")
+        assert sm.dnd is True
+        assert sm._dnd_escape is None
+        assert rec.spoken == spoken_after_prompt, "拒绝后静默回勿扰"
+        await sm.on_asr_text("打开台灯")
+        assert sm._dnd_escape is None, "计数已清零，1 次不得触发"
+
+    async def test_exit_timeout_keeps_counter_reasks_immediately(self):
+        """裁定 6：超时回勿扰、计数保持——下次同义指令立即重问。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        sm.tick(T0 + 10.1)
+        assert sm._dnd_escape is None
+        assert sm.dnd is True
+        await sm.on_asr_text("打开台灯")
+        assert sm._dnd_escape is not None, "计数保持，单次同义立即重问"
+        assert rec.spoken[-1] == pb.dnd_escape_prompt_text("打开台灯")
+
+    async def test_answer_exit_phrase_skips_exec_question(self):
+        """裁定 6：逃生询问中答「退出勿扰模式」= 同意退出且跳过执行问句。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_asr_text("退出勿扰模式")
+        assert sm.dnd is False
+        assert sm.state is State.STANDBY
+        assert rec.spoken[-1] == pb.DND_EXIT_ACK
+        assert rec.ir == []
+
+    async def test_exec_refuse_normal_standby_no_ir(self):
+        """裁定 8：执行问句被拒 → 正常待机不执行（已同意退出，勿扰不回）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_asr_text("确认")
+        await sm.on_asr_text("不要")
+        assert sm.dnd is False
+        assert sm.state is State.STANDBY
+        assert rec.ir == []
+
+    async def test_exec_timeout_normal_standby_no_ir(self):
+        """执行问句超时 → 正常待机不执行。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        await sm.on_asr_text("确认")
+        sm.tick(T0 + 10.1)
+        assert sm._dnd_escape is None
+        assert sm.state is State.STANDBY
+        assert rec.ir == []
+
+    async def test_unrelated_answer_treated_as_refusal(self):
+        """裁定 6：无关应答按拒绝处理（fail-closed 静默回勿扰）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await self._drive_to_prompt(sm, rec)
+        spoken_after_prompt = list(rec.spoken)
+        await sm.on_asr_text("现在几点")
+        assert sm.dnd is True
+        assert sm._dnd_escape is None
+        assert rec.spoken == spoken_after_prompt

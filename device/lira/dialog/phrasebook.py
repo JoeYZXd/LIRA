@@ -47,6 +47,9 @@ __all__ = [
     "DND_EXIT_ACK",
     "DND_STATUS_ON",
     "DND_STATUS_OFF",
+    "DND_ESCAPE_PROMPT",
+    "DND_EXEC_PROMPT",
+    "dnd_escape_prompt_text",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -146,6 +149,15 @@ SHUTDOWN_FAREWELL = "好的，我休息了。您也早点休息，再见。"
 DND_EXIT_ACK = "好的，已退出勿扰模式。"
 DND_STATUS_ON = "是的，我在勿扰模式，先不说话。您说「退出勿扰模式」就能叫醒我。"
 DND_STATUS_OFF = "没有，我正常听着呢，随时可以吩咐。"
+
+#: 三次逃生舱（R10，2026-10-06 计划 U6）：主动开口询问是否退出
+DND_ESCAPE_PROMPT = "您连着说了几遍「{desc}」。我在勿扰模式，先不应答。要退出勿扰吗？确认请说：确认。"
+#: 退出后的执行问句（低危；高危走具名确认话术 confirm_prompt_text）
+DND_EXEC_PROMPT = "要现在为您{desc}吗？确认请说：确认。"
+
+
+def dnd_escape_prompt_text(desc: str) -> str:
+    return DND_ESCAPE_PROMPT.format(desc=desc)
 
 INPUT_NOT_HEARD = "收音没有完成，请再说一遍。"
 UNDERSTANDING_FAILED = "理解指令时出了问题，请再说一遍。"

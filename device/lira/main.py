@@ -368,8 +368,13 @@ class DeviceCallbacks:
     def __init__(self, runtime: "DeviceRuntime") -> None:
         self._rt = runtime
 
-    def speak(self, text: str, *, owner=None):
+    def speak(self, text: str, *, owner=None, exempt=False):
         if owner is not None and not self._rt.engine.is_current(owner):
+            return None
+        # 勿扰谓词门（R8/R9，2026-10-06 计划 U5）：豁免集 = 老人主动问询的直接
+        # 应答（状态机 exempt 标记：勿扰应答/逃生舱/告别语/退出确认）；被动播报
+        # 源（隐私开关公告、sync 快照公告）不带标记 → 勿扰中一律静音
+        if getattr(self._rt.engine, "dnd", False) and not exempt:
             return None
         # 最近播报环形记录（内存，不落盘；dev 回放/状态区展示面）
         self._rt.recent_speaks.append(text)
@@ -389,6 +394,8 @@ class DeviceCallbacks:
         )
 
     def chime(self, *, owner=None):
+        if getattr(self._rt.engine, "dnd", False):
+            return None  # R8：勿扰中裸唤醒词不提示（勿扰形同虚设防线）
         if owner is not None and not self._rt.engine.is_current(owner):
             return None
         return self._rt.tts.chime(owner=owner, volume=self._rt.settings.volume)
@@ -636,6 +643,7 @@ class DeviceRuntime:
             "engine": self.engine.state.value,
             "route": self.route.value,
             "privacy_on": self.privacy.is_on,
+            "dnd": bool(getattr(self.engine, "dnd", False)),
             "sync": {
                 "session": self.sync_status.get("session", "unknown"),
                 "epoch": epoch,

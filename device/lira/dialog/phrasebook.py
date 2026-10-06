@@ -44,6 +44,9 @@ __all__ = [
     "PRIVACY_ON",
     "PRIVACY_OFF",
     "SHUTDOWN_FAREWELL",
+    "DND_EXIT_ACK",
+    "DND_STATUS_ON",
+    "DND_STATUS_OFF",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -135,6 +138,14 @@ PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫�
 # ---------- 真关机（R4，2026-10-06 计划 U4） ----------
 
 SHUTDOWN_FAREWELL = "好的，我休息了。您也早点休息，再见。"
+
+# ---------- 勿扰模式（R8-R12，2026-10-06 计划 U5） ----------
+#
+# 进入勿扰零提示音（R8 有意设计）；以下仅豁免集话术。
+
+DND_EXIT_ACK = "好的，已退出勿扰模式。"
+DND_STATUS_ON = "是的，我在勿扰模式，先不说话。您说「退出勿扰模式」就能叫醒我。"
+DND_STATUS_OFF = "没有，我正常听着呢，随时可以吩咐。"
 
 INPUT_NOT_HEARD = "收音没有完成，请再说一遍。"
 UNDERSTANDING_FAILED = "理解指令时出了问题，请再说一遍。"

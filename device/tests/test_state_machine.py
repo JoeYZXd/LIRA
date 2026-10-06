@@ -824,3 +824,180 @@ class TestShutdown:
         await sm.on_wake()
         await sm.on_asr_text("关电视", wake_prefixed=True)
         assert rec.poweroffs == 0
+
+
+# ---------- 勿扰模式核心（R8-R14；2026-10-06 计划 U5） ----------
+
+
+class CaptureTaskRecorder(Recorder):
+    """start_capture 返回可取消句柄（F1 中止断言用）。"""
+
+    def __init__(self):
+        super().__init__()
+        self.cancelled_tasks = []
+
+    def start_capture(self):
+        class _Task:
+            def __init__(self, log):
+                self._log = log
+
+            def cancel(self):
+                self._log.append("cancel")
+
+        return _Task(self.cancelled_tasks)
+
+
+async def enter_dnd(sm: DialogEngine, rec: Recorder) -> None:
+    """驱动进入勿扰（会话内裸说入口），返回时处于勿扰待机。"""
+    sm.tick(T0)
+    await sm.on_wake()
+    await sm.on_asr_text("进入勿扰模式")
+    assert sm.dnd is True
+    assert sm.state is State.STANDBY
+
+
+class TestDndMode:
+    async def test_enter_from_session_silent_with_listen_route(self):
+        """Covers R8/R13. 会话内裸说进入勿扰：零提示音、待机路由切 LISTEN。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("进入勿扰模式")
+        assert sm.dnd is True
+        assert sm.state is State.STANDBY
+        assert rec.spoken == spoken_before, "进入勿扰零提示音"
+        assert rec.routes[-1] is AudioRoute.LISTEN
+
+    async def test_enter_aborts_pending_capture(self):
+        """F1 勿扰复现防线：拍摄引导中进入勿扰 → 在途拍摄中止，迟到完成不出声。"""
+        rec = CaptureTaskRecorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.CAPTURING)
+        await sm.on_asr_text("进入勿扰模式")
+        assert rec.cancelled_tasks == ["cancel"], "在途拍摄任务必须中止"
+        assert sm.dnd is True
+        # 迟到的拍摄完成被态守卫丢弃，不得开播朗读
+        await sm.on_capture_done(True)
+        assert sm.state is State.STANDBY
+        assert any("识别已完成" in s for s in rec.spoken) is False
+
+    async def test_dnd_idle_bare_exit_phrase(self):
+        """Covers R11. 勿扰中裸说退出短语 → 退勿扰 + 确认话术 + 路由回 WAKE。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_asr_text("退出勿扰模式")
+        assert sm.dnd is False
+        assert sm.state is State.STANDBY
+        assert rec.spoken[-1] == pb.DND_EXIT_ACK
+        assert rec.routes[-1] is AudioRoute.WAKE
+
+    async def test_dnd_idle_query_answers_and_stays(self):
+        """Covers R12. 勿扰中询问 → 豁免应答、仍留勿扰待机（不进 FOLLOWUP）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_asr_text("你现在是在勿扰模式吗")
+        assert rec.spoken[-1] == pb.DND_STATUS_ON
+        assert sm.dnd is True
+        assert sm.state is State.STANDBY
+        assert rec.routes[-1] is AudioRoute.LISTEN
+
+    async def test_normal_mode_query_answers_off(self):
+        """Covers R12/AE8. 正常模式询问 → 回答「不在勿扰」，走常规回答链。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你是不是在睡觉")
+        assert rec.spoken[-1] == pb.DND_STATUS_OFF
+        assert sm.dnd is False
+        assert sm.state is State.FOLLOWUP
+
+    async def test_dnd_idle_normal_command_ignored_silently(self):
+        """Covers R9. 勿扰中普通指令：不执行、不出声。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("打开台灯")
+        assert sm.state is State.STANDBY
+        assert sm.dnd is True
+        assert rec.spoken == spoken_before
+        assert rec.ir == []
+
+    async def test_wake_in_dnd_opens_silent_window_then_exit(self):
+        """勿扰中裸唤醒词开静默聆听窗（应答门在装配层），退出短语生效。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_wake()
+        assert sm.state is State.LISTENING, "唤醒后开聆听窗（提示音门在装配层）"
+        await sm.on_asr_text("退出勿扰模式", wake_prefixed=True)
+        assert sm.dnd is False
+        assert sm.state is State.STANDBY
+        assert rec.spoken[-1] == pb.DND_EXIT_ACK
+
+    async def test_wake_in_dnd_normal_command_ignored(self):
+        """勿扰聆听窗内普通指令：忽略不出声，窗口保持到超时。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_wake()
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("开电视")
+        assert sm.state is State.LISTENING
+        assert rec.spoken == spoken_before
+        assert rec.ir == []
+
+    async def test_shutdown_phrase_in_dnd_with_prefix_executes(self):
+        """勿扰中关机短语（前缀投递）直接生效：告别语 + poweroff + 清 dnd。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_asr_text("立即去休息", wake_prefixed=True)
+        await asyncio.sleep(0)
+        assert rec.poweroffs == 1
+        assert sm.dnd is False
+
+    async def test_bare_shutdown_phrase_in_dnd_ignored(self):
+        """勿扰中裸说「立即去休息」视同不可归一话语：不计数不触发。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("立即去休息")
+        assert rec.poweroffs == 0
+        assert sm.dnd is True
+        assert rec.spoken == spoken_before
+
+    async def test_rearm_after_generation_bump(self):
+        """聆听再武装：dispatcher clear 推代次后，勿扰待机投递仍可达（R9 可达性）。"""
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        rec.generation = 7  # 模拟隐私恢复/麦克风重连引发的 dispatcher clear
+        await sm.on_asr_text("退出勿扰模式", generation=7)
+        assert sm.dnd is False, "clear 后勿扰退出必须仍可达"
+        assert rec.spoken[-1] == pb.DND_EXIT_ACK
+
+    async def test_dnd_survives_privacy_toggle(self):
+        """勿扰标志不受隐私开关影响（隐私门在上游切音频）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        sm.apply_privacy(True)
+        assert sm.dnd is True
+        sm.apply_privacy(False)
+        assert sm.dnd is True
+
+    async def test_enter_phrase_in_dnd_idempotent(self):
+        """勿扰中重复进入短语 = 幂等 no-op（忽略不出声）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("进入勿扰模式")
+        assert sm.dnd is True
+        assert sm.state is State.STANDBY
+        assert rec.spoken == spoken_before

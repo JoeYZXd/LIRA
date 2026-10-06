@@ -39,6 +39,7 @@ from lira.dialog.intents import (
     is_exit_or_stop,
     is_shutdown_phrase,
     is_book_fragment,
+    match_dnd_phrase,
     match_local,
     is_playback_command,
 )
@@ -178,6 +179,9 @@ class DialogEngine:
         self._wake_allowed = wake_allowed
         self.now: float = 0.0
         self.state: State = State.STANDBY
+        #: 勿扰模式（R8-R14，2026-10-06 计划 U5）：识别常开、语音反馈静默
+        #: （豁免集除外）。不持久化——引擎生命周期内标志，重启即正常模式。
+        self.dnd = False
         self.transitions: list[str] = []
         self._deadline: float | None = None
         self._idle_deadline: float | None = None
@@ -351,8 +355,16 @@ class DialogEngine:
         U4 真关机分支仅在前缀投递时提交（origin R4）；其余分支忽略该标记。
         """
         t = text.strip()
-        if not t or not self._input_current(generation):
+        if not t:
             return
+        if not self._input_current(generation):
+            if self.dnd and self.state is State.STANDBY:
+                # 聆听再武装点（R9 可达性）：隐私恢复/麦克风重连等 clear 路径会推
+                # dispatcher 代次，勿扰待机不迁移态——按当前代次重对齐后再验，
+                # 否则退出短语/逃生舱在 clear 后全聋且无反馈
+                self._rearm_listening()
+            if not self._input_current(generation):
+                return
         self._delivery_wake_prefixed = wake_prefixed
         # R1/R6 态前统一退出分支：取消词 + 结束聊天 + 统一退出∪喊停词集
         # （含「关机」——R5 语义为结束会话，永不触发真关机）。任何非待机态命中
@@ -369,6 +381,23 @@ class DialogEngine:
                 else:
                     self._cb.playback_stop()
             self._enter_standby()
+            return
+        # R8/R11/R12 勿扰短语（任何会话态可达；勿扰待机 STANDBY 同样经此处理）。
+        # 进入零提示音；询问勿扰内外皆答（勿扰中走豁免通道）；退出裸说生效。
+        verdict = match_dnd_phrase(t)
+        if verdict == "enter":
+            self._enter_dnd()
+            return
+        if verdict == "query":
+            if self.dnd:
+                self._speak_dnd(pb.DND_STATUS_ON)
+            else:
+                self._speak_answer(pb.DND_STATUS_OFF, owner=self._owner, user_text=t)
+            return
+        if verdict == "exit" and self.dnd:
+            self.dnd = False
+            self._enter_standby()  # 回正常待机（路由回 WAKE）
+            self._speak(pb.DND_EXIT_ACK)
             return
         self._speech_active = self._awaiting_endpoint = False
         # R4：真关机仅唤醒前缀投递提交（裸说「立即去休息」按普通指令处理，
@@ -426,10 +455,21 @@ class DialogEngine:
         logging.debug("态 %s 忽略 ASR 文本", self.state.value)
 
     async def _on_asr_standby(self, text: str) -> None:
+        if self.dnd:
+            # R8：勿扰待机识别常开——文本直达勿扰处理（豁免口/计数忽略）
+            await self._on_asr_dnd(text)
+            return
         # 会话已关闭；待机态不响应未带唤醒词的语音。
         logging.debug("STANDBY 忽略 ASR 文本（需先唤醒）")
 
+    async def _on_asr_dnd(self, text: str) -> None:
+        """勿扰待机的普通文本（退出/询问/进入/前缀关机已在态前分支处理）：
+        一律忽略不出声。U6 逃生舱：同义指令计数接入点。"""
+
     async def _on_asr_listening(self, text: str) -> None:
+        if self.dnd:
+            # 勿扰聆听窗内的普通指令：忽略不出声（豁免短语已在态前分支处理）
+            return
         if is_cancel(text):
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()
@@ -576,14 +616,36 @@ class DialogEngine:
 
     # ---------- 意图执行 ----------
 
+    def _enter_dnd(self) -> None:
+        """R8/R13：进入勿扰。当前会话立即静音结束（清理走 _enter_standby 同构链，
+        含 _abort_capture 的 F1 纪律——迟到拍摄完成不得在勿扰中出声）；零提示音
+        （R8 有意设计，R12 询问提供验证出口）。"""
+        self.dnd = True
+        self._enter_standby()
+
+    def _rearm_listening(self) -> None:
+        """勿扰待机聆听再武装：对齐 dispatcher 当前代次（不迁移态、不开窗）。"""
+        getter = getattr(self._cb, "input_generation", None)
+        if getter is not None:
+            self._listening_generation = getter()
+        else:
+            self._listening_generation += 1
+
+    def _speak_dnd(self, text: str) -> None:
+        """勿扰豁免播报：exempt 标记过装配层勿扰门；完成后不迁移态
+        （勿扰待机即终点，R9 完成路由裁定——绝不进 FOLLOWUP）。"""
+        _invoke(self._cb.speak, text, owner=self._owner, exempt=True)
+
     def _shutdown(self) -> None:
         """R4：告别语播完执行系统关机，无二次确认。
 
         关机意图即提交：告别语可被喊停截断、completion 可超时/取消，poweroff
         仍照常触发——调度脱离 owner 代次（挂 _track_completion 会被
         _invalidate_operation 取消，与「截断不影响关机」相悖）。按新会话处理：
-        挂起高危确认/在途效果一律不执行（_new_operation 清理链）。
+        挂起高危确认/在途效果一律不执行（_new_operation 清理链）。勿扰中直接
+        生效（清 dnd，告别语经豁免标记出声）。
         """
+        self.dnd = False
         self._new_operation()
         self._transition(State.EXECUTING)
         completion = self._speak(pb.SHUTDOWN_FAREWELL)
@@ -686,7 +748,13 @@ class DialogEngine:
         self.state = new
         if not initial:
             self.transitions.append(f"{old.value}->{new.value}")
-        self._cb.set_audio_route(_ROUTE_BY_STATE[new])
+        route = _ROUTE_BY_STATE[new]
+        if new is State.STANDBY and self.dnd:
+            # R8：勿扰待机识别常开（LISTEN 路由）。回声安全论证：三闸门防的是
+            # 设备自音频，勿扰静默期无自音频；豁免播报走常规 speak（置 occupied）
+            # 后由既有 settle 窗覆盖尾音。
+            route = AudioRoute.LISTEN
+        self._cb.set_audio_route(route)
         _voice_log_state(new, initial=initial)
 
     def _enter_standby(self) -> None:

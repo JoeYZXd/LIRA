@@ -822,3 +822,53 @@ class TestPoweroffWiring:
         rt.callbacks.poweroff()
         await settle(rt)
         assert rt.engine.state.value == "standby"
+
+
+# ---------- 勿扰装配层门（2026-10-06 计划 U5） ----------
+
+
+class TestDndAssemblyGate:
+    async def test_wake_in_dnd_suppresses_chime_and_ack(self, tmp_path):
+        """R8：勿扰中裸唤醒词无提示音、无应答（播报/铃音门在装配层）。"""
+        rig = make_rig(tmp_path, clock=lambda: 1000.0)
+        rt = rig.runtime
+        rt.engine.dnd = True
+        rt.wake_stream.hits.append("小丽拉")
+        rt._gate.feed(np.full(1600, .1, dtype=np.float32))
+        await settle(rt)
+        assert rt.engine.state.value == "listening"
+        assert rt.tts.chimes == 0
+        assert rt.tts.spoken == []
+
+    async def test_exit_phrase_after_wake_in_dnd_restores(self, tmp_path):
+        """勿扰聆听窗内退出短语 → 退勿扰 + 确认话术出声（豁免口）。"""
+        rig = make_rig(tmp_path, clock=lambda: 1000.0)
+        rt = rig.runtime
+        rt.engine.dnd = True
+        rt.wake_stream.hits.append("小丽拉")
+        rt._gate.feed(np.full(1600, .1, dtype=np.float32))
+        await settle(rt)
+        rt.asr_stream.text = lambda: "退出勿扰模式"
+        rt.asr_stream.is_endpoint = lambda: True
+        rt._gate.feed(np.zeros(12000, dtype=np.float32))
+        await settle(rt)
+        assert rt.engine.dnd is False
+        assert any("勿扰" in s for s, _, _ in rt.tts.spoken)
+
+    async def test_passive_announcer_gated_in_dnd(self, tmp_path):
+        """裁定 7：勿扰中被动播报源（sync 快照禁用公告）一律静音。"""
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        rt.engine.dnd = True
+        announcer = make_snapshot_announcer(rt.store, rt.callbacks.speak)
+        announcer(None, {"台灯": True})
+        await settle(rt)
+        assert rt.tts.spoken == [], "被动播报在勿扰中必须静音"
+
+    async def test_status_reports_dnd(self, tmp_path):
+        """勿扰标志对 dev 控制台/status 可见（最小接线；不含 Web 管理界面）。"""
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        assert rt.status()["dnd"] is False
+        rt.engine.dnd = True
+        assert rt.status()["dnd"] is True

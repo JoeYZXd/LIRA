@@ -658,3 +658,92 @@ class TestVoiceContinuity:
         sm.tick(T0 + 8)
         assert sm.state is State.STANDBY
         assert rec.ir == []
+
+
+# ---------- Covers AE1. 统一退出∪喊停（R1/R3/R5/R7；2026-10-06 计划 U3） ----------
+
+
+class TestUnifiedExitStop:
+    async def test_listening_exit_word_ends_session_amid_guidance(self):
+        """Covers AE1. 识别失败引导循环中说「别吵我」→ 立即回待机，不再继续引导。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("今天天气怎么样")  # 无本地匹配 → R24 引导一次，仍 LISTENING
+        assert sm.state is State.LISTENING
+        await sm.on_asr_text("别吵我")
+        assert sm.state is State.STANDBY
+
+    async def test_speaking_exit_word_stops_playback(self):
+        """播报中（SPEAKING）ASR 文本路径的退出分支完整性。"""
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        await sm.on_asr_text("你能做什么")  # HELP → _speak_answer，completion 挂起 → SPEAKING
+        assert sm.state is State.SPEAKING
+        await sm.on_asr_text("闭嘴")
+        assert sm.state is State.STANDBY
+
+    async def test_confirming_exit_word_fails_closed_without_ir(self):
+        """CONFIRMING 中说「行了」→ 与「取消」同路径：回待机、挂起高危动作不执行。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.CONFIRMING)
+        await sm.on_asr_text("行了")
+        assert rec.ir == []
+        assert sm.state is State.STANDBY
+
+    async def test_reading_stop_word_stops_not_pauses(self):
+        """Covers AE2（文本路径）。READING 中「别念了」→ playback_stop（非暂停）+ 待机。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.READING)
+        await sm.on_asr_text("别念了")
+        assert sm.state is State.STANDBY
+        assert rec.playback[-1] == "stop"
+
+    async def test_reading_jieshu_liaotian_keeps_pause_semantics(self):
+        """「结束聊天」既有暂停语义保留（与退出词的停止语义并存）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.READING)
+        await sm.on_asr_text("结束聊天")
+        assert sm.state is State.STANDBY
+        assert rec.playback[-1] == "pause"
+
+    async def test_capturing_exit_word_returns_standby(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.CAPTURING)
+        captures_before = rec.captures
+        await sm.on_asr_text("够了")
+        assert sm.state is State.STANDBY
+        assert rec.captures == captures_before
+
+    async def test_followup_exit_word_ends_session(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")  # speak 返回 None → 同步完成 → FOLLOWUP
+        assert sm.state is State.FOLLOWUP
+        await sm.on_asr_text("够了")
+        assert sm.state is State.STANDBY
+
+    async def test_standby_ignores_exit_words(self):
+        """R3：待机不监听退出说法。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_asr_text("退出")
+        assert sm.state is State.STANDBY
+        assert rec.spoken == []
+
+    async def test_guanji_ends_session_without_guidance(self):
+        """R5 会话语境承接：LISTENING 说「关机」→ 结束会话，不掉识别失败引导。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("关机")
+        assert sm.state is State.STANDBY
+        assert rec.spoken == [pb.WAKE_ACK]

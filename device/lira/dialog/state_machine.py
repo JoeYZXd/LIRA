@@ -36,6 +36,7 @@ from lira.dialog.intents import (
     classify_confirmation,
     find_alias_hits,
     is_cancel,
+    is_exit_or_stop,
     is_book_fragment,
     match_local,
     is_playback_command,
@@ -341,7 +342,15 @@ class DialogEngine:
         t = text.strip()
         if not t or not self._input_current(generation):
             return
-        if self.state is not State.STANDBY and (is_cancel(t) or t == "结束聊天"):
+        # R1/R6 态前统一退出分支：取消词 + 结束聊天 + 统一退出∪喊停词集
+        # （含「关机」——R5 语义为结束会话，永不触发真关机）。任何非待机态命中
+        # 即停播/停动作回待机，不等超时；待机不监听（R3）。CONFIRMING 中命中
+        # 与「取消」同路径：静默回待机、挂起动作必然不执行（fail-closed 出口
+        # 统一，不另设话术分支）。READING 中退出/喊停词 → 停止（非暂停），
+        # 「结束聊天」保留既有暂停语义。
+        if self.state is not State.STANDBY and (
+            is_cancel(t) or t == "结束聊天" or is_exit_or_stop(t)
+        ):
             if self.state is State.READING:
                 if t == "结束聊天":
                     self._cb.playback_pause()

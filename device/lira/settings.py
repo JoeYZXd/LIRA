@@ -8,23 +8,29 @@ DeviceSettings 被 DeviceCallbacks.speak（TTS 日志/播放）、SyncClient
 
 from __future__ import annotations
 
+import logging
 import threading
 
 
 class DeviceSettings:
-    """音量 / TTS 语速的运行时可变设置（线程安全；持久化留待后续单元）。
+    """音量 / TTS 语速的运行时可变设置（线程安全）。
 
     边界拒绝：越界值抛 ValueError（UI 层转为 400），不静默夹紧——
     家属在屏上设错时应当被明确告知，而不是悄悄改成功。
+    持久化（2026-10-06 计划 U8）：经 on_change 钩子统一落盘——语音词、朗读
+    白名单词、Web 表单三个调用点都走 set_*，三写点自动全部持久化。
     """
 
     VOLUME_RANGE = (0.1, 2.0)
     SPEED_RANGE = (0.5, 2.0)
 
-    def __init__(self, volume: float = 1.0, tts_speed: float = 1.0) -> None:
+    def __init__(self, volume: float = 1.0, tts_speed: float = 1.0,
+                 on_change=None) -> None:
         self._lock = threading.Lock()
         self._volume = volume
         self._tts_speed = tts_speed
+        #: 持久化钩子，签名 (key: str, value: float)；异常吞掉只记日志
+        self._on_change = on_change
 
     @property
     def volume(self) -> float:
@@ -44,7 +50,17 @@ class DeviceSettings:
     def set_volume(self, value: float) -> None:
         with self._lock:
             self._volume = self._check(value, self.VOLUME_RANGE, "音量")
+        self._notify("volume", self._volume)
 
     def set_tts_speed(self, value: float) -> None:
         with self._lock:
             self._tts_speed = self._check(value, self.SPEED_RANGE, "语速")
+        self._notify("tts_speed", self._tts_speed)
+
+    def _notify(self, key: str, value: float) -> None:
+        if self._on_change is None:
+            return
+        try:
+            self._on_change(key, value)
+        except Exception:  # noqa: BLE001 - 持久化失败不拖垮设置变更
+            logging.exception("settings 持久化失败 key=%s", key)

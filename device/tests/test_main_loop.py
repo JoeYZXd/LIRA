@@ -220,11 +220,11 @@ class Rig:
 
 
 def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int = 0,
-             clock=None, ir=None):
+             clock=None, ir=None, settings=None):
     """整机替身装配（mock HAL + 假语音栈 + 假 LLM/OCR）。
 
     ir 可注入真实 HAL 资源（如会 open 失败的 BroadlinkIrController，F1 回归用），
-    默认 MockIrController。
+    默认 MockIrController。settings 可注入带持久化钩子的 DeviceSettings（U8）。
     """
     from lira.appliances.models import ApplianceModel
     from lira.appliances.store import ApplianceStore
@@ -244,7 +244,7 @@ def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int
     ir = MockIrController() if ir is None else ir
     source = SilenceSource()
     hal = {"camera": FakeCamera(), "audio": source, "ir": ir, "display": MockDisplay()}
-    settings = DeviceSettings()
+    settings = settings or DeviceSettings()
     kwargs = {}
     if transport_factory is not None:
         kwargs["sync_transport_factory"] = transport_factory
@@ -872,3 +872,55 @@ class TestDndAssemblyGate:
         assert rt.status()["dnd"] is False
         rt.engine.dnd = True
         assert rt.status()["dnd"] is True
+
+
+# ---------- 全局音量持久化（2026-10-06 计划 U8） ----------
+
+
+class TestGlobalVolume:
+    async def test_voice_volume_adjusts_and_persists_via_hook(self, tmp_path):
+        """语音调音量 → settings 变更 + 钩子落盘（三写点统一经 set_*）。"""
+        from lira.settings import DeviceSettings
+
+        persisted = []
+        settings = DeviceSettings(on_change=lambda k, v: persisted.append((k, v)))
+        rig = make_rig(tmp_path, settings=settings)
+        rt = rig.runtime
+        rt.callbacks.adjust_volume(0.2)
+        assert rt.settings.volume == 1.2
+        assert persisted == [("volume", 1.2)]
+
+    async def test_adjust_volume_clamps_at_ceiling(self, tmp_path):
+        from lira.settings import DeviceSettings
+
+        persisted = []
+        settings = DeviceSettings(volume=2.0, on_change=lambda k, v: persisted.append((k, v)))
+        rig = make_rig(tmp_path, settings=settings)
+        rt = rig.runtime
+        rt.callbacks.adjust_volume(0.2)
+        assert rt.settings.volume == 2.0, "顶格夹取不越界"
+        assert persisted == [], "夹取后值未变不触发落盘"
+
+    async def test_whitelist_volume_word_writes_global(self, tmp_path):
+        """R16 语义并轨：朗读白名单「大声点」同步写全局持久值。"""
+        from lira.settings import DeviceSettings
+
+        persisted = []
+        settings = DeviceSettings(on_change=lambda k, v: persisted.append((k, v)))
+        rig = make_rig(tmp_path, settings=settings)
+        rt = rig.runtime
+        rt.callbacks.playback_volume_up()
+        assert rt.settings.volume == 1.2, "白名单词改写全局值"
+        assert persisted == [("volume", 1.2)]
+
+    def test_settings_builder_roundtrip(self, tmp_path):
+        """生产装配助手：写 → 重建 → 恢复。"""
+        from lira.appliances.store import ApplianceStore
+        from lira.main import build_settings_with_persistence
+
+        store = ApplianceStore(tmp_path / "s.db")
+        s1 = build_settings_with_persistence(store)
+        s1.set_volume(0.8)
+        s2 = build_settings_with_persistence(store)
+        assert s2.volume == 0.8, "重启恢复持久音量"
+        store.close()

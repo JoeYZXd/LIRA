@@ -50,6 +50,7 @@ __all__ = [
     "DND_ESCAPE_PROMPT",
     "DND_EXEC_PROMPT",
     "dnd_escape_prompt_text",
+    "VOLUME_ACK",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -154,6 +155,9 @@ DND_STATUS_OFF = "没有，我正常听着呢，随时可以吩咐。"
 DND_ESCAPE_PROMPT = "您连着说了几遍「{desc}」。我在勿扰模式，先不应答。要退出勿扰吗？确认请说：确认。"
 #: 退出后的执行问句（低危；高危走具名确认话术 confirm_prompt_text）
 DND_EXEC_PROMPT = "要现在为您{desc}吗？确认请说：确认。"
+
+#: R16 全局音量调整确认（以调整后的音量播出，自然演示效果）
+VOLUME_ACK = "好的。"
 
 
 def dnd_escape_prompt_text(desc: str) -> str:

@@ -59,6 +59,7 @@ class Recorder:
         self.playback: list[str] = []
         self.listening_starts = 0
         self.poweroffs = 0
+        self.volume_deltas: list[float] = []
 
     # DialogCallbacks 协议
     def speak(self, text: str) -> None:
@@ -96,6 +97,9 @@ class Recorder:
 
     def poweroff(self) -> None:
         self.poweroffs += 1
+
+    def adjust_volume(self, delta: float) -> None:
+        self.volume_deltas.append(delta)
 
 
 def build_engine(rec: Recorder, **router_kwargs) -> DialogEngine:
@@ -1193,3 +1197,35 @@ class TestRepeatLastAnswer:
         sm._history.clear()
         await sm.on_asr_text("再说一遍")
         assert any("没听清" in s or "试试" in s for s in rec.spoken), "无历史走引导"
+
+
+# ---------- 全局音量语音控制（R16；2026-10-06 计划 U8） ----------
+
+
+class TestVoiceVolume:
+    async def test_volume_up_in_listening_adjusts_and_acks(self):
+        """Covers AE11（非 SPEAKING 态）。「声音大点」→ +0.2 调整 + 确认话术。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("声音大点")
+        assert rec.volume_deltas == [0.2]
+        assert rec.spoken[-1] == pb.VOLUME_ACK
+        assert sm.state is State.FOLLOWUP, "确认走回答链，重开追问窗"
+
+    async def test_volume_down_and_clamp_is_assembly_concern(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("声音小一点")
+        assert rec.volume_deltas == [-0.2]
+
+    async def test_volume_word_in_dnd_ignored(self):
+        """勿扰中音量词=不可归一话语：不出声不调整。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("声音大点")
+        assert rec.volume_deltas == []
+        assert rec.spoken == spoken_before

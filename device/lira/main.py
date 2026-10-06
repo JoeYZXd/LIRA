@@ -54,6 +54,7 @@ from lira.hal.mock import (
     MockDisplay,
     MockIrController,
 )
+from lira.settings import DeviceSettings
 from lira.privacy import (
     PassphraseVault,
     PrivacyGatedSink,
@@ -269,6 +270,25 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
     except FileNotFoundError as exc:
         logging.warning("语音栈模型未就绪: %s", exc)
         return None
+
+
+def build_settings_with_persistence(store) -> "DeviceSettings":
+    """R16（2026-10-06 计划 U8）：带持久化钩子的运行时设置。
+
+    启动时从 store meta 恢复音量；语音词/白名单词/Web 三个调用点统一经
+    set_* 落钩子写回（单一全局音量，三写点自动一致）。
+    """
+    from lira.settings import DeviceSettings
+
+    try:
+        volume = float(store.get_meta("volume"))
+    except (TypeError, ValueError):
+        volume = 1.0
+
+    def persist(key: str, value: float) -> None:
+        store.set_meta(key, str(float(value)))
+
+    return DeviceSettings(volume=volume, on_change=persist)
 
 
 def build_ocr(cfg: AppConfig):
@@ -491,10 +511,21 @@ class DeviceCallbacks:
         self._rt.pipeline.playback_read_again()
 
     def playback_volume_up(self) -> None:
+        # R16 语义并轨：朗读白名单调音量同步写全局持久值（单一全局音量）
+        self.adjust_volume(0.2)
         self._rt.pipeline.playback_volume_up()
 
     def playback_volume_down(self) -> None:
+        self.adjust_volume(-0.2)
         self._rt.pipeline.playback_volume_down()
+
+    def adjust_volume(self, delta: float) -> None:
+        """R16：语音全局音量调整。夹取到合法区间（语音路径静默夹取，区别于
+        Web 的边界拒绝）；持久化经 DeviceSettings 钩子统一落盘。"""
+        low, high = DeviceSettings.VOLUME_RANGE
+        new_value = min(high, max(low, self._rt.settings.volume + delta))
+        if new_value != self._rt.settings.volume:
+            self._rt.settings.set_volume(new_value)
 
 
 # ---------- 整机运行时 ----------
@@ -1114,7 +1145,7 @@ def main(argv: list[str] | None = None) -> int:
     except AttributeError:
         pass  # 非 ISP 相机（mock）无方向属性
     try:
-        settings = DeviceSettings()
+        settings = build_settings_with_persistence(store)
         runtime = DeviceRuntime(
             cfg=cfg, hal=hal, store=store, settings=settings,
             audio=audio, ocr=ocr, privacy=privacy,

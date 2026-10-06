@@ -41,6 +41,7 @@ from lira.dialog.intents import (
     is_book_fragment,
     is_repeat_word,
     match_dnd_phrase,
+    match_volume_word,
     match_local,
     is_playback_command,
 )
@@ -129,6 +130,9 @@ class DialogCallbacks(Protocol):
     def poweroff(self) -> None:
         """R4：系统级关机（告别语播完后调用；实现须自行容错，见 main.py）。"""
 
+    def adjust_volume(self, delta: float) -> None:
+        """R16：全局音量调整（装配层夹取 + 持久化）。"""
+
 
 @dataclass
 class _PendingConfirm:
@@ -162,6 +166,8 @@ class DialogEngine:
     MAX_GUIDANCE_RETRIES = 2
     #: R10 勿扰三次逃生舱：同义指令连续 3 次（换说法同义归一）主动开口询问
     DND_ESCAPE_THRESHOLD = 3
+    #: R16 全局音量语音调整步长（与朗读白名单既有步长一致）
+    VOLUME_STEP = 0.2
     #: R26 拍摄失败引导重拍最多 2 次，仍失败告知请家人帮忙（U4 消费）
     MAX_CAPTURE_RETRIES = 2
 
@@ -586,6 +592,14 @@ class DialogEngine:
                 self._speak_answer(last, owner=self._owner,
                                    user_text=self._request_text, record=False)
                 return
+        # R16：全局音量语音词（活跃会话态）。SPEAKING 播报中明确不支持——
+        # ASR 被三闸门关闭且命令 KWS 词集不含音量词，收窄是结构性的（R16 显式
+        # 收窄登记）；确认话术以调整后的音量播出（自然演示效果）。
+        direction = match_volume_word(text)
+        if direction is not None:
+            self._cb.adjust_volume(self.VOLUME_STEP if direction == "up" else -self.VOLUME_STEP)
+            self._speak_answer(pb.VOLUME_ACK, owner=self._owner, user_text=text)
+            return
         if is_cancel(text):
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()

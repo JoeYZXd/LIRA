@@ -1229,3 +1229,57 @@ class TestVoiceVolume:
         await sm.on_asr_text("声音大点")
         assert rec.volume_deltas == []
         assert rec.spoken == spoken_before
+
+
+# ---------- 语音状态自查（R17；2026-10-06 计划 U9） ----------
+
+
+class StatusRecorder(Recorder):
+    def __init__(self, facts=None):
+        super().__init__()
+        self._facts = facts or {}
+
+    def status_facts(self):
+        return self._facts
+
+
+class TestStatusQuery:
+    async def test_query_reports_network_ok(self):
+        """「你连上网了吗」→ 播报网络状态（facts mock 断言映射）。"""
+        rec = StatusRecorder({"network": True, "cloud": True, "mic_on": True})
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你连上网了吗")
+        assert "网络正常" in rec.spoken[-1]
+        assert "云端服务也连着" in rec.spoken[-1]
+        assert sm.state is State.FOLLOWUP
+
+    async def test_query_reports_mic_off(self):
+        """facts 注入麦克风关闭 → 话术含对应表述（facts 映射单测——隐私开启时
+        语音路径按设计不可达：隐私门上游丢弃输入，不写语音可达断言）。"""
+        rec = StatusRecorder({"network": False, "cloud": None, "mic_on": False})
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("网络怎么样")
+        assert "连不上网" in rec.spoken[-1]
+        assert "麦克风已经关闭" in rec.spoken[-1]
+        assert "云端" not in rec.spoken[-1], "未知事实降级省略，不误报"
+
+    async def test_query_in_dnd_exempt_and_stays(self):
+        """裁定 9：勿扰中询问 → 豁免应答、仍留勿扰待机。"""
+        rec = StatusRecorder({"network": True, "cloud": None, "mic_on": True})
+        sm = build_engine(rec)
+        await enter_dnd(sm, rec)
+        await sm.on_asr_text("你连上网了吗")
+        assert "网络正常" in rec.spoken[-1]
+        assert sm.dnd is True
+        assert sm.state is State.STANDBY
+
+    async def test_facts_getter_missing_degrades(self):
+        """可选回调缺失（旧 Recorder）→ 空 facts 降级表述，播报不阻塞。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你连上网了吗")
+        assert "说不准" in rec.spoken[-1]
+        assert sm.state is State.FOLLOWUP

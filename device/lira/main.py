@@ -498,6 +498,21 @@ class DeviceCallbacks:
             return ReadingTaskFacts(ReadingTaskStatus.CAPTURING, resumable=False)
         return None
 
+    def status_facts(self) -> dict:
+        """R17：状态自查事实（老人能懂的话由 phrasebook 组装，这里只供事实）。
+
+        network 复用既有缓存探针（10s 周期，播报不阻塞）；cloud 由 LLM 熔断器
+        推导（CLOSED=可用/OPEN=不可用/其它=未知）；mic_on 取隐私门状态。
+        """
+        breaker = getattr(self._rt._llm, "breaker", None)
+        breaker_name = str(getattr(getattr(breaker, "state", None), "name", "") or "")
+        cloud = True if breaker_name == "CLOSED" else False if "OPEN" in breaker_name else None
+        return {
+            "network": bool(self._rt._network_ok()),
+            "cloud": cloud,
+            "mic_on": not self._rt.privacy.is_on,
+        }
+
     def playback_pause(self) -> None:
         self._rt.pipeline.playback_pause()
 

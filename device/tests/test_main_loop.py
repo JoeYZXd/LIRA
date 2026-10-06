@@ -924,3 +924,14 @@ class TestGlobalVolume:
         s2 = build_settings_with_persistence(store)
         assert s2.volume == 0.8, "重启恢复持久音量"
         store.close()
+
+
+class TestStatusFactsWiring:
+    async def test_status_facts_production_mapping(self, tmp_path):
+        """R17：生产 status_facts 映射（网络探针/隐私门/熔断器）。"""
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        facts = rt.callbacks.status_facts()
+        assert isinstance(facts["network"], bool)
+        assert facts["mic_on"] is True, "隐私关 → 麦克风开"
+        assert facts["cloud"] in (True, False, None)

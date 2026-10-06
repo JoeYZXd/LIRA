@@ -40,6 +40,7 @@ from lira.dialog.intents import (
     is_shutdown_phrase,
     is_book_fragment,
     is_repeat_word,
+    is_status_query,
     match_dnd_phrase,
     match_volume_word,
     match_local,
@@ -419,6 +420,15 @@ class DialogEngine:
             self._enter_standby()  # 回正常待机（路由回 WAKE）
             self._speak(pb.DND_EXIT_ACK)
             return
+        # R17：状态自查——勿扰内外皆可问（裁定 9：A2 电话排障依赖路径）。
+        # 勿扰中经豁免通道应答（完成不迁移态）；正常模式走回答链回 FOLLOWUP。
+        if is_status_query(t):
+            facts = self._get_status_facts()
+            if self.dnd:
+                self._speak_dnd(pb.status_report_text(facts))
+            else:
+                self._speak_answer(pb.status_report_text(facts), owner=self._owner, user_text=t)
+            return
         self._speech_active = self._awaiting_endpoint = False
         # R4：真关机仅唤醒前缀投递提交（裸说「立即去休息」按普通指令处理，
         # 落识别失败引导）；前缀标记由 on_asr_text 随投递存于 _delivery_wake_prefixed
@@ -766,6 +776,12 @@ class DialogEngine:
         """勿扰豁免播报：exempt 标记过装配层勿扰门；完成后不迁移态
         （勿扰待机即终点，R9 完成路由裁定——绝不进 FOLLOWUP）。"""
         _invoke(self._cb.speak, text, owner=self._owner, exempt=True)
+
+    def _get_status_facts(self) -> dict:
+        """R17 状态事实经可选回调注入（reading_task_facts 同款模式）；
+        回调缺失时返回空 facts（播报降级表述，不阻塞）。"""
+        getter = getattr(self._cb, "status_facts", None)
+        return getter() if getter is not None else {}
 
     def _shutdown(self) -> None:
         """R4：告别语播完执行系统关机，无二次确认。

@@ -51,6 +51,7 @@ __all__ = [
     "DND_EXEC_PROMPT",
     "dnd_escape_prompt_text",
     "VOLUME_ACK",
+    "status_report_text",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -158,6 +159,37 @@ DND_EXEC_PROMPT = "要现在为您{desc}吗？确认请说：确认。"
 
 #: R16 全局音量调整确认（以调整后的音量播出，自然演示效果）
 VOLUME_ACK = "好的。"
+
+# ---------- 状态自查（R17，2026-10-06 计划 U9） ----------
+#
+# 措辞纪律：老人能懂的话，不报技术细节（IP/术语）；事实缺失降级表述不阻塞播报。
+
+STATUS_NETWORK_OK = "网络正常，能连上网。"
+STATUS_NETWORK_BAD = "现在连不上网。"
+STATUS_NETWORK_UNKNOWN = "网络情况我一下子说不准。"
+STATUS_CLOUD_OK = "云端服务也连着。"
+STATUS_CLOUD_BAD = "云端服务暂时连不上，读书认字不受影响。"
+STATUS_MIC_OFF = "麦克风已经关闭，听不见您说话。"
+
+
+def status_report_text(facts: dict) -> str:
+    """状态自查播报文案。facts 键：network/cloud/mic_on（True/False/None）。"""
+    parts = []
+    network = facts.get("network")
+    if network is True:
+        parts.append(STATUS_NETWORK_OK)
+    elif network is False:
+        parts.append(STATUS_NETWORK_BAD)
+    else:
+        parts.append(STATUS_NETWORK_UNKNOWN)
+    cloud = facts.get("cloud")
+    if cloud is True:
+        parts.append(STATUS_CLOUD_OK)
+    elif cloud is False:
+        parts.append(STATUS_CLOUD_BAD)
+    if facts.get("mic_on") is False:
+        parts.append(STATUS_MIC_OFF)
+    return "".join(parts)
 
 
 def dnd_escape_prompt_text(desc: str) -> str:

@@ -43,18 +43,19 @@ requires_asr = pytest.mark.skipif(not _asr_ready, reason=f"ASR 模型未就绪�
 
 @pytest.fixture(scope="module")
 def voices():
-    """(唤醒 KWS, 流式 ASR, 白名单 KWS)；模型缺失时为 None（文本注入仍可用）。"""
+    """(唤醒 KWS, 流式 ASR, 白名单 KWS, 命令 KWS)；模型缺失时为 None（文本注入仍可用）。"""
     if not (_kws_ready and _asr_ready):
         yield None
         return
     from lira.audio.asr import StreamingAsr
     from lira.audio.kws import WakeWordKws
-    from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
+    from lira.dialog.intents import COMMANDS_KEYWORDS_FILE, PLAYBACK_WHITELIST_KEYWORDS_FILE
 
     yield (
         WakeWordKws(),
         StreamingAsr(),
         WakeWordKws(keywords_file=PLAYBACK_WHITELIST_KEYWORDS_FILE),
+        WakeWordKws(keywords_file=COMMANDS_KEYWORDS_FILE),
     )
 
 

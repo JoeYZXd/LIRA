@@ -255,7 +255,8 @@ def make_rig(tmp_path, *, ws_url: str = "", transport_factory=None, ui_port: int
         hal=hal,
         store=store,
         settings=settings,
-        audio=AudioStack(wake_kws=FakeKws(), asr=FakeAsr(), playback_kws=FakeKws(), tts=tts),
+        audio=AudioStack(wake_kws=FakeKws(), asr=FakeAsr(), playback_kws=FakeKws(),
+                         command_kws=FakeKws(), tts=tts),
         ocr=FakeOcr(),
         llm=FakeLlm(),
         **kwargs,
@@ -759,3 +760,31 @@ class TestReviewFixes:
         finally:
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)
+
+
+# ---------- 常驻命令 KWS 通道整机接线（2026-10-06 计划 U2） ----------
+
+
+class TestCommandChannel:
+    async def test_command_hit_in_listening_ends_session(self, tmp_path):
+        """LISTENING 中命令命中喊停词 → 会话立即回待机（生产接线全链）。"""
+        rig = make_rig(tmp_path, clock=lambda: 1000.0)
+        rt = rig.runtime
+        rt.wake_stream.hits.append("小丽拉")
+        rt._gate.feed(np.full(1600, .1, dtype=np.float32))
+        await settle(rt)
+        assert rt.engine.state.value == "listening"
+        rt.command_stream.hits.append("别念了")
+        rt._gate.feed(np.zeros(1600, dtype=np.float32))
+        await settle(rt)
+        assert rt.engine.state.value == "standby"
+
+    async def test_command_hit_in_standby_is_dropped(self, tmp_path):
+        """STANDBY 命中丢弃：状态不变、无投递副作用。"""
+        rig = make_rig(tmp_path, clock=lambda: 1000.0)
+        rt = rig.runtime
+        rt.command_stream.hits.append("别念了")
+        rt._gate.feed(np.zeros(1600, dtype=np.float32))
+        await settle(rt)
+        assert rt.engine.state.value == "standby"
+        assert rt.tts.spoken == []

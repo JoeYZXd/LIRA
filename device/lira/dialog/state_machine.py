@@ -337,8 +337,13 @@ class DialogEngine:
     def close(self) -> None:
         self._enter_standby()
 
-    async def on_asr_text(self, text: str, *, generation: int | None = None) -> None:
-        """ASR 一句话文本（编排器在 endpoint 命中后调用）。按状态分发。"""
+    async def on_asr_text(self, text: str, *, generation: int | None = None,
+                          wake_prefixed: bool = False) -> None:
+        """ASR 一句话文本（编排器在 endpoint 命中后调用）。按状态分发。
+
+        wake_prefixed：投递前是否命中过唤醒词（route_dispatch 前缀标记）。
+        U4 真关机分支仅在前缀投递时提交（origin R4）；其余分支忽略该标记。
+        """
         t = text.strip()
         if not t or not self._input_current(generation):
             return

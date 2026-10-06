@@ -312,7 +312,7 @@ class DeviceHarness:
     """全 mock 整机：音频注入 → 隐私门 → 路由 → 状态机 → IR/阅读/同步。
 
     Args:
-        voices: (WakeWordKws, StreamingAsr, WakeWordKws[白名单]) 或 None。
+        voices: (WakeWordKws, StreamingAsr, WakeWordKws[白名单], WakeWordKws[命令]) 或 None。
             None = 无模型环境（文本注入 say_text 仍可驱动状态机）。
         ocr_text: FakeOcrEngine 固定识别文本（每次拍摄覆盖）。
     """
@@ -350,11 +350,13 @@ class DeviceHarness:
         self.wake_stream: KwsStream | None = None
         self.asr_stream: AsrStream | None = None
         self.playback_stream: KwsStream | None = None
+        self.command_stream: KwsStream | None = None
         if voices is not None:
-            wake_kws, asr_engine, playback_kws = voices
+            wake_kws, asr_engine, playback_kws, command_kws = voices
             self.wake_stream = wake_kws.create_stream()
             self.asr_stream = asr_engine.create_stream()
             self.playback_stream = playback_kws.create_stream()
+            self.command_stream = command_kws.create_stream()
 
         # 状态机 + 路由（家电表每次匹配现读本地库 → 同步更新即时生效）
         self.callbacks = _Callbacks(self)

@@ -33,8 +33,10 @@ class Stream:
 
 def rig(*, settle_seconds=0.0):
     events = []
-    async def asr(text):
+    prefix_flags = []
+    async def asr(text, generation=None, wake_prefixed=False):
         events.append(text)
+        prefix_flags.append(wake_prefixed)
     async def wake():
         events.append("wake")
     def spawn(event):
@@ -43,8 +45,10 @@ def rig(*, settle_seconds=0.0):
         else:
             events.append(event)
     holder = SimpleNamespace(route=AudioRoute.WAKE, wake_stream=Stream(),
-        asr_stream=Stream(), playback_stream=Stream(), tts=SimpleNamespace(occupied=False),
-        engine=SimpleNamespace(on_wake=wake, on_asr_text=asr))
+        asr_stream=Stream(), playback_stream=Stream(), command_stream=Stream(),
+        tts=SimpleNamespace(occupied=False),
+        engine=SimpleNamespace(listening_generation=0, on_wake=wake, on_asr_text=asr))
+    holder.prefix_flags = prefix_flags
     dispatch = RouteDispatch(streams=holder, wakeword="小丽拉", spawn=spawn,
                              settle_seconds=settle_seconds)
     return holder, dispatch, events
@@ -294,3 +298,74 @@ def test_exact_named_pcm_requires_alsa_hostapi(monkeypatch):
         query_hostapis=lambda index: {"name": "JACK"}))
     with pytest.raises(ConfigError, match="exact"):
         board_audio_device("lira_audio", direction="input")
+
+
+# ---------- 常驻命令 KWS 通道（2026-10-06 计划 U2；Covers R1/R6/R18/R20） ----------
+
+
+def test_command_hit_during_speaking_delivers_exit_word():
+    """播报中（SPEAKING + TTS 占用）命令命中喊停词 → 投递（回声闸门不关门 KWS）。"""
+    from lira.dialog.state_machine import State
+
+    holder, dispatch, events = rig()
+    holder.engine.state = State.SPEAKING
+    holder.tts.occupied = True
+    holder.route = AudioRoute.LISTEN
+    holder.command_stream.hit = "别念了"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["别念了"]
+    assert holder.prefix_flags == [False], "命令通道不得误耗唤醒前缀标记"
+
+
+def test_command_hit_in_standby_dropped():
+    """STANDBY 命中丢弃（无可停之物；R3 对喊停词的扩展）。"""
+    from lira.dialog.state_machine import State
+
+    holder, dispatch, events = rig()
+    holder.engine.state = State.STANDBY
+    holder.command_stream.hit = "别念了"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == []
+
+
+def test_command_hit_unknown_word_ignored():
+    """非命令词命中（噪声/未登记标签）不投递。"""
+    from lira.dialog.state_machine import State
+
+    holder, dispatch, events = rig()
+    holder.engine.state = State.SPEAKING
+    holder.command_stream.hit = "新闻联播"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == []
+
+
+def test_command_hit_while_reading_route_delivers():
+    """READING 路由下命令通道同样常喂（与播放白名单双通道并存，R20 幂等靠代次）。"""
+    from lira.dialog.state_machine import State
+
+    holder, dispatch, events = rig()
+    holder.route = AudioRoute.PLAYBACK
+    holder.engine.state = State.READING
+    holder.command_stream.hit = "别说了"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["别说了"]
+
+
+def test_wake_prefix_flag_consumed_by_first_asr_delivery():
+    """唤醒前缀标记：唤醒后首条 ASR 投递 wake_prefixed=True，其后恢复 False。"""
+    from lira.dialog.state_machine import State
+
+    holder, dispatch, events = rig()
+    holder.wake_stream.hit = "小丽拉"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["wake"]
+    holder.route = AudioRoute.LISTEN
+    dispatch.begin_listening()
+    holder.asr_stream.result = "立即去休息"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events == ["wake", "立即去休息"]
+    assert holder.prefix_flags == [True]
+    holder.asr_stream.result = "开电视"
+    dispatch.feed(np.zeros(1600, dtype=np.float32))
+    assert events[-1] == "开电视"
+    assert holder.prefix_flags[-1] is False

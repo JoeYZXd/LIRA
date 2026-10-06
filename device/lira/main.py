@@ -42,7 +42,7 @@ from lira.audio._paths import (
     WAKEWORD_KEYWORDS_FILE,
 )
 from lira.config import AppConfig, ConfigError, load_config
-from lira.dialog.intents import PLAYBACK_WHITELIST_KEYWORDS_FILE
+from lira.dialog.intents import COMMANDS_KEYWORDS_FILE, PLAYBACK_WHITELIST_KEYWORDS_FILE
 from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
@@ -227,11 +227,12 @@ async def enter_hal_resources(hal: dict[str, object], stack: AsyncExitStack) -> 
 
 @dataclass
 class AudioStack:
-    """sherpa 语音栈：双 KWS + 流式 ASR + TTS（+ 板上播放器）。"""
+    """sherpa 语音栈：三 KWS + 流式 ASR + TTS（+ 板上播放器）。"""
 
     wake_kws: object  # WakeWordKws
     asr: object  # StreamingAsr
     playback_kws: object  # WakeWordKws（白名单）
+    command_kws: object  # WakeWordKws（退出/喊停声学子集，2026-10-06 计划 U2）
     tts: object  # TtsEngine（board 后端时其内部持有 SoundDevicePlayer）
 
 
@@ -242,7 +243,7 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
         from lira.audio.kws import WakeWordKws
         from lira.audio.tts import TtsEngine
 
-        _ = PLAYBACK_WHITELIST_KEYWORDS_FILE  # intents 模块可用性一并确认
+        _ = PLAYBACK_WHITELIST_KEYWORDS_FILE, COMMANDS_KEYWORDS_FILE  # intents 模块可用性一并确认
     except ImportError as exc:
         logging.warning("音频依赖未安装: %s（pip install -e '.[audio]'）", exc)
         return None
@@ -262,6 +263,7 @@ def build_audio_stack(cfg: AppConfig) -> AudioStack | None:
             wake_kws=WakeWordKws(),
             asr=StreamingAsr(),
             playback_kws=WakeWordKws(keywords_file=PLAYBACK_WHITELIST_KEYWORDS_FILE),
+            command_kws=WakeWordKws(keywords_file=COMMANDS_KEYWORDS_FILE),
             tts=tts,
         )
     except FileNotFoundError as exc:
@@ -550,6 +552,7 @@ class DeviceRuntime:
         self.wake_stream = audio.wake_kws.create_stream()
         self.asr_stream = audio.asr.create_stream()
         self.playback_stream = audio.playback_kws.create_stream()
+        self.command_stream = audio.command_kws.create_stream()
 
         # IR 服务不在构造期绑定：run() 在 enter_hal_resources（R9 降级已发生）
         # 之后才装配——构造期绑定会永远持有降级前的 BroadlinkIrController，

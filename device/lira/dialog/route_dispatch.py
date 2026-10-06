@@ -5,6 +5,7 @@ from collections import deque
 import numpy as np
 
 from lira.audio.activity import SpeechActivity
+from lira.dialog.intents import COMMAND_KWS_WORDS
 from lira.dialog.state_machine import AudioRoute, State
 from lira.voice_log import VOICE_LOG
 
@@ -38,6 +39,9 @@ class RouteDispatch:
         self._discard_until = 0
         self._tts_was_occupied = False
         self._wake_ring_start = 0
+        #: 唤醒前缀标记：唤醒命中后置位，下一次 ASR 文本投递消费（SHUTDOWN 等
+        #: 前缀门控分支区分裸说/带前缀投递；2026-10-06 计划 U2/U4）
+        self._wake_prefix_pending = False
 
     @property
     def generation(self):
@@ -54,6 +58,7 @@ class RouteDispatch:
         self._wake_pending = False
         self._discard_until = 0
         self._tts_was_occupied = False
+        self._wake_prefix_pending = False
         for stream in (self._streams.asr_stream, self._streams.wake_stream,
                        self._streams.playback_stream):
             if stream is not None and hasattr(stream, "reset"):
@@ -137,14 +142,24 @@ class RouteDispatch:
             else:
                 self._event("on_empty_endpoint")
 
-    def _deliver(self, text):
+    def _deliver(self, text, *, wake_prefixed=None):
+        """投递一句话文本。wake_prefixed=None（ASR 通道）时消费一次唤醒前缀
+        标记——唤醒命中后的首条投递视为带前缀（「小丽拉立即去休息」）；
+        KWS 通道（播放白名单/命令）显式传 False（命中词与唤醒无关，不得误耗标记）。
+        """
         generation = self._generation
+        if wake_prefixed is None:
+            wake_prefixed = self._wake_prefix_pending
+            self._wake_prefix_pending = False
         async def deliver():
             if generation != self._generation:
                 return
             engine = self._streams.engine
             if hasattr(engine, "listening_generation"):
-                await engine.on_asr_text(text, generation=generation)
+                if wake_prefixed:
+                    await engine.on_asr_text(text, generation=generation, wake_prefixed=True)
+                else:
+                    await engine.on_asr_text(text, generation=generation)
             else:
                 await engine.on_asr_text(text)
         self._spawn(deliver())
@@ -185,6 +200,7 @@ class RouteDispatch:
         hit = rt.wake_stream.feed_and_poll(samples) if rt.wake_stream is not None else None
         if hit and self._wakeword in hit and not self._wake_pending:
             self._wake_pending = True
+            self._wake_prefix_pending = True
             self._wake_ring_start = start
             VOICE_LOG.log("wake", f"收到语音唤醒（{self._wakeword}）")
             generation = self._generation
@@ -193,6 +209,22 @@ class RouteDispatch:
                     await rt.engine.on_wake()
             self._spawn(wake())
             return
+        # 常驻命令 KWS（2026-10-06 计划 U2）：全路由常喂（与唤醒 KWS 同理，不受
+        # 三闸门约束），承载退出∪喊停高区分度声学子集——播报中喊停的唯一活通道
+        # （ASR 在 SPEAKING 被闸门关闭）。STANDBY 命中丢弃（无可停之物；勿扰待机
+        # 的退出走 ASR 文本通道）。唤醒命中块提前 return，同块命令投递让位唤醒
+        # （单块丢失，量级无害——计划 Deferred to Implementation 已记）。
+        command_stream = getattr(rt, "command_stream", None)
+        if command_stream is not None:
+            cmd_hit = command_stream.feed_and_poll(samples)
+            if cmd_hit:
+                word = next((w for w in COMMAND_KWS_WORDS if w in cmd_hit), None)
+                if word is not None:
+                    if getattr(rt.engine, "state", None) is State.STANDBY:
+                        VOICE_LOG.log("command", f"待机丢弃命令命中：{word}")
+                    else:
+                        VOICE_LOG.log("command", f"命令通道命中：{word}")
+                        self._deliver(word, wake_prefixed=False)
         if route is AudioRoute.LISTEN and not self._wake_pending:
             if (start < self._discard_until
                     or getattr(getattr(rt, "engine", None), "state", None) in _ASR_IGNORED_STATES
@@ -207,4 +239,4 @@ class RouteDispatch:
             if hit:
                 word = hit.split("@")[-1].strip()
                 VOICE_LOG.log("playback", f"播放控制语音：{word}")
-                self._deliver(word)
+                self._deliver(word, wake_prefixed=False)

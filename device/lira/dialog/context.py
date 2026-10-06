@@ -78,6 +78,11 @@ class ConversationHistory:
     def snapshot(self, *, task: ReadingTaskFacts | None = None) -> ContextSnapshot:
         return ContextSnapshot(tuple(self._pairs), task)
 
+    def last_answer(self) -> str | None:
+        """最近一条成功完成的回答原文（R15「再说一遍」重报用；无则 None）。
+        识别失败引导等不入史话术不在其中（只经 record_completed 写入）。"""
+        return self._pairs[-1].assistant if self._pairs else None
+
     def clear(self) -> None:
         self._pairs.clear()
         self._characters = 0

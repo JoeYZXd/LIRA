@@ -1143,3 +1143,53 @@ class TestDndEscapeHatch:
         assert sm.dnd is True
         assert sm._dnd_escape is None
         assert rec.spoken == spoken_after_prompt
+
+
+# ---------- 追问窗「再说一遍」（R15；2026-10-06 计划 U7） ----------
+
+
+class TestRepeatLastAnswer:
+    async def test_repeat_replays_last_answer_verbatim(self):
+        """Covers AE10. 回答播完追问窗内「再说一遍」→ 原文重报、不重新生成。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")  # HELP 回答 → 同步完成 → FOLLOWUP
+        assert sm.state is State.FOLLOWUP
+        spoken_before = list(rec.spoken)
+        await sm.on_asr_text("再说一遍")
+        assert rec.spoken[-1] == pb.HELP_TEXT, "原文重报"
+        assert sm.state is State.FOLLOWUP, "重报后重开追问窗"
+        assert rec.spoken[spoken_before.__len__():].count(pb.HELP_TEXT) == 1, "恰重报一次"
+
+    async def test_repeat_twice_same_text_history_not_duplicated(self):
+        """窗内连续重报同文；重报不写入历史（上下文不自污染）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")
+        pairs_after_answer = len(sm._history.snapshot().pairs)
+        await sm.on_asr_text("再说一遍")
+        await sm.on_asr_text("再说一遍")
+        assert rec.spoken[-1] == pb.HELP_TEXT
+        assert len(sm._history.snapshot().pairs) == pairs_after_answer, "重报不入史"
+
+    async def test_repeat_in_listening_falls_through(self):
+        """非追问窗（LISTENING）说「再说一遍」→ 按普通指令路由（识别失败引导）。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("再说一遍")
+        assert sm.state is State.LISTENING
+        assert any("没听清" in s or "试试" in s for s in rec.spoken), "走 R24 引导"
+
+    async def test_repeat_with_empty_history_falls_through(self):
+        """FOLLOWUP 但历史无成功回答 → 按普通指令路由。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")
+        assert sm.state is State.FOLLOWUP
+        sm._history.clear()
+        await sm.on_asr_text("再说一遍")
+        assert any("没听清" in s or "试试" in s for s in rec.spoken), "无历史走引导"

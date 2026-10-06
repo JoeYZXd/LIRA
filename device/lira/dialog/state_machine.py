@@ -39,6 +39,7 @@ from lira.dialog.intents import (
     is_exit_or_stop,
     is_shutdown_phrase,
     is_book_fragment,
+    is_repeat_word,
     match_dnd_phrase,
     match_local,
     is_playback_command,
@@ -576,6 +577,15 @@ class DialogEngine:
             # 勿扰聆听窗内的普通指令：计数（U6 逃生舱）且忽略不出声
             self._note_dnd_command(text)
             return
+        # R15：追问窗内「再说一遍」→ 原文重报上一条成功回答（不重新生成、
+        # 不重复入史；引导话术不入史故重报对象恒为最近成功回答）。窗内不限次数，
+        # 每次重报后重开追问窗。无历史成功回答 → 按普通指令路由。
+        if self.state is State.FOLLOWUP and is_repeat_word(text):
+            last = self._history.last_answer()
+            if last is not None:
+                self._speak_answer(last, owner=self._owner,
+                                   user_text=self._request_text, record=False)
+                return
         if is_cancel(text):
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()
@@ -963,7 +973,8 @@ class DialogEngine:
         self._completion_tasks.add(task)
         task.add_done_callback(self._completion_tasks.discard)
 
-    def _speak_answer(self, text: str, *, owner: OperationOwner, user_text: str) -> None:
+    def _speak_answer(self, text: str, *, owner: OperationOwner, user_text: str,
+                      record: bool = True) -> None:
         self._transition(State.SPEAKING)
         self._disarm()
         completion = self._speak(text)
@@ -971,7 +982,8 @@ class DialogEngine:
             if not self.is_current(owner) or self.state is not State.SPEAKING:
                 return
             if completion is None or getattr(completion, "status", "success") == "success":
-                self._history.record_completed(user_text, text)
+                if record:
+                    self._history.record_completed(user_text, text)
                 self._begin_listening(replay=False)
                 self._transition(State.FOLLOWUP)
                 self._arm(self.FOLLOWUP_WINDOW_SECONDS)

@@ -7,6 +7,8 @@ requires-python = ">=3.11"
 # 避免一次性安装 sherpa-onnx / rknn / paddle 等板上专用包到 x86 开发环境。
 dependencies = [
     "PyYAML>=6.0",
+    # 退出/勿扰词表拼音归一（纯 Python，无二进制依赖；2026-10-06 计划 U1）
+    "pypinyin>=0.50",
 ]
 
 [project.optional-dependencies]

@@ -10,18 +10,30 @@ from __future__ import annotations
 from pathlib import Path
 
 from lira.dialog.intents import (
+    COMMAND_KWS_WORDS,
+    COMMANDS_KEYWORDS_FILE,
+    COMMANDS_RAW_FILE,
     CONFIRM_WORDS,
     CANCEL_WORDS,
+    EXIT_STOP_WORDS,
     PLAYBACK_COMMANDS,
     PLAYBACK_WHITELIST_KEYWORDS_FILE,
     REJECT_WORDS,
     READ_TRIGGER_WORDS,
+    VOLUME_DOWN_WORDS,
+    VOLUME_UP_WORDS,
     Appliance,
     IntentKind,
     classify_confirmation,
     is_cancel,
+    is_exit_or_stop,
     is_playback_command,
+    is_repeat_word,
+    is_shutdown_phrase,
+    is_status_query,
+    match_dnd_phrase,
     match_local,
+    match_volume_word,
 )
 
 
@@ -181,3 +193,120 @@ class TestPlaybackWhitelistKeywordsFile:
             assert pinyin.split(), f"缺拼音列: {ln}"
             words.add(word)
         assert words == set(PLAYBACK_COMMANDS)
+
+
+# ---------- 退出/勿扰/控制词表（2026-10-06 计划 U1） ----------
+
+
+class TestExitStopWords:
+    def test_full_set_hits(self):
+        for w in EXIT_STOP_WORDS:
+            assert is_exit_or_stop(w), w
+
+    def test_punctuation_stripped(self):
+        assert is_exit_or_stop("行了。")
+        assert is_exit_or_stop("别念了，")
+
+    def test_homophone_misrecognition_hits(self):
+        """拼音归一：同音误转写与正字全等命中。"""
+        assert is_exit_or_stop("别年了")  # 别念了
+        assert is_exit_or_stop("闭最")  # 闭嘴（bi zui）
+
+    def test_fail_closed(self):
+        """候选集外一律不命中（无编辑距离放宽）。"""
+        assert not is_exit_or_stop("别吵")
+        assert not is_exit_or_stop("吵架")
+        assert not is_exit_or_stop("退出吧")
+        assert not is_exit_or_stop("今天天气怎么样")
+
+    def test_guanji_is_exit_not_shutdown(self):
+        """R5：「关机」只作结束会话，永不构成真关机。"""
+        assert is_exit_or_stop("关机")
+        assert not is_shutdown_phrase("关机")
+
+
+class TestShutdownPhrase:
+    def test_hit(self):
+        assert is_shutdown_phrase("立即去休息")
+        assert is_shutdown_phrase("立即去休息。")
+
+    def test_fail_closed(self):
+        for t in ("马上休息", "休息一下", "休息休息", "该休息了"):
+            assert not is_shutdown_phrase(t), t
+
+
+class TestDndPhrases:
+    def test_enter(self):
+        for t in ("进入勿扰模式", "进入勿扰", "开启勿扰模式"):
+            assert match_dnd_phrase(t) == "enter", t
+
+    def test_exit(self):
+        for t in ("退出勿扰模式", "退出勿扰", "关闭勿扰模式"):
+            assert match_dnd_phrase(t) == "exit", t
+
+    def test_query(self):
+        for t in ("你现在是在勿扰模式吗", "在睡觉吗", "你是不是睡着了"):
+            assert match_dnd_phrase(t) == "query", t
+
+    def test_fail_closed(self):
+        assert match_dnd_phrase("勿扰模式") is None
+        assert match_dnd_phrase("我不困") is None
+
+
+class TestVolumeRepeatStatus:
+    def test_volume(self):
+        assert match_volume_word("声音大点") == "up"
+        assert match_volume_word("声音小一点") == "down"
+        assert match_volume_word("大声点") is None  # 白名单词，刻意不在此表
+
+    def test_repeat(self):
+        for t in ("再说一遍", "再说一次", "没听清", "没听清楚"):
+            assert is_repeat_word(t), t
+        assert not is_repeat_word("再说一遍吧")  # fail-closed
+
+    def test_status_query(self):
+        for t in ("你连上网了吗", "网络怎么样", "你的云端能连上吗", "连wifi了吗"):
+            assert is_status_query(t), t
+        for t in ("今天天气怎么样", "打开电视"):
+            assert not is_status_query(t), t
+
+
+class TestWordSetDisjointness:
+    def test_no_overlap_with_legacy_sets(self):
+        assert not set(EXIT_STOP_WORDS) & set(CANCEL_WORDS)
+        assert not set(EXIT_STOP_WORDS) & set(PLAYBACK_COMMANDS)
+        volume = set(VOLUME_UP_WORDS) | set(VOLUME_DOWN_WORDS)
+        assert not volume & set(PLAYBACK_COMMANDS)
+
+    def test_command_kws_subset_of_exit_stop(self):
+        """声学子集是文本层全集的子集（词表统一裁定的声学收窄）。"""
+        assert set(COMMAND_KWS_WORDS) <= set(EXIT_STOP_WORDS)
+
+
+class TestCommandsKeywordsFile:
+    def test_file_exists_and_format(self):
+        """commands.txt 独立断言分支：允许行内 :boost #threshold 参数
+        （区别于白名单文件的「无 #」约定），# 后必须跟数字。"""
+        import re
+
+        path = COMMANDS_KEYWORDS_FILE
+        assert path.is_file(), f"命令关键词文件缺失: {path}"
+        lines = [ln.strip() for ln in path.read_text("utf-8").splitlines() if ln.strip()]
+        words = set()
+        for ln in lines:
+            assert "@" in ln, ln
+            for m in re.finditer(r"#(.)", ln):
+                assert m.group(1).replace(".", "").isdigit(), f"# 必须是阈值参数: {ln}"
+            pinyin, _, word = ln.rpartition("@")
+            assert pinyin.split(), f"缺拼音列: {ln}"
+            words.add(word.strip())
+        assert words == set(COMMAND_KWS_WORDS)
+
+    def test_raw_source_in_sync(self):
+        raw_lines = [
+            ln.strip()
+            for ln in COMMANDS_RAW_FILE.read_text("utf-8").splitlines()
+            if ln.strip()
+        ]
+        raw_words = {ln.rpartition("@")[2].strip() for ln in raw_lines}
+        assert raw_words == set(COMMAND_KWS_WORDS)

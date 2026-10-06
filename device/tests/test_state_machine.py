@@ -58,6 +58,7 @@ class Recorder:
         self.captures = 0
         self.playback: list[str] = []
         self.listening_starts = 0
+        self.poweroffs = 0
 
     # DialogCallbacks 协议
     def speak(self, text: str) -> None:
@@ -92,6 +93,9 @@ class Recorder:
 
     def playback_volume_down(self) -> None:
         self.playback.append("volume_down")
+
+    def poweroff(self) -> None:
+        self.poweroffs += 1
 
 
 def build_engine(rec: Recorder, **router_kwargs) -> DialogEngine:
@@ -747,3 +751,76 @@ class TestUnifiedExitStop:
         await sm.on_asr_text("关机")
         assert sm.state is State.STANDBY
         assert rec.spoken == [pb.WAKE_ACK]
+
+
+# ---------- 真关机（R4/R5；2026-10-06 计划 U4） ----------
+
+
+class TestShutdown:
+    async def test_wake_prefixed_phrase_farewell_then_poweroff(self):
+        """Covers AE3. 待机唤醒后说「小丽拉，立即去休息」→ 告别语 + poweroff 恰一次。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        await sm.on_asr_text("立即去休息", wake_prefixed=True)
+        await asyncio.sleep(0)  # 让 commit 任务拿到循环槽位
+        assert any("休息" in s for s in rec.spoken), "应有告别语"
+        assert rec.poweroffs == 1
+        assert sm.state is State.STANDBY
+
+    async def test_poweroff_fires_after_farewell_completes(self):
+        """告别语 completion 未完成时 poweroff 不触发；完成后触发（时序保证）。"""
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        await sm.on_asr_text("立即去休息", wake_prefixed=True)
+        assert rec.poweroffs == 0, "告别语播完前不得关机"
+        rec.completions[-1].finish()
+        await asyncio.sleep(0.05)
+        assert rec.poweroffs == 1
+
+    async def test_farewell_interrupted_still_commits_poweroff(self):
+        """告别语被喊停截断（completion 失败/取消）→ 关机意图已提交，poweroff 照常。"""
+        rec = ControlledRecorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        await sm.on_asr_text("立即去休息", wake_prefixed=True)
+        rec.completions[-1].finish("failed")
+        await asyncio.sleep(0.05)
+        assert rec.poweroffs == 1
+
+    async def test_bare_phrase_without_prefix_is_not_shutdown(self):
+        """R4 前缀要求：会话中裸说「立即去休息」→ 普通指令处理，不关机。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("立即去休息")  # 无 wake_prefixed
+        assert rec.poweroffs == 0
+        assert sm.state is State.LISTENING  # 落识别失败引导
+
+    async def test_shutdown_drops_pending_high_risk_confirm(self):
+        """CONFIRMING 挂起高危确认时真关机 → 挂起丢弃、IR 不发。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        await enter_state(sm, rec, State.CONFIRMING)
+        await sm.on_asr_text("立即去休息", wake_prefixed=True)
+        await asyncio.sleep(0)
+        assert rec.ir == []
+        assert rec.poweroffs == 1
+        assert sm.state is State.STANDBY
+
+    async def test_guanji_and_guandian_never_shutdown(self):
+        """Covers AE4/R5. 「关机」（结束会话）与「关电视」（家电语境）都不关机。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        sm.tick(T0)
+        await sm.on_wake()
+        await sm.on_asr_text("关机", wake_prefixed=True)  # 即便带前缀也只是结束会话
+        assert rec.poweroffs == 0
+        assert sm.state is State.STANDBY
+        await sm.on_wake()
+        await sm.on_asr_text("关电视", wake_prefixed=True)
+        assert rec.poweroffs == 0

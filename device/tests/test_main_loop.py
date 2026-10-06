@@ -788,3 +788,37 @@ class TestCommandChannel:
         await settle(rt)
         assert rt.engine.state.value == "standby"
         assert rt.tts.spoken == []
+
+
+class TestPoweroffWiring:
+    async def test_poweroff_callback_spawns_system_poweroff(self, tmp_path, monkeypatch):
+        """R4：poweroff 回调走系统级 systemctl poweroff（Restart=always 约束）。"""
+        calls = []
+
+        async def fake_exec(*args, **kwargs):
+            calls.append(args)
+
+            class Proc:
+                async def wait(self):
+                    return 0
+
+            return Proc()
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        rt.callbacks.poweroff()
+        await settle(rt)
+        assert calls == [("systemctl", "poweroff")]
+
+    async def test_poweroff_failure_does_not_crash(self, tmp_path, monkeypatch):
+        """poweroff 子进程失败仅记日志（设备留在待机，主循环存活）。"""
+        async def boom(*args, **kwargs):
+            raise OSError("no systemd")
+
+        monkeypatch.setattr(asyncio, "create_subprocess_exec", boom)
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        rt.callbacks.poweroff()
+        await settle(rt)
+        assert rt.engine.state.value == "standby"

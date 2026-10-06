@@ -37,6 +37,7 @@ from lira.dialog.intents import (
     find_alias_hits,
     is_cancel,
     is_exit_or_stop,
+    is_shutdown_phrase,
     is_book_fragment,
     match_local,
     is_playback_command,
@@ -123,6 +124,9 @@ class DialogCallbacks(Protocol):
 
     def playback_volume_down(self) -> None: ...
 
+    def poweroff(self) -> None:
+        """R4：系统级关机（告别语播完后调用；实现须自行容错，见 main.py）。"""
+
 
 @dataclass
 class _PendingConfirm:
@@ -195,6 +199,8 @@ class DialogEngine:
         self._listening_generation = 0
         self._speech_active = False
         self._awaiting_endpoint = False
+        #: 当前投递是否带唤醒前缀（route_dispatch 标记；SHUTDOWN 前缀门控读）
+        self._delivery_wake_prefixed = False
         self._last_audio_progress = 0.0
         self._last_speech_progress = 0.0
         self._last_recognition_progress = 0.0
@@ -347,6 +353,7 @@ class DialogEngine:
         t = text.strip()
         if not t or not self._input_current(generation):
             return
+        self._delivery_wake_prefixed = wake_prefixed
         # R1/R6 态前统一退出分支：取消词 + 结束聊天 + 统一退出∪喊停词集
         # （含「关机」——R5 语义为结束会话，永不触发真关机）。任何非待机态命中
         # 即停播/停动作回待机，不等超时；待机不监听（R3）。CONFIRMING 中命中
@@ -364,6 +371,11 @@ class DialogEngine:
             self._enter_standby()
             return
         self._speech_active = self._awaiting_endpoint = False
+        # R4：真关机仅唤醒前缀投递提交（裸说「立即去休息」按普通指令处理，
+        # 落识别失败引导）；前缀标记由 on_asr_text 随投递存于 _delivery_wake_prefixed
+        if self._delivery_wake_prefixed and is_shutdown_phrase(t):
+            self._shutdown()
+            return
         handler = {
             State.STANDBY: self._on_asr_standby,
             State.LISTENING: self._on_asr_listening,
@@ -563,6 +575,29 @@ class DialogEngine:
         logging.debug("CAPTURING 态忽略 ASR 文本")
 
     # ---------- 意图执行 ----------
+
+    def _shutdown(self) -> None:
+        """R4：告别语播完执行系统关机，无二次确认。
+
+        关机意图即提交：告别语可被喊停截断、completion 可超时/取消，poweroff
+        仍照常触发——调度脱离 owner 代次（挂 _track_completion 会被
+        _invalidate_operation 取消，与「截断不影响关机」相悖）。按新会话处理：
+        挂起高危确认/在途效果一律不执行（_new_operation 清理链）。
+        """
+        self._new_operation()
+        self._transition(State.EXECUTING)
+        completion = self._speak(pb.SHUTDOWN_FAREWELL)
+
+        async def commit():
+            if completion is not None:
+                try:
+                    await asyncio.wait_for(completion.wait(), timeout=15.0)
+                except (asyncio.TimeoutError, asyncio.CancelledError):
+                    pass  # 截断/超时不影响关机提交
+            _invoke(self._cb.poweroff)
+
+        asyncio.create_task(commit())
+        self._finish_command()
 
     def _dispatch(self, intent: Intent) -> None:
         """本地规则意图执行（EXECUTING 为同步分发过程态）。"""

@@ -401,6 +401,17 @@ class DeviceCallbacks:
         if self._rt.tts is not None:
             await self._rt.tts.stop(owner)
 
+    def poweroff(self) -> None:
+        """R4：系统级关机。user unit Restart=always——只退进程数秒即被拉起，
+        必须走系统 poweroff；失败仅记日志（设备留在待机，不崩主循环）。"""
+        async def run():
+            try:
+                proc = await asyncio.create_subprocess_exec("systemctl", "poweroff")
+                await proc.wait()
+            except Exception:
+                logging.exception("dialog event=poweroff_failed")
+        self._rt.spawn(run())
+
     def input_generation(self) -> int:
         dispatcher = getattr(self._rt, "dispatcher", None)
         return dispatcher.generation if dispatcher is not None else 0

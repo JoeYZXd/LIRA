@@ -43,6 +43,7 @@ __all__ = [
     "OCR_COMPLETE",
     "PRIVACY_ON",
     "PRIVACY_OFF",
+    "SHUTDOWN_FAREWELL",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
@@ -130,6 +131,11 @@ OCR_COMPLETE = "识别已完成，可以把书或材料从摄像头前移开了�
 
 PRIVACY_ON = "好的，隐私模式已开启。麦克风已经关闭，我不会再听您说话，也不会把任何内容发到网上。想让我继续工作，请让家人在手机上打开设备管理页面关闭隐私模式。"
 PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫我小丽拉。"
+
+# ---------- 真关机（R4，2026-10-06 计划 U4） ----------
+
+SHUTDOWN_FAREWELL = "好的，我休息了。您也早点休息，再见。"
+
 INPUT_NOT_HEARD = "收音没有完成，请再说一遍。"
 UNDERSTANDING_FAILED = "理解指令时出了问题，请再说一遍。"
 PLAYBACK_FAILED = "回答没有播完，您可以再问一次。"

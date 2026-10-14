@@ -68,6 +68,13 @@ __all__ = [
     "CHAT_TOO_LONG",
     "CHAT_EMPTY",
     "CHAT_GREETING",
+    "CHAT_OFFLINE_NOTE",
+    "CHAT_ORIGIN_REJECT",
+    "CHAT_NAME_INVALID",
+    "CHAT_NAME_DUPLICATE",
+    "CHAT_MEMBER_MISSING",
+    "CHAT_NEED_JSON",
+    "CHAT_BAD_JSON_BODY",
 ]
 
 # ---------- 唤醒与聆听（R25/R20） ----------
@@ -234,3 +241,22 @@ CHAT_TOO_LONG = "这条消息超过 2000 字了，请拆成几条发给我。"
 CHAT_EMPTY = "输入框还是空的，想说什么就打出来发给我吧。"
 #: 空会话引导语（U3 会话页零消息态渲染；会话历史为空时不显示"加载更多"）
 CHAT_GREETING = "还没聊过天呢。在下面的输入框打句话，发给小丽拉吧。"
+
+# ---------- 聊天页面文案（home-console 计划 U3/R5-R9；UI 层唯一出处） ----------
+#
+# 与上方降级文案同源管理：页面错误提示与数据端点 JSON 错误串不再散落
+# ui 层（含首页入口的"未装配"提示，经 app.py 传入模板）。
+
+#: chat 未装配 / 装配失败的显式文案（不隐藏、不静默；CHAT_UNAVAILABLE 已被
+#: 发送降级占用，故此名带 _NOTE）
+CHAT_OFFLINE_NOTE = "聊天功能暂不可用，请找家人看看设备。"
+#: 表单 POST 跨源拒绝（同源守卫的显式呈现，不执行任何变更）
+CHAT_ORIGIN_REJECT = "请求来源不被允许，已拒绝。"
+#: 成员称呼非法（空/超长；上限与 ui 层 _MAX_NAME_CHARS=20 一致，数字不模板化）
+CHAT_NAME_INVALID = "称呼需要 1 到 20 个字。"
+#: 成员重名（创建/改名撞上既有名字；{name} 为撞上的称呼，str.format 填充）
+CHAT_NAME_DUPLICATE = "「{name}」这个名字已经有了，换一个称呼吧。"
+#: 数据端点显式错误串（错误回 JSON 不 302；HTTP 404 detail 同用前者）
+CHAT_MEMBER_MISSING = "成员不存在"
+CHAT_NEED_JSON = "内容类型须为 application/json"
+CHAT_BAD_JSON_BODY = "请求体须为 JSON"

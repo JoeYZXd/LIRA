@@ -61,6 +61,14 @@
 </style>
 {% endblock %}
 {% block content %}
+{# 快捷步进小表单（R2）：四个 −/+ 表单同构，宏收敛为单一出处；
+   边界数值全部来自上下文（settings 的 VOLUME_RANGE/SPEED_RANGE），不再硬编码 #}
+{% macro step_form(action, aria, button_class, symbol, value) -%}
+<form method="post" action="/{{ action }}" class="step-form">
+  <input type="hidden" name="value" value="{{ value }}">
+  <button class="small {{ button_class }}" type="submit" aria-label="{{ aria }}">{{ symbol }}</button>
+</form>
+{%- endmacro %}
 <div class="hero">
   <p class="hello">{{ greeting }}</p>
 </div>
@@ -90,32 +98,20 @@
     <div class="stepper">
       <span class="stepper-label">音量</span>
       <div class="stepper-row">
-        <form method="post" action="/volume" class="step-form">
-          <input type="hidden" name="value" value="{{ '%.1f'|format([volume - 0.1, 0.1] | max) }}">
-          <button class="small ghost" type="submit" aria-label="音量调低一档">−</button>
-        </form>
+        {{ step_form('volume', '音量调低一档', 'ghost', '−', '%.1f'|format([volume - 0.1, volume_range[0]] | max)) }}
         <span class="stepper-value">{{ '%.1f'|format(volume) }}</span>
-        <form method="post" action="/volume" class="step-form">
-          <input type="hidden" name="value" value="{{ '%.1f'|format([volume + 0.1, 2.0] | min) }}">
-          <button class="small primary" type="submit" aria-label="音量调高一档">＋</button>
-        </form>
+        {{ step_form('volume', '音量调高一档', 'primary', '＋', '%.1f'|format([volume + 0.1, volume_range[1]] | min)) }}
       </div>
-      <span class="muted">范围 0.1 ~ 2.0</span>
+      <span class="muted">范围 {{ volume_range[0] }} ~ {{ volume_range[1] }}</span>
     </div>
     <div class="stepper">
       <span class="stepper-label">语速</span>
       <div class="stepper-row">
-        <form method="post" action="/speed" class="step-form">
-          <input type="hidden" name="value" value="{{ '%.1f'|format([tts_speed - 0.1, 0.5] | max) }}">
-          <button class="small ghost" type="submit" aria-label="语速调慢一档">−</button>
-        </form>
+        {{ step_form('speed', '语速调慢一档', 'ghost', '−', '%.1f'|format([tts_speed - 0.1, speed_range[0]] | max)) }}
         <span class="stepper-value">{{ '%.1f'|format(tts_speed) }}</span>
-        <form method="post" action="/speed" class="step-form">
-          <input type="hidden" name="value" value="{{ '%.1f'|format([tts_speed + 0.1, 2.0] | min) }}">
-          <button class="small primary" type="submit" aria-label="语速调快一档">＋</button>
-        </form>
+        {{ step_form('speed', '语速调快一档', 'primary', '＋', '%.1f'|format([tts_speed + 0.1, speed_range[1]] | min)) }}
       </div>
-      <span class="muted">范围 0.5 ~ 2.0</span>
+      <span class="muted">范围 {{ speed_range[0] }} ~ {{ speed_range[1] }}</span>
     </div>
   </div>
 </section>

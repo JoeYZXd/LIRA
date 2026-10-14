@@ -42,7 +42,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from lira.chat.store import ChatStore
-from lira.dialog.context import ContextSnapshot, ConversationPair
+from lira.dialog.context import ContextSnapshot, ConversationHistory, ConversationPair
 from lira.dialog.phrasebook import (
     CHAT_BUSY,
     CHAT_EMPTY,
@@ -146,84 +146,102 @@ class ChatService:
         """
         # 成员存在性先行：写事务前的早期复查（发送中被删由落库 FK 兜底）
         if self._store.get_member(member_id) is None:
-            logger.info(
-                "chat event=member_gone source=web-chat member_id=%d chars=%d",
-                member_id, len(text),
-            )
+            self._log("member_gone", member_id, len(text))
             return ChatSendResult(state="member_gone", message=CHAT_MEMBER_GONE)
 
         message = text.strip()
         if not message:
-            logger.info(
-                "chat event=reject reason=empty source=web-chat member_id=%d", member_id
-            )
+            self._log("reject", member_id, reason="empty")
             return ChatSendResult(state="empty", message=CHAT_EMPTY)
         if len(message) > MAX_MESSAGE_CHARS:
-            logger.info(
-                "chat event=reject reason=too_long source=web-chat member_id=%d chars=%d",
-                member_id, len(message),
-            )
+            self._log("reject", member_id, len(message), reason="too_long")
             return ChatSendResult(state="too_long", message=CHAT_TOO_LONG)
 
         # 全局单飞（镜像 dev_mutex：locked() 显式拒绝后加锁，锁内无 await 间隙）
         if self._mutex.locked():
-            logger.info(
-                "chat event=busy source=web-chat member_id=%d chars=%d",
-                member_id, len(message),
-            )
+            self._log("busy", member_id, len(message))
             return ChatSendResult(state="busy", message=CHAT_BUSY)
 
         async with self._mutex:
             started = self._now()
-            logger.info(
-                "chat event=send source=web-chat member_id=%d chars=%d",
-                member_id, len(message),
-            )
+            self._log("send", member_id, len(message))
             if not self._rate_limit_allow(member_id):
-                logger.info(
-                    "chat event=rate_limited source=web-chat member_id=%d chars=%d",
-                    member_id, len(message),
-                )
+                self._log("rate_limited", member_id, len(message))
                 return ChatSendResult(state="busy", message=CHAT_BUSY)
             if self._privacy():
                 # R8：隐私 ON 一律降级，不发起任何 LLM 调用
                 return self._persist_privacy_turn(member_id, message, started)
             if not self._remote_available():
-                logger.info(
-                    "chat event=unavailable source=web-chat member_id=%d chars=%d",
-                    member_id, len(message),
-                )
+                self._log("unavailable", member_id, len(message))
                 return ChatSendResult(state="unavailable", message=CHAT_UNAVAILABLE)
             return await self._call_llm_and_persist(member_id, message, started)
 
     # ---------- 内部流程 ----------
+
+    def _log(
+        self,
+        event: str,
+        member_id: int,
+        chars: int | None = None,
+        started: float | None = None,
+        *,
+        reason: str | None = None,
+        level: int = logging.INFO,
+    ) -> None:
+        """R10 结构化事件日志的字节级单一出处：只含事件/原因/字数/耗时/ID。
+
+        `started` 给出时追加 elapsed（仅落库/调用完成路径）；消息文本绝不
+        进入日志（内容纪律由全部调用点经由本 helper 机械保证）。
+        """
+        parts = ["chat event=", event]
+        if reason is not None:
+            parts += [" reason=", reason]
+        parts += [" source=web-chat member_id=", str(member_id)]
+        if chars is not None:
+            parts += [" chars=", str(chars)]
+        if started is not None:
+            parts += [" elapsed=%.3fs" % (self._now() - started)]
+        logger.log(level, "".join(parts))
+
+    def _persist(
+        self,
+        member_id: int,
+        rows: list[tuple[str, str]],
+        started: float,
+        success_result: Callable[[bool], ChatSendResult],
+    ) -> ChatSendResult:
+        """落库三态收敛（privacy 轮单条 / ok 轮成对共用）：
+
+        - IntegrityError：写事务 FK 兜底"发送中成员被删"竞态（store 单事务
+          已整体回滚）→ member_gone；
+        - sqlite3.Error：落库失败不掩盖降级原因/不吞回复——事件日志 +
+          success_result(False)（saved=False 非静默标记）；
+        - 成功：success_result(True)，事件名取结果态（privacy/ok 与事件
+          名一一对应）。
+        """
+        try:
+            self._store.append_messages(member_id, rows)
+        except sqlite3.IntegrityError:
+            self._log("member_gone", member_id, len(rows[0][1]), started, level=logging.WARNING)
+            return ChatSendResult(state="member_gone", message=CHAT_MEMBER_GONE)
+        except sqlite3.Error:
+            self._log("save_failed", member_id, len(rows[0][1]), started, level=logging.WARNING)
+            return success_result(False)
+        result = success_result(True)
+        self._log(result.state, member_id, len(rows[0][1]), started)
+        return result
 
     def _persist_privacy_turn(self, member_id: int, message: str, started: float) -> ChatSendResult:
         """隐私拦截轮：不调 LLM，user 消息单独落库（R7"自己打的字仍保存"）。
 
         无 assistant 配对、计入 500 条上限；滑窗组装跳过该未配对尾部。
         """
-        try:
-            self._store.append_messages(member_id, [("user", message)])
-        except sqlite3.IntegrityError:
-            # 隐私轮落库撞上"发送中成员被删"（FK）：按 member_gone 呈现
-            logger.warning(
-                "chat event=member_gone source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-                member_id, len(message), self._now() - started,
-            )
-            return ChatSendResult(state="member_gone", message=CHAT_MEMBER_GONE)
-        except sqlite3.Error:
-            # 落库失败不掩盖降级原因：仍按 privacy 呈现，仅额外记事件（非静默）
-            logger.warning(
-                "chat event=save_failed source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-                member_id, len(message), self._now() - started,
-            )
-            return ChatSendResult(state="privacy", message=CHAT_PRIVACY, saved=False)
-        logger.info(
-            "chat event=privacy source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-            member_id, len(message), self._now() - started,
+        return self._persist(
+            member_id,
+            [("user", message)],
+            started,
+            lambda saved: ChatSendResult(state="privacy", message=CHAT_PRIVACY, saved=saved),
         )
-        return ChatSendResult(state="privacy", message=CHAT_PRIVACY, saved=True)
 
     async def _call_llm_and_persist(self, member_id: int, message: str, started: float) -> ChatSendResult:
         window = self._build_window(member_id)
@@ -244,41 +262,24 @@ class ChatService:
             return self._persist_privacy_turn(member_id, message, started)
         except LlmError:
             # 失败不落库：user+assistant 均不落，重试干净无重复（Key Decisions）
-            logger.info(
-                "chat event=fail source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-                member_id, len(message), self._now() - started,
-            )
+            self._log("fail", member_id, len(message), started)
             return ChatSendResult(state="failed", message=CHAT_FAILED)
-        try:
-            # 单事务成对落库 + 裁剪（store 内部完成）
-            self._store.append_messages(member_id, [("user", message), ("assistant", reply)])
-        except sqlite3.IntegrityError:
-            # 写事务 FK 复查兜底"发送中成员被删"竞态（store 单事务已整体回滚）
-            logger.warning(
-                "chat event=member_gone source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-                member_id, len(message), self._now() - started,
-            )
-            return ChatSendResult(state="member_gone", message=CHAT_MEMBER_GONE)
-        except sqlite3.Error:
-            # 落库失败不吞回复：返回 + saved=False 标记 + 事件日志（非静默、非 500）
-            logger.warning(
-                "chat event=save_failed source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-                member_id, len(message), self._now() - started,
-            )
-            return ChatSendResult(state="ok", reply=reply, saved=False)
-        logger.info(
-            "chat event=ok source=web-chat member_id=%d chars=%d elapsed=%.3fs",
-            member_id, len(message), self._now() - started,
+        # 单事务成对落库 + 裁剪（store 内部完成）；落库失败不吞回复（非静默、非 500）
+        return self._persist(
+            member_id,
+            [("user", message), ("assistant", reply)],
+            started,
+            lambda saved: ChatSendResult(state="ok", reply=reply, saved=saved),
         )
-        return ChatSendResult(state="ok", reply=reply, saved=True)
 
     def _build_window(self, member_id: int) -> list[tuple[str, str]]:
         """从库组装滑窗：最近 WINDOW_PAIRS 对 + WINDOW_MAX_CHARS 字符预算双界。
 
+        本方法只负责 chat 特有的行→对转换；双界裁剪复用 ConversationHistory：
         - 跳过未配对的尾部 user 消息（隐私拦截轮遗留，绝不作为上下文回传）；
-        - 超限丢弃语义镜像 ConversationHistory：最新一对单独超预算则本轮窗口
-          为空（不带过期上下文）；否则自最旧端裁剪至预算内；
-        - 多取一行（+1）用于识别未配对尾部后仍凑满 8 对。
+        - 中段不成对（防御性）更旧历史一并放弃，保上下文连续；
+        - 最新一对单独超预算则本轮窗口为空（不带过期上下文）；超限自最旧
+          端裁剪（pop 最旧，record_completed 语义）。
         """
         rows = self._store.recent_messages(member_id, limit=WINDOW_PAIRS * 2 + 1)
         if rows and rows[-1]["role"] == "user":
@@ -291,20 +292,10 @@ class ChatService:
                 break  # 中段不成对（防御性）：更旧历史一并放弃，保上下文连续
             newest_first.append((user_row["content"], assistant_row["content"]))
             i -= 2
-        newest_first = newest_first[:WINDOW_PAIRS]
-        kept: list[tuple[str, str]] = []
-        total = 0
-        for pair in newest_first:
-            chars = len(pair[0]) + len(pair[1])
-            if chars > WINDOW_MAX_CHARS:
-                break  # 该对超预算：它与更旧历史一并丢弃（镜像 clear 语义）
-            kept.append(pair)
-            total += chars
-        while kept and total > WINDOW_MAX_CHARS:
-            dropped = kept.pop(0)  # 自最旧端裁剪（镜像 popleft 语义）
-            total -= len(dropped[0]) + len(dropped[1])
-        kept.reverse()  # 旧→新，供 ContextSnapshot 顺序拼接
-        return kept
+        history = ConversationHistory(max_pairs=WINDOW_PAIRS, max_chars=WINDOW_MAX_CHARS)
+        for user, assistant in reversed(newest_first):  # 旧→新喂入，供顺序裁剪
+            history.record_completed(user, assistant)
+        return [(pair.user, pair.assistant) for pair in history.snapshot().pairs]
 
     def _rate_limit_allow(self, member_id: int) -> bool:
         """每成员固定窗口限流：窗口内计数达上限即拒绝；换窗重新计数。"""

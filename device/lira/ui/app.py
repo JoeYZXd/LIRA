@@ -31,9 +31,10 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from lira.appliances.store import ApplianceStore
+from lira.dialog.phrasebook import CHAT_OFFLINE_NOTE
 from lira.privacy import PassphraseVault, PrivacyState
 from lira.settings import DeviceSettings
-from lira.ui.chat import CHAT_UNAVAILABLE_NOTE
+from lira.ui.chat import mount_chat
 
 __all__ = [
     "DeviceSettings",
@@ -115,13 +116,16 @@ def _index_context(services: UiServices, **extra: object) -> dict[str, object]:
     return {
         "greeting": home_greeting(datetime.now().hour),
         "chat_available": services.chat is not None,
-        "chat_unavailable_note": CHAT_UNAVAILABLE_NOTE,
+        "chat_unavailable_note": CHAT_OFFLINE_NOTE,
         "privacy_on": services.privacy.is_on,
         "remote_available": services.remote_available(),
         "network_ok": services.network_ok(),
         "passphrase_set": services.vault.is_set(),
         "volume": services.settings.volume,
         "tts_speed": services.settings.tts_speed,
+        # 步进器边界单一出处（settings 类常量；模板钳制与范围提示皆由此渲染）
+        "volume_range": DeviceSettings.VOLUME_RANGE,
+        "speed_range": DeviceSettings.SPEED_RANGE,
         "appliances": _appliance_rows(services),
         "dev_console": services.dev is not None,
         **extra,
@@ -138,8 +142,6 @@ def create_app(services: UiServices) -> FastAPI:
         mount_dev(app, services.dev)
 
     # 聊天路由恒挂载：chat=None 时入口显式"暂不可用"（不隐藏）
-    from lira.ui.chat import mount_chat
-
     mount_chat(app, services, templates)
 
     @app.get("/")

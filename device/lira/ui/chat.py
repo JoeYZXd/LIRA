@@ -21,6 +21,8 @@
     动态值绝不拼进属性字符串。
   - 文本参数一律 POST body；数据端点错误回 JSON 不 302。
   - chat=None 装配：入口显式"暂不可用"，端点显式报错（不 500、不静默）。
+  - 文案单一出处：页面提示与 JSON 错误串一律取自 phrasebook CHAT_* 族
+    （与发送降级文案同库审校）。
 
 日志纪律（R10）：成员生命周期事件只记数字 ID 与来源（source=web-chat），
 绝不记名字或消息内容；消息内容不落任何日志（ChatService 已保证）。
@@ -35,8 +37,18 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
+from lira.chat.service import MAX_MESSAGE_CHARS
 from lira.chat.store import DuplicateMemberError
-from lira.dialog.phrasebook import CHAT_GREETING, CHAT_UNAVAILABLE
+from lira.dialog.phrasebook import (
+    CHAT_BAD_JSON_BODY,
+    CHAT_GREETING,
+    CHAT_MEMBER_MISSING,
+    CHAT_NAME_DUPLICATE,
+    CHAT_NAME_INVALID,
+    CHAT_NEED_JSON,
+    CHAT_OFFLINE_NOTE,
+    CHAT_ORIGIN_REJECT,
+)
 
 __all__ = ["mount_chat", "PAGE_SIZE", "EMOJI_PRESETS"]
 
@@ -46,11 +58,16 @@ logger = logging.getLogger(__name__)
 PAGE_SIZE = 50
 #: 新建成员的 emoji 预设（页内单选；非预设值一律回落库默认头像）
 EMOJI_PRESETS = ("🙂", "😊", "👵", "👴", "👩", "👨", "👧", "👦")
+#: 成员称呼上限（字）；模板 maxlength 经上下文同源注入（CHAT_NAME_INVALID 同数）
 _MAX_NAME_CHARS = 20
-#: chat 未装配 / 装配失败的显式文案（不隐藏、不静默）
-CHAT_UNAVAILABLE_NOTE = "聊天功能暂不可用，请找家人看看设备。"
-_ORIGIN_REJECT_NOTE = "请求来源不被允许，已拒绝。"
-_NAME_INVALID_NOTE = f"称呼需要 1 到 {_MAX_NAME_CHARS} 个字。"
+
+
+def _page(rows: list[dict]) -> tuple[list[dict], bool]:
+    """分页收敛（fetch limit=PAGE_SIZE+1 的约定形状）：多取的最旧一条丢弃，
+    换取 has_more 标记（"加载更多"是否还有下一页）。rows 旧→新。"""
+    if len(rows) > PAGE_SIZE:
+        return rows[1:], True
+    return rows, False
 
 
 def _origin_ok(request: Request) -> bool:
@@ -85,18 +102,16 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
         return {
             "mode": "picker",
             "chat_available": chat is not None,
-            "unavailable_note": CHAT_UNAVAILABLE_NOTE,
+            "unavailable_note": CHAT_OFFLINE_NOTE,
             "members": [] if chat is None else chat.store.list_members(),
             "emoji_presets": EMOJI_PRESETS,
+            "max_name_chars": _MAX_NAME_CHARS,
             "error": error,
         }
 
     def _conversation_context(member: dict, *, rename_error: str | None = None) -> dict:
         store = _chat().store
-        rows = store.recent_messages(member["id"], limit=PAGE_SIZE + 1)
-        has_more = len(rows) > PAGE_SIZE
-        if has_more:
-            rows = rows[1:]  # 保留最近 50 条（丢弃多取的最旧一条）
+        rows, has_more = _page(store.recent_messages(member["id"], limit=PAGE_SIZE + 1))
         return {
             "mode": "conversation",
             "chat_available": True,
@@ -105,21 +120,39 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
             "greeting": CHAT_GREETING,
             "has_more": has_more,
             "oldest_id": rows[0]["id"] if rows else 0,
-            "page_size": PAGE_SIZE,
+            "max_message_chars": MAX_MESSAGE_CHARS,
+            "max_name_chars": _MAX_NAME_CHARS,
             "rename_error": rename_error,
         }
 
     def _member_or_404(member_id: int) -> dict:
         member = _chat().store.get_member(member_id)
         if member is None:
-            raise HTTPException(status_code=404, detail="成员不存在")
+            raise HTTPException(status_code=404, detail=CHAT_MEMBER_MISSING)
         return member
 
     def _origin_reject_page(request: Request) -> templates.TemplateResponse:
         """表单类 POST 的跨源拒绝：显式错误重渲染选人页（不执行任何变更）。"""
         return templates.TemplateResponse(
-            request, "chat.html", _picker_context(error=_ORIGIN_REJECT_NOTE), status_code=403
+            request, "chat.html", _picker_context(error=CHAT_ORIGIN_REJECT), status_code=403
         )
+
+    def _form_guard(request: Request) -> templates.TemplateResponse | None:
+        """表单 POST 公共前置（规范序：先 chat 未装配、后同源）——两态均不
+        执行任何变更；返回 None 表示放行。
+
+        - chat 未装配 → 503 显式"暂不可用"重渲染选人页；
+        - 跨源 → 403 显式拒绝重渲染选人页。
+        JSON 端点不经过本 helper（错误须回 JSON，前置检查就地内联复用
+        _chat/_origin_ok 原子检查）。
+        """
+        if _chat() is None:
+            return templates.TemplateResponse(
+                request, "chat.html", _picker_context(error=CHAT_OFFLINE_NOTE), status_code=503
+            )
+        if not _origin_ok(request):
+            return _origin_reject_page(request)
+        return None
 
     # ---------- 选人页 ----------
 
@@ -140,17 +173,14 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
 
     @app.post("/chat/members")
     async def create_member(request: Request):
-        if not _origin_ok(request):
-            return _origin_reject_page(request)
-        if _chat() is None:
-            return templates.TemplateResponse(
-                request, "chat.html", _picker_context(error=CHAT_UNAVAILABLE_NOTE), status_code=503
-            )
+        resp = _form_guard(request)
+        if resp is not None:
+            return resp
         form = await request.form()
         name = _clean_member_name(str(form.get("name", "")))
         if not name:
             return templates.TemplateResponse(
-                request, "chat.html", _picker_context(error=_NAME_INVALID_NOTE), status_code=400
+                request, "chat.html", _picker_context(error=CHAT_NAME_INVALID), status_code=400
             )
         emoji = _clean_emoji(str(form.get("emoji", "")))
         try:
@@ -160,7 +190,7 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
             return templates.TemplateResponse(
                 request,
                 "chat.html",
-                _picker_context(error=f"「{name}」这个名字已经有了，换一个称呼吧。"),
+                _picker_context(error=CHAT_NAME_DUPLICATE.format(name=name)),
                 status_code=400,
             )
         logger.info("chat event=member_created source=web-chat member_id=%d", member["id"])
@@ -168,12 +198,9 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
 
     @app.post("/chat/{member_id}/rename")
     async def rename_member(member_id: int, request: Request):
-        if not _origin_ok(request):
-            return _origin_reject_page(request)
-        if _chat() is None:
-            return templates.TemplateResponse(
-                request, "chat.html", _picker_context(error=CHAT_UNAVAILABLE_NOTE), status_code=503
-            )
+        resp = _form_guard(request)
+        if resp is not None:
+            return resp
         member = _member_or_404(member_id)
         form = await request.form()
         name = _clean_member_name(str(form.get("name", "")))
@@ -181,7 +208,7 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
             return templates.TemplateResponse(
                 request,
                 "chat.html",
-                _conversation_context(member, rename_error=_NAME_INVALID_NOTE),
+                _conversation_context(member, rename_error=CHAT_NAME_INVALID),
                 status_code=400,
             )
         try:
@@ -191,7 +218,9 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
             return templates.TemplateResponse(
                 request,
                 "chat.html",
-                _conversation_context(member, rename_error=f"「{name}」这个名字已经有了。"),
+                _conversation_context(
+                    member, rename_error=CHAT_NAME_DUPLICATE.format(name=name)
+                ),
                 status_code=400,
             )
         logger.info("chat event=member_renamed source=web-chat member_id=%d", member_id)
@@ -199,12 +228,9 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
 
     @app.post("/chat/{member_id}/delete")
     async def delete_member(member_id: int, request: Request):
-        if not _origin_ok(request):
-            return _origin_reject_page(request)
-        if _chat() is None:
-            return templates.TemplateResponse(
-                request, "chat.html", _picker_context(error=CHAT_UNAVAILABLE_NOTE), status_code=503
-            )
+        resp = _form_guard(request)
+        if resp is not None:
+            return resp
         member = _member_or_404(member_id)
         # 级联删除其全部消息（store FK ON DELETE CASCADE）
         _chat().store.delete_member(member["id"])
@@ -215,21 +241,22 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
 
     @app.post("/chat/{member_id}/messages")
     async def send_message(member_id: int, request: Request):
+        # JSON 端点前置就地内联（错误须回 JSON 不回 HTML；_form_guard 回的是页面）
         chat = _chat()
         if chat is None:
             return JSONResponse(
-                {"state": "unavailable", "message": CHAT_UNAVAILABLE_NOTE, "reply": None, "saved": False},
+                {"state": "unavailable", "message": CHAT_OFFLINE_NOTE, "reply": None, "saved": False},
                 status_code=503,
             )
         if not _origin_ok(request):
-            return JSONResponse({"error": _ORIGIN_REJECT_NOTE}, status_code=403)
+            return JSONResponse({"error": CHAT_ORIGIN_REJECT}, status_code=403)
         if not str(request.headers.get("content-type", "")).startswith("application/json"):
             # 纵深防御：消息端点只收 JSON（浏览器 fetch 恒为 application/json）
-            return JSONResponse({"error": "内容类型须为 application/json"}, status_code=415)
+            return JSONResponse({"error": CHAT_NEED_JSON}, status_code=415)
         try:
             body = await request.json()
         except Exception:  # noqa: BLE001 - 任何解析失败都按显式 400，不 500
-            return JSONResponse({"error": "请求体须为 JSON"}, status_code=400)
+            return JSONResponse({"error": CHAT_BAD_JSON_BODY}, status_code=400)
         # 文本参数只走 POST body（query 参数一律忽略）
         text = str(body.get("text", "")) if isinstance(body, dict) else ""
         result = await chat.send(member_id, text)
@@ -246,20 +273,15 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
     async def list_messages(member_id: int, request: Request, before: int | None = None):
         chat = _chat()
         if chat is None:
-            return JSONResponse({"error": CHAT_UNAVAILABLE_NOTE}, status_code=503)
+            return JSONResponse({"error": CHAT_OFFLINE_NOTE}, status_code=503)
         store = chat.store
         if store.get_member(member_id) is None:
-            return JSONResponse({"error": "成员不存在"}, status_code=404)
+            return JSONResponse({"error": CHAT_MEMBER_MISSING}, status_code=404)
         if before is None:
-            rows = store.recent_messages(member_id, limit=PAGE_SIZE + 1)
-            has_more = len(rows) > PAGE_SIZE
-            if has_more:
-                rows = rows[1:]
+            rows, has_more = _page(store.recent_messages(member_id, limit=PAGE_SIZE + 1))
         else:
-            # 多取一条判断"更早还有没有"；超出时丢弃最旧一条（保留贴近 before 的一页）
-            fetched = store.messages_before(member_id, before, limit=PAGE_SIZE + 1)
-            has_more = len(fetched) > PAGE_SIZE
-            rows = fetched[1:] if has_more else fetched
+            # 多取一条判断"更早还有没有"；_page 丢弃最旧一条（贴近 before 的一页）
+            rows, has_more = _page(store.messages_before(member_id, before, limit=PAGE_SIZE + 1))
         return JSONResponse(
             {
                 "messages": [

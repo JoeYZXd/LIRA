@@ -563,13 +563,12 @@ class TestXssEscaping:
         assert ".textContent =" in page
         assert "dataset" in page, "数值 ID 走 dataset/元素属性"
 
-    def test_rendered_pages_script_tags_balanced(self, client):
-        """script 平衡回归（选人页 + 会话页）。"""
-        picker = client.get("/chat").text
-        _assert_script_balance(picker)
+    def test_rendered_pages_script_tags_balanced(self, client, client_no_chat):
+        """script 平衡回归（会话页）；选人页/暂不可用页不再携带会话页脚本。"""
+        for page in (client.get("/chat").text, client_no_chat.get("/chat/1").text):
+            assert page.count("<script>") == 0, "非会话页不携带页脚本"
         mid = make_member_id(client)
         _assert_script_balance(client.get(f"/chat/{mid}").text)
-        _assert_script_balance(client.get("/chat").text)  # 建成员后的选人页
 
     def test_extracted_js_passes_node_check(self, client, tmp_path):
         """提取内嵌 JS 跑 node --check（node 不在 PATH 时跳过，Windows 手动执行）。"""
@@ -668,7 +667,8 @@ class TestConversationStructure:
         mid = make_member_id(client)
         body = client.get(f"/chat/{mid}").text
         assert f'data-member-id="{mid}"' in body
-        assert 'data-page-size="50"' in body
+        assert 'data-oldest-id' in body
+        assert 'data-page-size' not in body, "分页大小由服务端 has_more 编码，不再下发"
 
     def test_send_form_and_more_button_present(self, client, services):
         mid = make_member(services)

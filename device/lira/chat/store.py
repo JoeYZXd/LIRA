@@ -95,15 +95,16 @@ class ChatStore:
     # ---------- 成员 ----------
 
     def create_member(self, name: str, emoji: str | None = None) -> dict:
-        """创建家庭成员；重名显式拒绝，emoji 缺省落默认头像。"""
-        if self._find_member_by_name(name) is not None:
-            raise DuplicateMemberError(f"成员名已存在: {name}")
+        """创建家庭成员；重名显式拒绝（UNIQUE 约束直接裁决），emoji 缺省落默认头像。"""
         created_at = int(self._now())
-        with self._conn:
-            cur = self._conn.execute(
-                "INSERT INTO members (name, emoji, created_at) VALUES (?, ?, ?)",
-                (name, _DEFAULT_EMOJI if emoji is None else emoji, created_at),
-            )
+        try:
+            with self._conn:
+                cur = self._conn.execute(
+                    "INSERT INTO members (name, emoji, created_at) VALUES (?, ?, ?)",
+                    (name, _DEFAULT_EMOJI if emoji is None else emoji, created_at),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateMemberError(f"成员名已存在: {name}") from exc
         return self.get_member(cur.lastrowid)
 
     def get_member(self, member_id: int) -> dict | None:
@@ -116,13 +117,21 @@ class ChatStore:
         return [dict(r) for r in rows]
 
     def rename_member(self, member_id: int, new_name: str) -> dict:
-        """改名（消息按 id 外键，历史不断链）；不改 emoji。重名/成员不存在显式报错。"""
-        if self.get_member(member_id) is None:
+        """改名（消息按 id 外键，历史不断链）；不改 emoji。重名/成员不存在显式报错。
+
+        重名由 UNIQUE 约束裁决（IntegrityError → DuplicateMemberError）；
+        成员不存在经 rowcount==0 → KeyError（先于重名：UPDATE 未命中行
+        不触发约束，与"先查存在"旧序同语义）。
+        """
+        try:
+            with self._conn:
+                cur = self._conn.execute(
+                    "UPDATE members SET name=? WHERE id=?", (new_name, member_id)
+                )
+        except sqlite3.IntegrityError as exc:
+            raise DuplicateMemberError(f"成员名已存在: {new_name}") from exc
+        if cur.rowcount == 0:
             raise KeyError(f"成员不存在: {member_id}")
-        if self._find_member_by_name(new_name) is not None:
-            raise DuplicateMemberError(f"成员名已存在: {new_name}")
-        with self._conn:
-            self._conn.execute("UPDATE members SET name=? WHERE id=?", (new_name, member_id))
         return self.get_member(member_id)
 
     def delete_member(self, member_id: int) -> bool:
@@ -130,10 +139,6 @@ class ChatStore:
         with self._conn:
             cur = self._conn.execute("DELETE FROM members WHERE id=?", (member_id,))
         return cur.rowcount > 0
-
-    def _find_member_by_name(self, name: str) -> dict | None:
-        row = self._conn.execute("SELECT * FROM members WHERE name=?", (name,)).fetchone()
-        return dict(row) if row is not None else None
 
     # ---------- 消息 ----------
 

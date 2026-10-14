@@ -77,7 +77,7 @@
   <section class="card">
     <h2>{{ '创建第一位家人' if not members else '添加家人' }}</h2>
     <form method="post" action="/chat/members">
-      <input type="text" name="name" placeholder="家人的称呼，比如：妈妈" maxlength="20" required>
+      <input type="text" name="name" placeholder="家人的称呼，比如：妈妈" maxlength="{{ max_name_chars }}" required>
       <div class="emoji-row">
         {% for e in emoji_presets %}
         <label class="emoji-opt">
@@ -95,7 +95,7 @@
     <span class="chat-avatar">{{ member.emoji }}</span>
     <span class="chat-name">{{ member.name }}</span>
   </div>
-  <div id="chat-root" data-member-id="{{ member.id }}" data-oldest-id="{{ oldest_id }}" data-page-size="{{ page_size }}">
+  <div id="chat-root" data-member-id="{{ member.id }}" data-oldest-id="{{ oldest_id }}">
     <div id="chat-log" class="card chat-log">
       {% if not messages %}<p class="muted">{{ greeting }}</p>{% endif %}
       {%- for msg in messages %}
@@ -109,7 +109,7 @@
     </div>
     <section class="card">
       <form id="chat-form">
-        <input type="text" id="chat-input" name="text" placeholder="想说什么就打给我吧" autocomplete="off" maxlength="2000">
+        <input type="text" id="chat-input" name="text" placeholder="想说什么就打给我吧" autocomplete="off" maxlength="{{ max_message_chars }}">
         <button id="btn-send" class="primary" type="submit">发送</button>
       </form>
       <p id="chat-err" class="error" hidden></p>
@@ -119,7 +119,7 @@
       {% if rename_error %}<p class="error">{{ rename_error }}</p>{% endif %}
       <form method="post" action="/chat/{{ member.id }}/rename" class="inline">
         <label for="rename-input">称呼</label>
-        <input id="rename-input" type="text" name="name" value="{{ member.name }}" maxlength="20" required>
+        <input id="rename-input" type="text" name="name" value="{{ member.name }}" maxlength="{{ max_name_chars }}" required>
         <button class="small primary" type="submit">改名</button>
       </form>
       <form method="post" action="/chat/{{ member.id }}/delete" id="form-delete" style="margin-top: var(--space-3)">
@@ -133,6 +133,8 @@
     </details>
   </div>
 {% endif %}
+{% if mode == 'conversation' %}
+{# 会话页专属脚本：选人页 / 暂不可用页不携带（页内自判分支已无必要） #}
 <script>
 (function () {
   'use strict';
@@ -146,7 +148,6 @@
   var btnMore = document.getElementById('btn-more');
   var memberId = Number(root.dataset.memberId); // 数值 ID 只走 dataset
   var oldestId = Number(root.dataset.oldestId);
-  var pageSize = Number(root.dataset.pageSize) || 50;
   var sending = false; // 单飞：在途期间忽略再次提交（服务端另有全局单飞）
 
   // 转义纪律：动态文本一律 createElement + textContent 进 DOM（元素内容
@@ -172,7 +173,7 @@
     return wrap;
   }
 
-  // meta 行三态：发送中（pending）/ 未发送 + 降级文案 + 重发（bad）/ 清除（null）
+  // meta 行三态：发送中（pending）/ 未发送 + 降级文案 + 重发 / 清除（null）
   function renderMeta(wrap, opts) {
     var old = wrap.querySelector('.chat-meta');
     if (old) { old.parentNode.removeChild(old); }
@@ -223,11 +224,11 @@
       }
       // 任一降级态：保留气泡、标注"未发送"、附降级文案与一键重发
       var copy = (j && j.message) ? String(j.message) : '发送失败，请稍后再试。';
-      renderMeta(wrap, { label: '未发送', copy: copy, retry: true, bad: true });
+      renderMeta(wrap, { label: '未发送', copy: copy, retry: true });
       errEl.textContent = copy;
       errEl.hidden = false;
     }).catch(function () {
-      renderMeta(wrap, { label: '未发送', copy: '网络异常，消息没有发出去。', retry: true, bad: true });
+      renderMeta(wrap, { label: '未发送', copy: '网络异常，消息没有发出去。', retry: true });
       errEl.textContent = '网络异常，消息没有发出去。';
       errEl.hidden = false;
     }).finally(function () {
@@ -260,7 +261,7 @@
           }
           log.scrollTop += log.scrollHeight - anchor;
           if (items.length) { oldestId = Number(items[0].id); }
-          if (!j || !j.has_more || items.length < pageSize) { btnMore.hidden = true; } // 尽头即永久隐藏
+          if (!j || !j.has_more) { btnMore.hidden = true; } // 服务端 has_more 即尽头信号，永久隐藏
         })
         .catch(function () {
           errEl.textContent = '加载更早的聊天失败，请再试一次。';
@@ -294,4 +295,5 @@
   scrollBottom(); // 初始视图停在新消息端
 })();
 </script>
+{% endif %}
 {% endblock %}

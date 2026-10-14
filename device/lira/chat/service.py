@@ -126,7 +126,7 @@ class ChatService:
         self._rate_window_seconds = rate_window_seconds
         #: 设备级全局单飞锁：同时最多 1 个在途聊天调用（窗口组装 + LLM + 落库）
         self._mutex = asyncio.Lock()
-        #: 每成员固定窗口限流：member_id -> (窗口桶序号, 窗口内已计数)
+        #: 每成员固定窗口限流：member_id -> (窗口内已计数, 窗口桶序号)
         self._rate_counts: dict[int, tuple[int, int]] = {}
 
     # ---------- 依赖访问面 ----------

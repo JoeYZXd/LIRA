@@ -186,7 +186,7 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
         try:
             member = _chat().store.create_member(name, emoji)
         except DuplicateMemberError:
-            logger.info("chat event=member_create_rejected reason=duplicate")
+            logger.info("chat event=member_create_rejected reason=duplicate source=web-chat")
             return templates.TemplateResponse(
                 request,
                 "chat.html",
@@ -214,7 +214,10 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
         try:
             updated = _chat().store.rename_member(member_id, name)
         except DuplicateMemberError:
-            logger.info("chat event=member_rename_rejected reason=duplicate member_id=%d", member_id)
+            logger.info(
+                "chat event=member_rename_rejected reason=duplicate source=web-chat member_id=%d",
+                member_id,
+            )
             return templates.TemplateResponse(
                 request,
                 "chat.html",

@@ -170,7 +170,7 @@ class TestPicker:
     def test_default_emoji_applies_when_preset_missing(self, client, services):
         client.post("/chat/members", data={"name": "爷爷"}, follow_redirects=False)
         member = services.chat.store.list_members()[0]
-        assert member["emoji"], "emoji 落库非空（预设缺省回落默认头像）"
+        assert member["emoji"] == "🙂", "emoji 落库非空（预设缺省回落默认头像）"
 
     def test_create_duplicate_name_explicit_error(self, client):
         first = client.post("/chat/members", data={"name": "妈妈"}, follow_redirects=False)
@@ -188,7 +188,7 @@ class TestPicker:
         """emoji 只收预设单选值；伪造值回落默认（不经任何属性拼接渲染）。"""
         client.post("/chat/members", data={"name": "舅舅", "emoji": "<script>"})
         member = services.chat.store.list_members()[0]
-        assert member["emoji"] != "<script>"
+        assert member["emoji"] == "🙂"
 
 
 # ---------- 会话页 ----------

@@ -1026,64 +1026,68 @@ class DeviceRuntime:
                 "ui event=chat_init_failed kind=%s（聊天入口显式暂不可用，面板不受影响）",
                 type(exc).__name__,
             )
-        services = UiServices(
-            privacy=self.privacy,
-            vault=self._vault,
-            store=self.store,
-            settings=self.settings,
-            remote_available=self._llm.is_available,
-            network_ok=self._network_ok,
-            status_provider=self.status,
-            dev=self._dev_handle(),
-            chat=chat_service,
-        )
-        app = create_app(services)
-        # 显式 int 级别的日志配置：板上实测 uvicorn 默认 dictConfig 的字符串
-        # 级别（'INFO'）会在 _checkLevel 处报 Unknown level（仅完整运行进程内
-        # 复现，隔离不可复现；int 级别绕开字符串解析，根因存疑待查）
-        uvicorn_log_config = {
-            "version": 1,
-            "disable_existing_loggers": False,
-            "formatters": {
-                "default": {
-                    "()": "uvicorn.logging.DefaultFormatter",
-                    "fmt": "%(levelprefix)s %(message)s",
-                }
-            },
-            "handlers": {
-                "default": {
-                    "formatter": "default",
-                    "class": "logging.StreamHandler",
-                    "stream": "ext://sys.stderr",
-                }
-            },
-            "loggers": {
-                "uvicorn": {"handlers": ["default"], "level": 20, "propagate": False},
-                "uvicorn.error": {"level": 20},
-                "uvicorn.access": {"handlers": ["default"], "level": 20, "propagate": False},
-            },
-        }
-        server = uvicorn.Server(
-            uvicorn.Config(
-                app,
-                host=self._cfg.ui.host,
-                port=self._cfg.ui.port,
-                access_log=False,
-                log_config=uvicorn_log_config,
-            )
-        )
-        self._ui_server = server
+        # 库一旦创建成功，其后任何装配/启动失败都必须归还资源：try/finally
+        # 从 store 存在即生效，close 不再依赖恰好走到 serve 的 finally。
         try:
-            await server.serve()
-        except (SystemExit, OSError) as exc:
-            # uvicorn 端口绑定失败走 sys.exit(1)（SystemExit）或抛 OSError：
-            # 语音主功能不陪葬，降级为纯语音运行（评审 P2）
-            logging.warning("UI 服务不可用（%s），设备降级为纯语音模式", exc)
+            services = UiServices(
+                privacy=self.privacy,
+                vault=self._vault,
+                store=self.store,
+                settings=self.settings,
+                remote_available=self._llm.is_available,
+                network_ok=self._network_ok,
+                status_provider=self.status,
+                dev=self._dev_handle(),
+                chat=chat_service,
+            )
+            app = create_app(services)
+            # 显式 int 级别的日志配置：板上实测 uvicorn 默认 dictConfig 的字符串
+            # 级别（'INFO'）会在 _checkLevel 处报 Unknown level（仅完整运行进程内
+            # 复现，隔离不可复现；int 级别绕开字符串解析，根因存疑待查）
+            uvicorn_log_config = {
+                "version": 1,
+                "disable_existing_loggers": False,
+                "formatters": {
+                    "default": {
+                        "()": "uvicorn.logging.DefaultFormatter",
+                        "fmt": "%(levelprefix)s %(message)s",
+                    }
+                },
+                "handlers": {
+                    "default": {
+                        "formatter": "default",
+                        "class": "logging.StreamHandler",
+                        "stream": "ext://sys.stderr",
+                    }
+                },
+                "loggers": {
+                    "uvicorn": {"handlers": ["default"], "level": 20, "propagate": False},
+                    "uvicorn.error": {"level": 20},
+                    "uvicorn.access": {"handlers": ["default"], "level": 20, "propagate": False},
+                },
+            }
+            server = uvicorn.Server(
+                uvicorn.Config(
+                    app,
+                    host=self._cfg.ui.host,
+                    port=self._cfg.ui.port,
+                    access_log=False,
+                    log_config=uvicorn_log_config,
+                )
+            )
+            self._ui_server = server
+            try:
+                await server.serve()
+            except (SystemExit, OSError) as exc:
+                # uvicorn 端口绑定失败走 sys.exit(1)（SystemExit）或抛 OSError：
+                # 语音主功能不陪葬，降级为纯语音运行（评审 P2）
+                logging.warning("UI 服务不可用（%s），设备降级为纯语音模式", exc)
+            finally:
+                # Ctrl-C/SIGTERM 由 uvicorn 捕获时（capture_signals 暂接管信号）：
+                # serve 正常返回即驱动整机停机；UI 自身故障（绑端口失败）不触发停机
+                if server.should_exit:
+                    self._stop.set()
         finally:
-            # Ctrl-C/SIGTERM 由 uvicorn 捕获时（capture_signals 暂接管信号）：
-            # serve 正常返回即驱动整机停机；UI 自身故障（绑端口失败）不触发停机
-            if server.should_exit:
-                self._stop.set()
             # ChatStore 随 UI 伴随任务退出关闭（ApplianceStore 由 main() 的
             # finally 统一关闭；聊天装配降级为 None 时无库可关）
             if chat_store is not None:

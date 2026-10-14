@@ -140,7 +140,7 @@
   'use strict';
   var root = document.getElementById('chat-root');
   var log = document.getElementById('chat-log');
-  if (!root || !log) { return; } // 选人页 / 暂不可用页没有会话元素
+  if (!root || !log) { return; } // 会话元素缺失时的防御性退出（正常仅在会话视图渲染本脚本）
   var form = document.getElementById('chat-form');
   var input = document.getElementById('chat-input');
   var btn = document.getElementById('btn-send');
@@ -252,7 +252,7 @@
         .then(function (j) {
           var items = (j && j.messages) ? j.messages : [];
           var anchor = log.scrollHeight; // prepend 保持滚动锚点不跳
-          for (var i = 0; i < items.length; i++) {
+          for (var i = items.length - 1; i >= 0; i--) { // 倒序前插：整页旧→新落在已有气泡之上
             var m = items[i];
             var wrap = bubbleEl(m.role === 'user' ? 'user' : 'assistant');
             wrap.querySelector('.chat-bubble').textContent = String(m.content);

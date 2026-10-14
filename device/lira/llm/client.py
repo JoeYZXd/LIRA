@@ -106,8 +106,18 @@ class LlmClient:
 
     async def chat(self, prompt: str, *, system: str | None = None,
                    context: ContextSnapshot | None = None,
-                   on_wait_feedback=_DEFAULT_FEEDBACK) -> str:
+                   on_wait_feedback=_DEFAULT_FEEDBACK,
+                   timeout_seconds: float | None = None,
+                   voice_log: bool = True) -> str:
         """发起一次流式对话并回收完整文本。
+
+        Args:
+            timeout_seconds: 单次调用超时覆盖（None=构造时配置值）。文字聊天
+                传入约 30s 放宽长回复等待（home-console U2）；语音路径不传，
+                行为不变。
+            voice_log: False 时本调用不写任何 VOICE_LOG 条目（交互中提示、
+                回复预览、失败提示全部抑制）——文字聊天不进语音展示面，
+                且回复内容绝不外泄到 dev 控制台（home-console U2）。
 
         Raises:
             PrivacyBlocked: 隐私模式开启（网络层零请求）。
@@ -116,7 +126,8 @@ class LlmClient:
         # 隐私拦截在入口：任何网络活动之前（R12 fail-closed，AE1）
         if self._privacy():
             logger.info("llm.chat blocked_by=privacy")
-            VOICE_LOG.log("privacy", "隐私模式开启，远程调用已拦截")
+            if voice_log:
+                VOICE_LOG.log("privacy", "隐私模式开启，远程调用已拦截")
             raise PrivacyBlocked("隐私模式开启，已拦截远程调用")
 
         messages: list[dict[str, str]] = []
@@ -129,42 +140,53 @@ class LlmClient:
         messages.append({"role": "user", "content": prompt})
 
         # 语音交互日志（lira.voice_log 内存展示区）可含回复片段；
-        # logging 行"prompt/回复内容不落日志"纪律不受影响
-        VOICE_LOG.log("llm", f"与大模型交互中（提示 {len(prompt)} 字）…")
+        # logging 行"prompt/回复内容不落日志"纪律不受影响。
+        # voice_log=False（文字聊天）时整条调用不进展示区
+        if voice_log:
+            VOICE_LOG.log("llm", f"与大模型交互中（提示 {len(prompt)} 字）…")
         started = time.monotonic()
         try:
-            text = await self._stream_chat(messages, on_wait_feedback=on_wait_feedback)
+            text = await self._stream_chat(messages, on_wait_feedback=on_wait_feedback,
+                                           timeout_seconds=timeout_seconds)
         except APIConnectionError as exc:
             # 含 APITimeoutError（其父类是 APIConnectionError），由熔断器计数
             self._breaker.record_failure()
             logger.info("llm.chat event=conn_error elapsed=%.3fs", time.monotonic() - started)
-            VOICE_LOG.log("llm_fail", "大模型连接失败，已降级")
+            if voice_log:
+                VOICE_LOG.log("llm_fail", "大模型连接失败，已降级")
             raise LlmError("远程服务连接失败") from exc
         except APIStatusError as exc:
             # 5xx 计入熔断（服务端持续故障应开断路）；4xx 属配置问题不计
             if exc.status_code >= 500:
                 self._breaker.record_failure()
             logger.info("llm.chat event=http_%d elapsed=%.3fs", exc.status_code, time.monotonic() - started)
-            VOICE_LOG.log("llm_fail", f"大模型返回错误（HTTP {exc.status_code}），已降级")
+            if voice_log:
+                VOICE_LOG.log("llm_fail", f"大模型返回错误（HTTP {exc.status_code}），已降级")
             raise LlmError("远程服务返回错误") from exc
         self._breaker.record_success()
         logger.info("llm.chat event=ok elapsed=%.3fs", time.monotonic() - started)
-        preview = text if len(text) <= 80 else text[:80] + "…"
-        VOICE_LOG.log("llm_reply", f"大模型返回结果（{len(text)} 字）：{preview}")
+        if voice_log:
+            preview = text if len(text) <= 80 else text[:80] + "…"
+            VOICE_LOG.log("llm_reply", f"大模型返回结果（{len(text)} 字）：{preview}")
         return text
 
     async def _stream_chat(self, messages: list[dict[str, str]], *,
-                           on_wait_feedback=_DEFAULT_FEEDBACK) -> str:
+                           on_wait_feedback=_DEFAULT_FEEDBACK,
+                           timeout_seconds: float | None = None) -> str:
         """建流并回收全部增量；首 token 等待超窗时触发一次 R28 回调。"""
 
         stream = None
         async def _open_and_first_chunk() -> object:
             nonlocal stream
-            stream = await self._client.chat.completions.create(
-                model=self._model,
-                messages=messages,  # type: ignore[arg-type]
-                stream=True,
-            )
+            create_kwargs: dict = {
+                "model": self._model,
+                "messages": messages,  # type: ignore[arg-type]
+                "stream": True,
+            }
+            if timeout_seconds is not None:
+                # 单次调用超时覆盖构造时配置值（openai SDK 的 per-request 语义）
+                create_kwargs["timeout"] = timeout_seconds
+            stream = await self._client.chat.completions.create(**create_kwargs)
             try:
                 return await anext(stream)
             except StopAsyncIteration:

@@ -60,6 +60,14 @@ __all__ = [
     "confirm_prompt_text",
     "guidance_retry_text",
     "disabled_announce_text",
+    "CHAT_PRIVACY",
+    "CHAT_UNAVAILABLE",
+    "CHAT_BUSY",
+    "CHAT_FAILED",
+    "CHAT_MEMBER_GONE",
+    "CHAT_TOO_LONG",
+    "CHAT_EMPTY",
+    "CHAT_GREETING",
 ]
 
 # ---------- 唤醒与聆听（R25/R20） ----------
@@ -208,3 +216,21 @@ def dnd_escape_prompt_text(desc: str) -> str:
 INPUT_NOT_HEARD = "收音没有完成，请再说一遍。"
 UNDERSTANDING_FAILED = "理解指令时出了问题，请再说一遍。"
 PLAYBACK_FAILED = "回答没有播完，您可以再问一次。"
+
+# ---------- 文字聊天降级文案（home-console 计划 U2，R8/R10） ----------
+#
+# 措辞纪律：
+#  - 隐私态只断言"未发送至远程/云端"，不得断言"未离开设备"——局域网明文
+#    HTTP 与本地存储使更强承诺不实（沿 client.py 的措辞精度）；
+#  - 降级文案一律不回显消息内容（R10 内容纪律的文案侧）；
+#  - 面向家人：短句、友好、给出下一步（重试/找家人）。
+
+CHAT_PRIVACY = "现在是隐私模式，这句话没有发送到远程或云端，我也暂时不能回话。想让小丽拉继续聊，请家人在设备管理页面关闭隐私模式。"
+CHAT_UNAVAILABLE = "网络或远程服务暂时不可用，这句话没有发出去。请稍后再发一次。"
+CHAT_BUSY = "小丽拉正在回另一条消息，请稍等几秒再发。"
+CHAT_FAILED = "这次没有聊成，回复没有保存。请再发一次试试。"
+CHAT_MEMBER_GONE = "这位家人的会话已经不存在了，请回到选人页重新进入。"
+CHAT_TOO_LONG = "这条消息超过 2000 字了，请拆成几条发给我。"
+CHAT_EMPTY = "输入框还是空的，想说什么就打出来发给我吧。"
+#: 空会话引导语（U3 会话页零消息态渲染；会话历史为空时不显示"加载更多"）
+CHAT_GREETING = "还没聊过天呢。在下面的输入框打句话，发给小丽拉吧。"

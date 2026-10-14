@@ -272,14 +272,41 @@ def create_app(services: UiServices) -> FastAPI:
 
 
 def _demo_services() -> UiServices:  # pragma: no cover - 本地浏览用
-    """x86 本地浏览用 mock 装配（内存库，无 HAL 依赖）。"""
+    """x86 本地浏览用 mock 装配（内存库，无 HAL 依赖，含聊天演示数据）。"""
     store = ApplianceStore(":memory:")
+
+    from lira.chat.service import ChatService
+    from lira.chat.store import ChatStore
+
+    class _DemoLlm:
+        """演示桩：恒定回复，不发网络请求。"""
+
+        async def chat(self, prompt: str, **kwargs: object) -> str:
+            return "好的，我在听你说呢。（本地演示回复）"
+
+    chat_store = ChatStore(":memory:")
+    member = chat_store.create_member("妈妈", emoji="👩")
+    chat_store.append_messages(
+        member["id"],
+        [
+            ("user", "今天天气怎么样？"),
+            ("assistant", "我这边看不到实时天气，不过你可以看看窗外呀。（本地演示回复）"),
+        ],
+    )
+    chat_store.create_member("小明", emoji="🧒")
+    chat_service = ChatService(
+        chat_store,
+        _DemoLlm(),  # type: ignore[arg-type]
+        privacy=lambda: False,
+        remote_available=lambda: True,
+    )
     return UiServices(
         privacy=PrivacyState(),
         vault=PassphraseVault(store),
         store=store,
         remote_available=lambda: True,
         network_ok=lambda: True,
+        chat=chat_service,
     )
 
 

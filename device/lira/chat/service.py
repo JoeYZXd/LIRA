@@ -129,6 +129,13 @@ class ChatService:
         #: 每成员固定窗口限流：member_id -> (窗口桶序号, 窗口内已计数)
         self._rate_counts: dict[int, tuple[int, int]] = {}
 
+    # ---------- 依赖访问面 ----------
+
+    @property
+    def store(self) -> ChatStore:
+        """成员/历史库（home-console U3 的 UI 成员管理路由使用；只暴露注入的库）。"""
+        return self._store
+
     # ---------- 唯一入口 ----------
 
     async def send(self, member_id: int, text: str) -> ChatSendResult:

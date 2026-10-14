@@ -54,6 +54,9 @@ class UiServices:
     network_ok: Callable[[], bool] = lambda: False
     #: 开发者控制台句柄（dev_console.enabled 时由装配层注入；None = 不挂载）
     dev: object | None = None
+    #: 聊天服务（home-console U3 的 ChatService；None = 未装配——聊天入口
+    #: 显式"暂不可用"，不 404、不隐藏、不 500）
+    chat: object | None = None
     #: 整机状态提供者（R1 状态面；/status JSON 合并其返回的枚举/布尔/数值字段）
     status_provider: Callable[[], dict] = lambda: {}
 
@@ -97,6 +100,11 @@ def create_app(services: UiServices) -> FastAPI:
         from lira.ui.dev import mount_dev
 
         mount_dev(app, services.dev)
+
+    # 聊天路由恒挂载：chat=None 时入口显式"暂不可用"（不隐藏）
+    from lira.ui.chat import mount_chat
+
+    mount_chat(app, services, templates)
 
     @app.get("/")
     async def index(request: Request):

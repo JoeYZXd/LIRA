@@ -3,7 +3,9 @@
 定位（计划 U7 Approach）：设备本地小 Web 服务，板上绑屏即 kiosk。
 
 页面（服务端渲染 Jinja2，无前端构建链，无 HTMX——表单 + 重定向已够用）：
-  - `/`        状态卡（网络/远程可用/隐私）+ 隐私开关 + 音量/语速 + 设备列表只读
+  - `/`        首页（时段问候 + 聊天入口 + 音量/语速快捷步进 + 隐私开关 +
+               折叠收纳的设备状态/家电只读表/开发者控制台——home-console U5；
+               R4：既有端点/表单参数/`/status` 全部不变，纯呈现层重排）
   - `/passphrase/setup`  设备本地口令首启设置（无默认值，fail-closed）
   - `/status`  只读状态 JSON（kiosk 轮询用，不鉴权）
 
@@ -20,6 +22,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
@@ -30,8 +33,17 @@ from fastapi.templating import Jinja2Templates
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PassphraseVault, PrivacyState
 from lira.settings import DeviceSettings
+from lira.ui.chat import CHAT_UNAVAILABLE_NOTE
 
-__all__ = ["DeviceSettings", "UiServices", "create_app", "TEMPLATES_DIR"]
+__all__ = [
+    "DeviceSettings",
+    "HOME_WELCOME",
+    "UiServices",
+    "create_app",
+    "greeting_for_hour",
+    "home_greeting",
+    "TEMPLATES_DIR",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -78,8 +90,32 @@ def _appliance_rows(services: UiServices) -> list[dict[str, object]]:
     return rows
 
 
+#: 首页固定欢迎语（跟在时段问候后的一句；home-console U5 首屏）
+HOME_WELCOME = "我是小丽拉，您的家庭小助手。"
+
+
+def greeting_for_hour(hour: int) -> str:
+    """时段问候语（home-console U5）：5-11 点早上 / 12-17 点下午 / 其余晚上。
+
+    其余 = 18-23 点与 0-4 点（深夜凌晨归晚上），三分支覆盖全部 24 小时。
+    """
+    if 5 <= hour < 12:
+        return "早上好"
+    if 12 <= hour < 18:
+        return "下午好"
+    return "晚上好"
+
+
+def home_greeting(hour: int) -> str:
+    """首页首屏问候整句：时段问候 + 固定欢迎语（单一出处，可按小时单测）。"""
+    return f"{greeting_for_hour(hour)}，{HOME_WELCOME}"
+
+
 def _index_context(services: UiServices, **extra: object) -> dict[str, object]:
     return {
+        "greeting": home_greeting(datetime.now().hour),
+        "chat_available": services.chat is not None,
+        "chat_unavailable_note": CHAT_UNAVAILABLE_NOTE,
         "privacy_on": services.privacy.is_on,
         "remote_available": services.remote_available(),
         "network_ok": services.network_ok(),

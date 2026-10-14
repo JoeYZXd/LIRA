@@ -971,3 +971,102 @@ class TestReviewFixesWiring:
         """agent-native：语音可变的持久音量进入 status 观测面。"""
         rig = make_rig(tmp_path)
         assert rig.runtime.status()["volume"] == 1.0
+
+
+# ---------- 聊天装配与降级（home-console 计划 U6） ----------
+
+
+class TestChatAssembly:
+    async def test_ui_mount_registers_chat_and_keeps_existing_assembly(
+        self, tmp_path, monkeypatch
+    ):
+        """装配冒烟：mock HAL 下 UI 应用含聊天路由且 chat 服务真实可用，
+        既有装配不变（/status 照常）；ChatStore 随 UI 伴随任务退出关闭。"""
+        import sqlite3
+
+        import httpx
+
+        from lira.chat.store import ChatStore
+
+        # 钉住 close() 接线：包一层记录调用（不改行为）
+        closed: list[bool] = []
+        original_close = ChatStore.close
+
+        def recording_close(self):
+            original_close(self)
+            closed.append(True)
+
+        monkeypatch.setattr(ChatStore, "close", recording_close)
+        rig = make_rig(tmp_path, ui_port=0)
+        task = asyncio.ensure_future(rig.runtime.run())
+        try:
+            await asyncio.sleep(0.3)
+            server = rig.runtime._ui_server
+            assert server is not None and server.started
+            port = server.servers[0].sockets[0].getsockname()[1]
+            base = f"http://127.0.0.1:{port}"
+            async with httpx.AsyncClient() as client:
+                # 既有装配不变：/status 只读 JSON 照常（mock rig 已录入 1 台家电）
+                r = await client.get(f"{base}/status")
+                assert r.status_code == 200
+                assert r.json()["appliance_count"] == 1
+                # 聊天路由已注册：选人页 200（chat 未装配时建成员会得显式 503）
+                picker = await client.get(f"{base}/chat")
+                assert picker.status_code == 200
+                # 经生产装配的 ChatService 真实落库：创建成员 → 303 进会话页
+                created = await client.post(f"{base}/chat/members", data={"name": "妈妈"})
+                assert created.status_code == 303
+                assert created.headers["location"].startswith("/chat/")
+                # 会话页可达且选人页列出该成员（store 读写经同一装配的 ChatService）
+                convo = await client.get(f"{base}{created.headers['location']}")
+                assert convo.status_code == 200 and "妈妈" in convo.text
+                after = await client.get(f"{base}/chat")
+                assert after.status_code == 200 and "妈妈" in after.text
+        finally:
+            rig.source.push_eof()
+            await asyncio.wait_for(task, timeout=5.0)
+        assert len(closed) == 1, "ChatStore.close() 必须挂在 _run_ui 退出路径"
+        # db 路径核对：聊天表建在既有设备库文件（无第三份数据副本）
+        with sqlite3.connect(tmp_path / "device.db") as probe:
+            tables = {
+                row[0]
+                for row in probe.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+        assert {"members", "messages"} <= tables
+
+    async def test_chat_store_failure_degrades_to_none(self, tmp_path, monkeypatch, caplog):
+        """降级路径：ChatStore 构造失败 → 警告（无内容）+ chat=None，
+        UI 仍挂载、既有面板不受影响，异常不上抛拖垮主循环。"""
+        import sqlite3
+
+        import httpx
+
+        from lira.chat.store import ChatStore
+
+        def broken_init(self, *args, **kwargs):
+            raise sqlite3.OperationalError("chat store init boom")
+
+        monkeypatch.setattr(ChatStore, "__init__", broken_init)
+        rig = make_rig(tmp_path, ui_port=0)
+        with caplog.at_level(logging.WARNING):
+            task = asyncio.ensure_future(rig.runtime.run())
+            try:
+                await asyncio.sleep(0.3)
+                server = rig.runtime._ui_server
+                assert server is not None and server.started, "聊天失败不得拖垮 UI"
+                port = server.servers[0].sockets[0].getsockname()[1]
+                base = f"http://127.0.0.1:{port}"
+                async with httpx.AsyncClient() as client:
+                    # 既有面板不受影响：/status 与首页（含隐私开关入口）照常
+                    r = await client.get(f"{base}/status")
+                    assert r.status_code == 200
+                    home = await client.get(f"{base}/")
+                    assert home.status_code == 200
+                    # 聊天入口显式"暂不可用"（不隐藏、不静默、不报错页）
+                    assert "暂不可用" in home.text
+            finally:
+                rig.source.push_eof()
+                await asyncio.wait_for(task, timeout=5.0)
+        assert any("chat_init_failed" in rec.message for rec in caplog.records)

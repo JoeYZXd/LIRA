@@ -41,6 +41,8 @@ from lira.audio._paths import (
     VOCODER_ONNX,
     WAKEWORD_KEYWORDS_FILE,
 )
+from lira.chat.service import ChatService
+from lira.chat.store import ChatStore
 from lira.config import AppConfig, ConfigError, load_config
 from lira.dialog.intents import COMMANDS_KEYWORDS_FILE, PLAYBACK_WHITELIST_KEYWORDS_FILE
 from lira.dialog.route_dispatch import RouteDispatch
@@ -1003,6 +1005,27 @@ class DeviceRuntime:
         except ImportError as exc:
             logging.warning("UI 依赖未安装（pip install -e '.[ui]'）: %s", exc)
             return
+        # 聊天装配（home-console U6）：ChatStore 打开与设备库同一 db 文件
+        # （cfg.db_path 已按仓库根解析——不按 cwd 重解析，避免第三份数据副本）；
+        # privacy 谓词与 LlmClient 同源（build_llm 的 lambda: privacy.is_on 形态），
+        # 可用性信号复用同一 remote_available。构造包降级：任何失败记警告并以
+        # chat=None 继续——面板（含隐私开关入口）必须可用，聊天入口显式
+        # "暂不可用"（沿下方端口绑定失败的降级先例）。
+        chat_store: ChatStore | None = None
+        chat_service = None
+        try:
+            chat_store = ChatStore(self._cfg.db_path)
+            chat_service = ChatService(
+                chat_store,
+                self._llm,
+                privacy=lambda: self.privacy.is_on,
+                remote_available=self._llm.is_available,
+            )
+        except Exception as exc:  # noqa: BLE001 - 聊天装配失败不拖垮面板（计划 U6）
+            logging.warning(
+                "ui event=chat_init_failed kind=%s（聊天入口显式暂不可用，面板不受影响）",
+                type(exc).__name__,
+            )
         services = UiServices(
             privacy=self.privacy,
             vault=self._vault,
@@ -1012,6 +1035,7 @@ class DeviceRuntime:
             network_ok=self._network_ok,
             status_provider=self.status,
             dev=self._dev_handle(),
+            chat=chat_service,
         )
         app = create_app(services)
         # 显式 int 级别的日志配置：板上实测 uvicorn 默认 dictConfig 的字符串
@@ -1060,6 +1084,10 @@ class DeviceRuntime:
             # serve 正常返回即驱动整机停机；UI 自身故障（绑端口失败）不触发停机
             if server.should_exit:
                 self._stop.set()
+            # ChatStore 随 UI 伴随任务退出关闭（ApplianceStore 由 main() 的
+            # finally 统一关闭；聊天装配降级为 None 时无库可关）
+            if chat_store is not None:
+                chat_store.close()
 
     async def _shutdown(self, stack) -> None:
         """优雅停机：UI 先退（should_exit -> serve 自然返回）->

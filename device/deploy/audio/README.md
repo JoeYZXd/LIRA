@@ -16,4 +16,6 @@
 
 先完成服务、摄像头、收音和输出检查，再按 `docs/voice-continuity-validation.md` 记录真人样本。连续完整指令、回声中的自身播报隔离、实际停止延迟不能靠模拟测试证明。
 
+流式语音改造的同机对照、数值采集与回滚记录见仓库根目录的 [voice-streaming-validation.md](../../../docs/voice-streaming-validation.md)。新流水线继续使用 `lira_audio`，无需为连续 PCM 输出修改专用 PCM、PipeWire 或 service override。HAL 首帧消费和排空时间必须通过外部录音或回环校验，不能当作扬声器实测。
+
 如果配置失败、音频绑定错误或出现自身播报误执行，停止试运行并成对恢复应用和音频配置。原本不存在的新增专用配置也应移除；不要删除用户后来添加的其他配置。重启用户音频服务与 LIRA，重新检查服务和原有读书路径。保留备份与失败记录。

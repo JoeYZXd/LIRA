@@ -12,6 +12,10 @@ ExecStartPre=/bin/sh -c 'find /home/orangepi/lira/device/lira -name __pycache__ 
 ExecStart=/home/orangepi/lira/device/.venv/bin/python -m lira.main
 # M7 实机验证期开开发者控制台（产线改为 0 或删本行，config dev_console.enabled 同步关）
 Environment=LIRA_DEV_CONSOLE=1
+# dev-console 改版 U6/U7（2026-10-15）：多候选声纹积累与自然命名/控制台确认。
+# 与既有声纹识别同一开关；未设时候选路径完全不存在。阈值与校准见 deploy/SETUP.md
+# §3.2/§4.3——校准完成前不得对外宣称就绪/准确率。
+Environment=LIRA_PERSONAL_MEMORY=1
 Restart=always
 RestartSec=3
 

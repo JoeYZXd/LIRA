@@ -564,3 +564,67 @@ dev_console:
   （代次/隐私/状态）与存储内第二道隐私检查；迟到结果不落库。
 - 升级前备份设备库（§1.5 冷拷贝方式同样适用）；回滚关闭新功能后新增表
   保留不删，家庭历史不受影响。
+
+## 4. 开发者控制台改版：升级、验证与校准交接（U8）
+
+### 4.1 升级流程（源码部署路径）
+
+板上主循环以源码 checkout 运行（`/home/orangepi/lira/device`，`lira.service`
+user unit 直启 `.venv/bin/python -m lira.main`）。升级三步：
+
+1. **备份**（升级前必须）：
+   ```bash
+   ssh lira 'tar -czf ~/lira/deploy-backups/device-$(date +%Y%m%d-%H%M%S).tar.gz \
+     -C ~/lira device --exclude device/.venv --exclude device/lira/__pycache__ \
+     && cp -a ~/lira/data/device.db ~/lira/deploy-backups/device.db.$(date +%Y%m%d-%H%M%S)'
+   ```
+2. **同步源码**：`rsync -av --delete device/lira/ lira:~/lira/device/lira/`
+   （先 `-n` 干跑核对增量；`--delete` 只作用于包目录内部，清掉板上旧文件），
+   同步 `device/pyproject.toml`（若依赖有变需在板 venv 补装）。
+3. **重启与检查**：`ssh lira 'systemctl --user restart lira'`，随后跑 §4.2。
+
+wheel 打包验证（KTD8，开发机执行）：`pip wheel . --no-deps` 构建后，在**干净
+venv** 离线安装（`--no-index --find-links=<wheels>`），断言
+`site-packages/lira/ui/{templates,static}` 齐全且 `dev.html` 可渲染——控制台
+资产必须来自安装包而非源码路径；无 CDN、无构建链。
+
+### 4.2 部署后自动化检查（无需在场）
+
+```bash
+ssh lira 'systemctl --user is-active lira && \
+  journalctl --user -u lira --since -2min | grep -iE "traceback|error" | grep -v ERROR_LEVEL_EXPECTED || true'
+curl -s http://<board-ip>:<ui-port>/status        # 只读状态 JSON（不鉴权）
+curl -s -o /dev/null -w "%{http_code}" http://<board-ip>:<ui-port>/dev   # 401/303/200 均为挂载证据
+```
+
+判定：服务 active、日志无 traceback、`/status` 200、`/dev` 非连接拒绝；
+浏览器打开 `/dev` 走完登录 → 磁贴全渲染 → 实时区曲线随语音出现包络。
+
+### 4.3 校准交接清单（需家庭成员在场，未完成前不得宣称就绪）
+
+板端校准是交付门槛（KTD5/Verification Contract）。以下每项记录到
+`docs/` 校准笔记（含日期、参数版本、结论）：
+
+- [ ] **有效语音判定**：不同家人交替交谈（A/B/A ≥3 轮），核对候选归组稳定、
+  重复/短句/噪声不虚增进度（对照实时区声纹磁贴与 `voice_candidate` 事件）。
+- [ ] **质量门槛**：低声/远场/削波（贴麦克风喊）各说数句，核对
+  `low_energy/clipped/too_short` 拒绝原因如预期；不合适则调 §3.2 参数并
+  **bump `strategy_version`**（旧证据自动失效重积，不会静默混算）。
+- [ ] **同名关联**：对已有成员称呼说"我是X"（X 已存在），核对会话不绑定、
+  不读记忆、声纹磁贴出现"同名待确认"；控制台确认后身份生效且既有声纹未被
+  覆盖；再对无同名的新声音走自然命名全程。
+- [ ] **性能基线**：同一音频场景对比观察开/关（实时区折叠 vs 展开）各
+  ≥10 分钟：无第二采集流、无 TTS 重复、无额外断档；记录 CPU/内存差异
+  （`pidstat -p $(pgrep -f lira.main) 60`）。主音频线程超 100ms 块周期即失败。
+- [ ] **观测时延**：说话到曲线可见 p95 ≤1s（250ms 轮询单飞）。
+- [ ] **隐私联锁实测**：交谈中开隐私——磁贴立即停更、候选停止积累、
+  已开页面 ≤1s 清空敏感展示。
+- [ ] 校准结论回填 §3.2 声明处（达标/未达标如实记录；未达标保留
+  "工程初值"标注，不得对外宣称识别准确率）。
+
+### 4.4 可选 3D 决策记录（R6）
+
+U8 决策：**不采用 Three.js**。R6 的"温馨动效"已由 CSS 过渡/按压反馈覆盖
+（`prefers-reduced-motion` 全量支持，信息不依赖动画），3D 作为非必要点缀
+引入本地 vendor 资产与维护成本不成比例；数据与操作路径不受影响。后续若
+重评，须满足：本地随包、按需加载、可关、静态回退，且不改变验收路径。

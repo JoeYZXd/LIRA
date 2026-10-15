@@ -50,9 +50,10 @@ include = ["lira*"]
 
 [tool.setuptools.package-data]
 "lira.llm" = ["*.md"]
-# KTD8：dev 控制台模板与本地静态资源随 wheel 交付（无 CDN 依赖；
-# vendor/* 为 U8 可选本地化第三方资产预留）
-"lira.ui" = ["templates/*.html", "static/*.css", "static/*.js", "static/vendor/*"]
+# KTD8：dev 控制台模板与本地静态资源随 wheel 交付（无 CDN 依赖）。
+# U8 决策：可选 3D 未采用（CSS/SVG 温柔动效已覆盖 R6，见 dev-console.css），
+# 不引入 Three.js，也不保留 vendor 预留 glob（空壳依赖清零）。
+"lira.ui" = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

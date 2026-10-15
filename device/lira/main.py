@@ -49,6 +49,7 @@ from lira.dialog.intents import COMMANDS_KEYWORDS_FILE, PLAYBACK_WHITELIST_KEYWO
 from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
+from lira.dev_telemetry import DevTelemetry
 from lira.hal.base import HalError
 from lira.llm.breaker import BreakerState
 from lira.hal.mock import (
@@ -719,6 +720,11 @@ class DeviceRuntime:
             self.speaker_identity=SpeakerIdentity(self.personal_memory,model_path)
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
 
+        # 结构化遥测（U2）：唯一输入旁路的音频包络 + VOICE_LOG 文本镜像。
+        # RouteDispatch.feed 经 getattr(streams, "telemetry") 取用，先于装配。
+        self.telemetry = DevTelemetry()
+        VOICE_LOG.register_sink(self.telemetry)
+
         self.engine = self._build_engine(llm)
         self.engine.tick(self._clock())
         self.pipeline = ReadingPipeline(
@@ -736,6 +742,8 @@ class DeviceRuntime:
         )
         # 隐私门订阅注册（privacy.py 约定的广播次序：gate.apply -> 唤醒门 -> 播报）
         self.privacy.subscribe(self._gate.apply)
+        # 遥测联锁紧随音频门（AE5）：先关音频门，再清遥测缓冲并进入拒收态
+        self.privacy.subscribe(self.telemetry.apply_privacy)
         self.privacy.subscribe(self.dispatcher.apply_privacy)
         self.privacy.subscribe(self.engine.apply_privacy)
         self.privacy.subscribe(self.clear_voice_identity)
@@ -859,6 +867,9 @@ class DeviceRuntime:
         if self._mic_paused:
             return
         self.dispatcher.clear()
+        # U2 遥测：暂停期 feed 完全停摆，generation 自动 gap 要到恢复后首块
+        # 音频才落（时间戳会错记成恢复时刻），此处显式落暂停的可读边界
+        self.telemetry.mark_gap("麦克风暂停：dev 录音窗口独占采集设备")
         self._mic_paused = True
         self._mic_resume_event = asyncio.Event()
         try:
@@ -872,6 +883,8 @@ class DeviceRuntime:
         if not self._mic_paused:
             return
         self.dispatcher.clear()
+        # U2 遥测：恢复边界不另发 mark_gap——上面 clear() 已递增 generation，
+        # 恢复后首块音频会自动落 gap("generation_changed")，重复标记徒增刷屏
         self._mic_paused = False
         try:
             await self._hal["audio"].open()
@@ -969,6 +982,9 @@ class DeviceRuntime:
                 chunk = await self._read_mic_chunk(source)
             except AudioInputError:
                 self.dispatcher.clear()
+                # U2 遥测：输入中断落可读边界（AE3 真实状态）；恢复后首块音频
+                # 的 generation 自动 gap 与本条原因不同，不算重复标记
+                self.telemetry.mark_gap("音频输入中断（AudioInputError）")
                 logging.warning("audio event=input_discontinuity")
                 callback = getattr(self.engine, "on_input_error", None)
                 if callback is not None:
@@ -978,6 +994,9 @@ class DeviceRuntime:
                 continue  # 麦克风暂停窗口（dev 录音独占），恢复后自动续跑
             if not chunk:
                 self.dispatcher.clear()
+                # U2 遥测：EOF 后不再有 feed，generation 自动 gap 永远不会发生，
+                # 必须显式落标记（前端才辨认得出"采集正常结束"而非静音）
+                self.telemetry.mark_gap("音频源结束（EOF），主循环退出")
                 logging.info("音频源结束（EOF），主循环退出")
                 break
             samples = np.frombuffer(chunk, dtype=np.int16)

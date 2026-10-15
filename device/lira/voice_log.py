@@ -35,9 +35,21 @@ class VoiceLog:
 
     def __init__(self, capacity: int = 200) -> None:
         self._entries: deque[VoiceLogEntry] = deque(maxlen=capacity)
+        #: 可选镜像 sink（U2 结构化遥测）：log() 同步镜像一份，None 撤销
+        self._sink = None
+
+    def register_sink(self, sink) -> None:
+        """注册/撤销镜像 sink（约定接口：add_event(kind, text)、clear_events()）。
+
+        老端点数据面不受影响：本环形状/容量/行为原样，``/dev/api/voice-log``
+        继续读自己的 deque；sink 侧由 DevTelemetry 自行限界与隐私拒收。
+        """
+        self._sink = sink
 
     def log(self, kind: str, text: str) -> None:
         self._entries.append(VoiceLogEntry(time.time(), kind, text))
+        if self._sink is not None:
+            self._sink.add_event(kind, text)
 
     def snapshot(self) -> list[VoiceLogEntry]:
         """时间正序的全部条目（页面侧自行倒序渲染）。"""
@@ -45,6 +57,8 @@ class VoiceLog:
 
     def clear(self) -> None:
         self._entries.clear()
+        if self._sink is not None:
+            self._sink.clear_events()
 
 
 #: 进程级单例（模块 import 即用；测试可 clear 复位）

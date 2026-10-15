@@ -220,7 +220,8 @@ function renderVoiceCandidates(data) {
       const p = pendingByCid.get(c.candidate_id);
       const name = p && p.member_name ? p.member_name : ('成员 ' + (p ? p.proposed_member_id : '?'));
       extra = '<div class="vc-await">与已有成员「' + vlEscape(name) + '」同名——确认前不读取该成员记忆' +
-        '<button type="button" onclick="confirmAssociation(' + c.candidate_id + ',' +
+        '<button type="button" id="vc-confirm-btn-' + c.candidate_id +
+        '" onclick="confirmAssociation(' + c.candidate_id + ',' +
         (p ? p.proposed_member_id : 'null') + ')">确认关联</button><span id="vc-confirm-out-' +
         c.candidate_id + '" class="muted"></span></div>';
     }
@@ -260,7 +261,7 @@ async function loadVoiceCandidates() {
 async function confirmAssociation(candidateId, memberId) {
   if (memberId === null || memberId === undefined) { return; }
   // 在途防护（U8 前端竞态评审 FR-7）：确认进行中禁用按钮，双击不双 POST
-  const btn = document.querySelector('#tile-voice-candidates .vc-card .vc-await button');
+  const btn = document.getElementById('vc-confirm-btn-' + candidateId);
   if (btn) { btn.disabled = true; }
   try {
     await confirmAssociationInner(candidateId, memberId);
@@ -405,6 +406,9 @@ async function previewToggle() {
   previewOn = true;
   document.getElementById('preview-btn').textContent = '停止预览';
   await fetchFrame();
+  // U8 COR-4：首帧在途时被停止——previewOn 已复位，不得再挂 interval
+  //（原实现僵尸 interval 常驻，再次开启后双倍轮询打相机）
+  if (!previewOn) { return; }
   previewTimer = setInterval(async () => {
     if (!previewOn || fetching) return;
     fetching = true;

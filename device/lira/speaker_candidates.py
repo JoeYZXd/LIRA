@@ -250,10 +250,12 @@ class VoiceCandidates:
         不产生写入（AE2：低质量、重复或歧义片段不增加进度）。
         """
         now = self._now() if now is None else now
-        self._expire_candidates(now)
         # 迟到提交第二道防线（AE5）：主流程复检是第一道，这里再看一眼隐私。
+        # U8 COR-8：隐私闸先于 expire——承诺顺序是"隐私期零写入"，expire 的
+        # 状态翻转也是写入。
         if self._privacy():
             return self._verdict(PRIVACY, reason="隐私开启，候选证据暂停写入")
+        self._expire_candidates(now)
         vector = np.asarray(vector, np.float32)
         norm = float(np.linalg.norm(vector))
         vector = vector / norm if norm > 1e-6 else vector
@@ -288,8 +290,10 @@ class VoiceCandidates:
             member_id, ambiguous = established
             if ambiguous:
                 return self._verdict(AMBIGUOUS, reason="声音归属不明确，本段不计入")
-            return self._verdict(ESTABLISHED, candidate_id=member_id,
-                                 reason="命中已建立声纹，走现有识别，不建候选")
+            # U8 COR-3：established 的 id 是 member_id——不进 candidate_id 字段
+            #（遥测文本会把它误记成候选 id，U8 校准按候选聚合会误计）
+            return self._verdict(ESTABLISHED,
+                                 reason=f"命中已建立声纹 member={member_id}，走现有识别，不建候选")
 
         target = self._assign(vector, now)
         if isinstance(target, Verdict):
@@ -347,7 +351,10 @@ class VoiceCandidates:
         （U8 效率审查：dev 端点同请求内避免第二次全表 BLOB 解码）。
         """
         now = self._now() if now is None else now
-        self._expire_candidates(now)
+        # 隐私期只读（U8 COR-1/AE5）：expire 是写事务——磁贴展开触发的快照
+        # 不得在隐私期落任何写入（过期收尾推迟到下一次非隐私 observe）
+        if not self._privacy():
+            self._expire_candidates(now)
         rows = self.db.execute(
             "SELECT candidate_id,status,segment_count,total_seconds,"
             "consistency_passed,updated_at,pending_name,proposed_member_id,"

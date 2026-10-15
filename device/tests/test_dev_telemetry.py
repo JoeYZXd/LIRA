@@ -115,6 +115,10 @@ class TestPrivacyInterlock:
         cursor_events = tel.events_since(0)[1]
         tel.apply_privacy(True)
         tel.apply_privacy(False)  # 一个拍内快开快关：客户端不会撞 403
+        # 静默期（无任何新事件）也必须 reset（U8 COR-10：完全追平的客户端
+        # cursor==旧最大 seq，单跳墓碑时 reset 永不触发→隐私前日志滞留）
+        _, _, quiet_event_reset = tel.events_since(cursor_events)
+        assert quiet_event_reset, "静默期也要可检出清空"
         tel.add_observer()
         _feed(tel, _sine(0.2))
         tel.add_event("wake", "隐私关闭后的事件")

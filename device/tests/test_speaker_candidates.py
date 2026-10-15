@@ -326,7 +326,10 @@ def test_dimension_mismatch_is_rejected_as_stale_fingerprint(tmp_path):
 def test_established_profile_creates_no_candidate(tmp_path):
     store, _, _ = make_store(tmp_path, profiles=lambda: [(7, A)])
     verdict = store.observe(A, samples_for(4.0, seed=1))
-    assert verdict.outcome == "established" and verdict.candidate_id == 7
+    # U8 COR-3：established 的 id 是 member_id——不进 candidate_id 字段
+    #（防遥测文本把成员 id 误记成候选 id），member id 走 reason 文案
+    assert verdict.outcome == "established" and verdict.candidate_id is None
+    assert "member=7" in verdict.reason
     assert table_counts(store) == (0, 0), "已建立成员不建候选"
     stranger = store.observe(B, samples_for(4.0, seed=2))
     assert stranger.outcome == "accepted", "未命中的声音仍正常积累候选"

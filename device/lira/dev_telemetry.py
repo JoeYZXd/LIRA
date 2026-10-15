@@ -301,7 +301,10 @@ class DevTelemetry:
             self._audio_seq += 1  # 墓碑 seq（不落帧）：跳号使 cursor+1 < oldest
             self._append_gap("privacy_on", self._capture_generation,
                              self._last_route, self._last_occupied)
-            self._event_seq += 1  # 事件环墓碑：清空后 next_seq 越过旧 cursor
+            # 事件环墓碑跳两号（U8 COR-10）：完全追平的客户端（cursor==旧最大
+            # seq）在静默期也必须拿到 reset——只跳一号时 next_seq==cursor+1，
+            # 无新事件则 reset 永不触发，隐私前日志滞留前端
+            self._event_seq += 2
         else:
             self._privacy_on = False
 

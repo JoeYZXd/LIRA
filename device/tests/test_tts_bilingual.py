@@ -38,6 +38,7 @@ def native_models(tmp_path, monkeypatch):
 def test_bilingual_and_numbers_keep_one_model_and_voice(native_models, backend, sid):
     model_dir, configs, calls, samples = native_models
     engine = TtsEngine(model_dir=model_dir, backend=backend)
+    calls.clear()  # Startup primes the two fixed feedback cues.
     texts = ['你好', 'Hello world', '今天学 English 123', '2026年10月1日', '13800138000']
     for text in texts:
         result = engine.generate(text, speed=1.2)
@@ -59,6 +60,7 @@ def test_kokoro_explicit_voice_is_shared_across_languages(native_models, monkeyp
     for name, value in settings.items():
         monkeypatch.setenv(name, value)
     engine = TtsEngine(model_dir=model_dir, backend='kokoro')
+    calls.clear()
     for text in ('你好', 'Hello', '123'):
         engine.generate(text)
     assert [call[1] for call in calls] == [sid] * 3

@@ -68,6 +68,7 @@ class _PlaybackRequest:
 
 #: 规则 FST 优先级顺序（后挂的先匹配会被前面的覆盖，号码放最前最具体）
 _RULE_FSTS = ("phone.fst", "date.fst", "number.fst")
+_FEEDBACK_CUES = ("嗯。", "嗯，我想想。")
 
 
 def _resolve_vocoder(vocoder: Path) -> Path:
@@ -160,6 +161,20 @@ class TtsEngine:
         #: 正在播放标志（半双工：状态机可轮询；hook 回调同时广播）
         self.occupied = False
         self._init_playback()
+        # Warm only fixed, non-personal cues before any playback worker can
+        # access the native model. Keep the configured model and speaker.
+        self._feedback_audio = {}
+        for cue in _FEEDBACK_CUES:
+            samples = self.generate(cue)
+            if (samples.ndim != 1 or not len(samples)
+                    or not np.isfinite(samples).all()):
+                raise RuntimeError("TTS feedback warmup produced invalid audio")
+            if len(samples) <= self.sample_rate * 4:
+                cached = samples.copy()
+                cached.flags.writeable = False
+                self._feedback_audio[cue] = cached
+            else:
+                logging.warning("TTS feedback exceeds bounded cache duration")
         logging.info(
             "TTS 已加载: %s (rule_fsts=%s, sr=%d)",
             model_dir.name,
@@ -169,8 +184,16 @@ class TtsEngine:
 
     def generate(self, text: str, speed: float = 1.0) -> np.ndarray:
         """同步合成，返回 float32 波形（模型采样率）。"""
+        cached = self._cached_feedback(text, speed)
+        if cached is not None:
+            return cached.copy()
         audio = self.tts.generate(text, sid=self._speaker, speed=speed)
         return np.asarray(audio.samples, dtype=np.float32)
+
+    def _cached_feedback(self, text, speed):
+        # Non-default speeds still use native synthesis; cache size never grows
+        # with user text or settings, and volume is applied at playback time.
+        return getattr(self, "_feedback_audio", {}).get(text) if speed == 1.0 else None
 
     def _init_playback(self) -> None:
         self._queue: deque[_PlaybackRequest] = deque()
@@ -344,6 +367,13 @@ class TtsEngine:
 
     def _generate_measured(self, request, chunk):
         segment = next(_METRIC_SEGMENTS)
+        cached = self._cached_feedback(chunk, request.speed)
+        if cached is not None:
+            mark(request.trace, "pcm_ready", segment=segment, frames=len(cached))
+            logging.info("tts event=feedback_cache_ready frames=%d", len(cached))
+            # No inference occurred: do not inflate synthesis/RTF measurements
+            # with a near-zero cache copy duration.
+            return cached.copy()
         started = time.monotonic()
         mark(request.trace, "synthesis_start", segment=segment, at=started)
         samples = self.generate(chunk, request.speed)

@@ -97,8 +97,12 @@ class TtsEngine:
         if backend not in ("matcha", "kokoro", "melo"):
             raise ValueError("LIRA_TTS_BACKEND must be matcha, kokoro or melo")
         self._backend = backend
-        self._speaker_zh = int(os.environ.get("LIRA_TTS_SPEAKER_ZH", "3"))
-        self._speaker_en = int(os.environ.get("LIRA_TTS_SPEAKER_EN", "0"))
+        # One speaker for every language. Keep the existing Chinese voice
+        # override as a fallback for explicitly selected Kokoro installations.
+        self._speaker = 0
+        if backend == "kokoro":
+            self._speaker = int(os.environ.get(
+                "LIRA_TTS_SPEAKER", os.environ.get("LIRA_TTS_SPEAKER_ZH", "3")))
         if backend == "kokoro" and Path(model_dir) == TTS_MODEL_DIR:
             model_dir = TTS_MODEL_DIR.parent / "kokoro-multi-lang-v1_1"
         if backend == "melo" and Path(model_dir) == TTS_MODEL_DIR:
@@ -120,7 +124,6 @@ class TtsEngine:
                         model=str(acoustic), lexicon=str(model_dir / "lexicon.txt"),
                         tokens=str(model_dir / "tokens.txt"), dict_dir=str(model_dir / "dict")),
                     num_threads=num_threads), rule_fsts=rule_fsts)
-            self._english_engine = TtsEngine(backend="kokoro", num_threads=num_threads)
         elif backend == "kokoro":
             config = sherpa_onnx.OfflineTtsConfig(
                 model=sherpa_onnx.OfflineTtsModelConfig(
@@ -166,15 +169,7 @@ class TtsEngine:
 
     def generate(self, text: str, speed: float = 1.0) -> np.ndarray:
         """同步合成，返回 float32 波形（模型采样率）。"""
-        if self._backend == "melo" and re.search(r'[A-Za-z]', text):
-            samples = self._english_engine.generate(text, speed)
-            ratio = self.sample_rate / self._english_engine.sample_rate
-            return np.interp(np.arange(int(len(samples)*ratio))/ratio,
-                             np.arange(len(samples)), samples).astype(np.float32)
-        sid = 0
-        if self._backend == "kokoro":
-            sid = self._speaker_zh if re.search(r"[\u3400-\u9fff]", text) else self._speaker_en
-        audio = self.tts.generate(text, sid=sid, speed=speed)
+        audio = self.tts.generate(text, sid=self._speaker, speed=speed)
         return np.asarray(audio.samples, dtype=np.float32)
 
     def _init_playback(self) -> None:

@@ -228,6 +228,11 @@ function renderVoiceCandidates(data) {
     if (c.member_id !== null && c.member_id !== undefined) {
       const m = (data.members || []).find(x => x.member_id === c.member_id);
       extra += '<div class="vc-await">已关联成员：' + (m ? vlEscape(m.emoji + ' ' + m.name) : ('#' + c.member_id)) + '</div>';
+    } else if (c.status !== 'promoted') {
+      extra += '<div class="vc-await"><button type="button" class="vc-delete" id="vc-delete-btn-' +
+        c.candidate_id + '" onclick="deleteVoiceCandidate(' + c.candidate_id +
+        ')">删除未完成声纹</button><span id="vc-delete-out-' + c.candidate_id +
+        '" role="status" aria-live="polite"></span></div>';
     }
     return '<div class="vc-card' + (pendingByCid.has(c.candidate_id) ? ' is-awaiting' : '') + '">' +
       '<div class="vc-card-head">待认识的声音 ' + String(c.candidate_id).padStart(2, '0') +
@@ -235,7 +240,7 @@ function renderVoiceCandidates(data) {
       '<div class="vc-progress"><div class="vc-progress-fill" style="width:' + pct + '%"></div></div>' +
       '<div class="vc-meta">' + pct + '% · ' + vlEscape(vcProgressBasis(c)) + '</div>' + extra + '</div>';
   }).join('');
-  parts.push('<div class="vc-block"><div class="vc-block-title">声音候选 ' + (data.candidates || []).length + '</div>' +
+  parts.push('<div class="vc-block"><div class="vc-block-title">历史声音候选 ' + (data.candidates || []).length + '</div>' +
     (candidateCards || '<p class="muted">（暂无旧候选；请对 LIRA 说“录入声纹”，按提示确认后保存）</p>') + '</div>');
   document.getElementById('voice-candidates-view').innerHTML = parts.join('');
 }
@@ -262,11 +267,38 @@ async function confirmAssociation(candidateId, memberId) {
   if (memberId === null || memberId === undefined) { return; }
   // 在途防护（U8 前端竞态评审 FR-7）：确认进行中禁用按钮，双击不双 POST
   const btn = document.getElementById('vc-confirm-btn-' + candidateId);
-  if (btn) { btn.disabled = true; }
+  const buttons = btn ? btn.closest('.vc-card').querySelectorAll('button') : [];
+  buttons.forEach(button => { button.disabled = true; });
   try {
     await confirmAssociationInner(candidateId, memberId);
   } finally {
-    if (btn) { btn.disabled = false; }
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+async function deleteVoiceCandidate(candidateId) {
+  const btn = document.getElementById('vc-delete-btn-' + candidateId);
+  if (!btn || btn.disabled) { return; }
+  if (!window.confirm('删除这条未完成声纹及其采样记录？已登记成员和聊天记忆不会删除。')) { return; }
+  const buttons = btn.closest('.vc-card').querySelectorAll('button');
+  buttons.forEach(button => { button.disabled = true; });
+  btn.textContent = '正在删除…';
+  const target = document.getElementById('vc-delete-out-' + candidateId);
+  try {
+    const r = await api('/dev/api/voice-candidates/' + candidateId, {method: 'DELETE'});
+    if (r.status === 200) {
+      await loadVoiceCandidates();
+      out('voice-candidates-out', '未完成声纹已删除', 'ok');
+      document.querySelector('#tile-voice-candidates .tile-head').focus();
+    } else {
+      target.textContent = (r.body && r.body.error) || ('删除失败：HTTP ' + r.status);
+      target.className = 'err';
+    }
+  } catch (_) {
+    target.textContent = '连接失败，请重试'; target.className = 'err';
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+    btn.textContent = '删除未完成声纹';
   }
 }
 

@@ -1051,6 +1051,48 @@ def make_voice_memory_client(tmp_path):
 
 
 class TestVoiceCandidatesEndpoints:
+    def test_delete_unfinished_candidate_removes_evidence_not_members(self, tmp_path):
+        import numpy as np
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store=rt.speaker_candidates
+        cid=store.observe(np.array([1.,0.],np.float32),_vc_samples(4,91)).candidate_id
+        member=rt.personal_memory.enroll('已登记',np.array([0.,1.],np.float32))
+        response=client.delete(f'/dev/api/voice-candidates/{cid}')
+        assert response.status_code==200
+        assert store.db.execute('SELECT count(*) FROM voice_candidates WHERE candidate_id=?',(cid,)).fetchone()[0]==0
+        assert store.db.execute('SELECT count(*) FROM voice_candidate_evidence WHERE candidate_id=?',(cid,)).fetchone()[0]==0
+        assert rt.personal_memory.people.get_member(member) and len(rt.personal_memory.profiles())==1
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==404
+
+    def test_delete_candidate_requires_session_and_preserves_promoted(self, tmp_path):
+        import numpy as np
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        store=rt.speaker_candidates
+        cid=store.observe(np.array([1.,0.],np.float32),_vc_samples(4,92)).candidate_id
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==401
+        login(client)
+        rt.privacy._on = True
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==403
+        rt.privacy._on = False
+        store.db.execute("UPDATE voice_candidates SET status='promoted', member_id=42 WHERE candidate_id=?",(cid,))
+        store.db.commit()
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==409
+        assert store.db.execute('SELECT count(*) FROM voice_candidates WHERE candidate_id=?',(cid,)).fetchone()[0]==1
+        for invalid in ('bad','0','-1',str(2**80)):
+            assert client.delete(f'/dev/api/voice-candidates/{invalid}').status_code==400
+
+    def test_delete_failure_rolls_back_candidate_evidence(self, tmp_path):
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store=rt.speaker_candidates
+        cid=store.observe(np.array([1.,0.],np.float32),_vc_samples(4,93)).candidate_id
+        store.db.execute("CREATE TRIGGER reject_delete BEFORE DELETE ON voice_candidates BEGIN SELECT RAISE(ABORT,'test'); END")
+        response=client.delete(f'/dev/api/voice-candidates/{cid}')
+        assert response.status_code==500
+        assert store.db.execute('SELECT count(*) FROM voice_candidates WHERE candidate_id=?',(cid,)).fetchone()[0]==1
+        assert store.db.execute('SELECT count(*) FROM voice_candidate_evidence WHERE candidate_id=?',(cid,)).fetchone()[0]==1
+
     def test_not_assembled_returns_503(self):
         """未装配（无 personal_memory/候选）→ 503 诚实降级，前端显示降级文案。"""
         _app, client, _rt = make_client()

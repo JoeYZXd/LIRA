@@ -115,6 +115,7 @@ pre {
 .muted { color: var(--ink-soft); font-size: 13px; }
 .ok { color: var(--ok); font-weight: 600; }
 .err { color: var(--danger); font-weight: 600; }
+.vc-delete { color: var(--danger); min-height: 44px; }
 .hidden { display: none; }
 .hidden-audio { display: none; }
 

@@ -375,6 +375,25 @@ def open_voice_tile(page) -> None:
 
 
 class TestVoiceCandidatesTile:
+    def test_delete_candidate_confirms_and_refreshes_without_deleting_members(self, dev_server, page):
+        import numpy as np
+        memory = attach_voice_memory(dev_server.runtime)
+        store = dev_server.runtime.speaker_candidates
+        member = memory.enroll('保留成员', np.array([0.,1.],np.float32))
+        cid=store.observe(np.array([1.,0.],np.float32),vc_samples(94)).candidate_id
+        login_console(page, dev_server)
+        open_voice_tile(page)
+        button=page.get_by_role('button',name='删除未完成声纹')
+        page.once('dialog',lambda dialog:dialog.dismiss())
+        button.click()
+        assert button.is_visible() and store._candidate_row(cid) is not None
+        page.once('dialog',lambda dialog:dialog.accept())
+        button.click()
+        wait_for_text(page,'#voice-candidates-out','未完成声纹已删除')
+        assert page.get_by_role('button',name='删除未完成声纹').count()==0
+        assert store._candidate_row(cid) is None
+        assert memory.people.get_member(member) and len(memory.profiles())==1
+
     def test_summary_members_and_progress_basis(self, dev_server, page):
         """磁贴摘要行 + 已建立成员卡 + 候选卡（状态徽标与可解释进度依据）。
         AE2：就绪 100% 但未确认的候选不计入已建立人数。"""

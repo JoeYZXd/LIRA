@@ -392,6 +392,18 @@ class VoiceCandidates:
 
     # ---------- 命名上下文与确认晋升（U7，KTD6） ----------
 
+    def delete_unfinished(self, candidate_id: int) -> None:
+        """Delete only unbound candidate evidence, never an established identity."""
+        with self.db:
+            row=self._candidate_row(candidate_id)
+            if row is None:
+                raise CandidateNotFound('声纹候选不存在')
+            if row['member_id'] is not None or row['status'] == STATUS_PROMOTED:
+                raise CandidateConflict('已建立的声纹不能作为未完成记录删除')
+            self.db.execute('DELETE FROM voice_candidate_evidence WHERE candidate_id=?',(candidate_id,))
+            self.db.execute('DELETE FROM voice_candidates WHERE candidate_id=?',(candidate_id,))
+        self._emit('deleted', candidate_id=candidate_id)
+
     def _candidate_row(self, candidate_id: int):
         return self.db.execute(
             "SELECT * FROM voice_candidates WHERE candidate_id=?",

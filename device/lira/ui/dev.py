@@ -705,6 +705,38 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         return JSONResponse({**snap, "members": members,
                              "pending_confirmations": pending})
 
+    @app.delete("/dev/api/voice-candidates/{candidate_id}")
+    async def dev_voice_candidate_delete(candidate_id: str, request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        denied = await _privacy_reject()
+        if denied is not None:
+            return denied
+        candidates = getattr(handle.runtime, "speaker_candidates", None)
+        if candidates is None:
+            return JSONResponse({"error": "声纹候选未装配"}, status_code=503)
+        try:
+            candidate_id_int = int(candidate_id)
+            if not 0 < candidate_id_int < 2**63:
+                raise ValueError
+        except ValueError:
+            return JSONResponse({"error": "candidate_id 须为整数"}, status_code=400)
+        try:
+            candidates.delete_unfinished(candidate_id_int)
+        except CandidateNotFound as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except CandidateConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        except sqlite3.Error:
+            logger.warning("dev event=voice_candidate_delete_failed")
+            return JSONResponse({"error": "删除失败，请稍后重试"}, status_code=500)
+        identity = getattr(handle.runtime, "speaker_identity", None)
+        pending = getattr(identity, "pending", None)
+        if pending and pending.get('candidate_id') == candidate_id_int:
+            identity.pending = None
+        return JSONResponse({"deleted": True, "candidate_id": candidate_id_int})
+
     @app.post("/dev/api/voice-candidates/{candidate_id}/confirm")
     async def dev_voice_candidate_confirm(candidate_id: str, request: Request):
         """确认同名关联（领域操作端点，无通用参数写面，KTD6）。

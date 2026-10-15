@@ -189,6 +189,22 @@ class StreamFake(Fake):
     async def create(self, **kwargs):
         self.requests.append(kwargs)
         if kwargs.get('stream'):
+            if kwargs.get('tool_choice') != 'none':
+                message=next(self.messages)
+                if message.tool_calls:
+                    chunks=[SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(
+                        content=None,tool_calls=[SimpleNamespace(index=i,id=c.id,type='function',function=c.function)
+                            for i,c in enumerate(message.tool_calls)]),finish_reason=None)]),
+                        SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None),finish_reason='tool_calls')])]
+                else:
+                    chunks=[SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=t),finish_reason=None)]) for t in self._stream_chunks]
+                    chunks.append(SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=None),finish_reason='stop')]))
+                class SelectionStream:
+                    def __aiter__(self): return self.iterate()
+                    async def iterate(self):
+                        for chunk in chunks: yield chunk
+                    async def close(self): pass
+                return SelectionStream()
             return ChunkStream(self._stream_chunks)
         return SimpleNamespace(choices=[SimpleNamespace(message=next(self.messages))])
 

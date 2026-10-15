@@ -99,7 +99,107 @@ async def stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta=None):
         await stream.close()
 
 
-async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, on_progress=None, on_sentence=None, on_delta=None):
+
+class ToolStreamProtocolError(Exception):
+    """Incomplete/unsupported tool stream; contains no model content."""
+
+
+async def tool_stream_message(sdk, kwargs, check_privacy):
+    """Buffer uncertain content until EOF proves it belongs to a final answer.
+
+    Tool and reasoning deltas are private protocol state, never speech. Limits
+    cover the aggregate, including many tiny deltas and tool indices.
+    """
+    from types import SimpleNamespace
+    check_privacy()
+    started = time.monotonic()
+    stream = await retry_remote(
+        lambda: sdk.chat.completions.create(**dict(kwargs, stream=True)), check_privacy)
+    content, reasoning, calls = [], [], {}
+    total = 0
+    finish = None
+    first = True
+    try:
+        if not hasattr(stream, "__aiter__"):
+            raise ToolStreamProtocolError()
+        async for chunk in stream:
+            check_privacy()
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue
+            if len(choices) != 1 or finish is not None:
+                raise ToolStreamProtocolError()
+            choice = choices[0]
+            delta = getattr(choice, "delta", None)
+            if delta is None:
+                raise ToolStreamProtocolError()
+            if getattr(delta, "function_call", None):
+                raise ToolStreamProtocolError()
+            for field, target in (("content", content), ("reasoning_content", reasoning)):
+                value = getattr(delta, field, None)
+                if value:
+                    if not isinstance(value, str):
+                        raise ToolStreamProtocolError()
+                    total += len(value)
+                    if total > 65536:
+                        raise ToolStreamProtocolError()
+                    target.append(value)
+                    if field == "reasoning_content" and len(reasoning) == 1:
+                        logging.info("llm event=reasoning_first elapsed=%.3f", time.monotonic()-started)
+                    if first and field == "content":
+                        logging.info("llm event=candidate_content elapsed=%.3f", time.monotonic()-started)
+                        first = False
+            for fragment in getattr(delta, "tool_calls", None) or []:
+                index = getattr(fragment, "index", None)
+                if not isinstance(index, int) or not 0 <= index < 8:
+                    raise ToolStreamProtocolError()
+                call = calls.setdefault(index, {"id": "", "type": "function",
+                    "function": {"name": "", "arguments": ""}})
+                kind = getattr(fragment, "type", None)
+                if kind not in (None, "function"):
+                    raise ToolStreamProtocolError()
+                function = getattr(fragment, "function", None)
+                for value, target, key in ((getattr(fragment, "id", None), call, "id"),
+                        (getattr(function, "name", None), call["function"], "name"),
+                        (getattr(function, "arguments", None), call["function"], "arguments")):
+                    if value:
+                        if not isinstance(value, str):
+                            raise ToolStreamProtocolError()
+                        total += len(value)
+                        if total > 65536:
+                            raise ToolStreamProtocolError()
+                        target[key] += value
+            finish = getattr(choice, "finish_reason", None)
+        check_privacy()
+        if (not calls and not content) or finish != ("tool_calls" if calls else "stop"):
+            raise ToolStreamProtocolError()
+        serialized = [calls[i] for i in sorted(calls)]
+        ids = set()
+        for call in serialized:
+            if not call["id"] or call["id"] in ids or not call["function"]["name"]:
+                raise ToolStreamProtocolError()
+            ids.add(call["id"])
+            try:
+                if not isinstance(json.loads(call["function"]["arguments"]), dict):
+                    raise ToolStreamProtocolError()
+            except (ValueError, TypeError):
+                raise ToolStreamProtocolError() from None
+        data = {"role": "assistant", "content": "".join(content)}
+        if reasoning:
+            data["reasoning_content"] = "".join(reasoning)
+        if serialized:
+            data["tool_calls"] = serialized
+        logging.info("llm event=tool_stream_confirmed elapsed=%.3f tools=%d", time.monotonic()-started, len(calls))
+        return SimpleNamespace(content=data["content"], tool_calls=[
+            SimpleNamespace(id=c["id"], function=SimpleNamespace(**c["function"]))
+            for c in serialized], model_dump=lambda **_: data), content
+    finally:
+        try:
+            await stream.close()
+        except Exception:
+            logging.warning("llm event=stream_close_failed")
+
+async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, on_progress=None, on_sentence=None, on_delta=None, request_options=None):
     now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M")
     messages = [{"role": "system", "content": POLICY + f" 当前北京时间：{now}。" +
                  ("这是语音回答。" if voice else "这是文字回答。")}, *messages]
@@ -123,26 +223,34 @@ async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, 
         kwargs = dict(model=model, messages=protocol_messages(messages), stream=False, timeout=30,
                       tools=[SEARCH_TOOL], tool_choice="auto" if turn < 3 else "none",
                       max_tokens=1600)
-        if model == "kimi-k2.6":
-            kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
+        kwargs.update(request_options or {})
         if voice and on_sentence is not None and searches:
             if not sources:
                 return "这次没查到可靠的最新资料，暂时没法确认，你可以稍后再问我。"
             return AgentReply(await stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta),weather and bool(sources))
-        planning_kwargs = kwargs
+        buffered = None
         if voice and on_sentence is not None:
-            planning_kwargs = dict(kwargs, max_tokens=256, messages=protocol_messages([
-                *kwargs['messages'], {'role':'system', 'content':
-                '本次请求只决定是否需要工具。需要搜索就调用工具；无需工具或需向用户澄清时，仅回复 ANSWER，不生成正文，下一次请求会生成正式回复。'}]))
-        completion = await retry_remote(lambda: sdk.chat.completions.create(**planning_kwargs), check_privacy)
-        check_privacy()
-        choice = completion.choices[0]
-        message = choice.message
+            try:
+                message, buffered = await tool_stream_message(sdk, kwargs, check_privacy)
+            except ToolStreamProtocolError:
+                return "这次没有获得完整回答，请稍后重试。"
+        else:
+            completion = await retry_remote(lambda: sdk.chat.completions.create(**kwargs), check_privacy)
+            check_privacy()
+            message = completion.choices[0].message
         if not message.tool_calls:
             if searches and not sources:
                 return "这次联网搜索未获得可核实的资料，暂时无法确认实时信息，请稍后重试。"
             if voice and on_sentence is not None:
-                return AgentReply(await stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta),weather and bool(sources))
+                async def confirmed_content():
+                    for content in buffered:
+                        check_privacy()
+                        if on_delta is not None:
+                            on_delta(content)
+                        yield content
+                return AgentReply(await consume_text(confirmed_content(), on_sentence,
+                    check_active=check_privacy,
+                    incremental=getattr(on_sentence, 'accepts_text_deltas', False)), weather and bool(sources))
             answer = message.content or "这次没有获得完整回答，请稍后重试。"
             if sources and not voice:
                 answer += "\n\n查询来源：\n" + "\n".join(
@@ -165,10 +273,12 @@ async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, 
                     searches += 1
                     seen.add(query)
                     try:
+                        search_started = time.monotonic()
                         raw = await retry_remote(lambda: sdk.post("tools/search_pro", cast_to=dict, body={
                             "text_query": query, "limit": 5, "timeout_seconds": 20,
                         }, options={"timeout": 25}), check_privacy)
                         check_privacy()
+                        logging.info("llm event=search_done elapsed=%.3f", time.monotonic()-search_started)
                         results = raw.get("search_results", [])
                         if not isinstance(results, list):
                             results = []

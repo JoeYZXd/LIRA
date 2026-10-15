@@ -166,6 +166,7 @@ class LlmClient:
             timeout=cfg.timeout_seconds,
             max_retries=0,
         )
+        self._base_url = cfg.base_url
         self._model = cfg.model
         self.memory = None
         #: 模型显示观察器（U3/KTD7）：运行时装配 `llm.telemetry = ...`（鸭子
@@ -262,7 +263,8 @@ class LlmClient:
             else:
                 text = await self._stream_chat(messages, on_wait_feedback=on_wait_feedback,
                                                timeout_seconds=timeout_seconds, observe=observe,
-                                               on_reply_chunk=on_reply_chunk)
+                                               on_reply_chunk=on_reply_chunk,
+                                               request_options=self._voice_options(voice_log and system != PLAIN_SPEAK_SYSTEM_PROMPT))
         except asyncio.CancelledError:
             observe.cancel()
             raise
@@ -295,6 +297,15 @@ class LlmClient:
             VOICE_LOG.log("llm_reply", f"大模型返回结果（{len(text)} 字）：{preview}")
         return text
 
+    def _voice_options(self, voice):
+        from urllib.parse import urlparse
+        endpoint = urlparse(str(self._base_url))
+        if (voice and self._model == "kimi-k3" and endpoint.scheme == "https"
+                and endpoint.hostname in ("api.moonshot.cn", "api.moonshot.ai")
+                and endpoint.path.rstrip("/") == "/v1"):
+            return {"reasoning_effort": "low"}
+        return {}
+
     async def _search_chat(self, messages, feedback, voice, on_reply_chunk=None, observe=None):
         from lira.llm.search_agent import run_search_agent
 
@@ -310,7 +321,8 @@ class LlmClient:
         task = asyncio.create_task(run_search_agent(
             self._client, self._model, messages, check_privacy, voice=voice,
             on_progress=progress if voice else None, on_sentence=on_reply_chunk,
-            on_delta=observe.delta if observe is not None else None))
+            on_delta=observe.delta if observe is not None else None,
+            request_options=self._voice_options(voice)))
         try:
             done, _ = await asyncio.wait({task}, timeout=self._wait_feedback_seconds)
             if not done and not progress_sent:
@@ -324,7 +336,7 @@ class LlmClient:
     async def _stream_chat(self, messages: list[dict[str, str]], *,
                            on_wait_feedback=_DEFAULT_FEEDBACK,
                            timeout_seconds: float | None = None,
-                           observe=None, on_reply_chunk=None) -> str:
+                           observe=None, on_reply_chunk=None, request_options=None) -> str:
         """建流并回收全部增量；首 token 等待超窗时触发一次 R28 回调。
 
         observe（可选）：逐非空内容增量旁路上报（U3/KTD7），不影响回收。
@@ -343,6 +355,7 @@ class LlmClient:
                 "messages": messages,  # type: ignore[arg-type]
                 "stream": True,
             }
+            create_kwargs.update(request_options or {})
             if timeout_seconds is not None:
                 # 单次调用超时覆盖构造时配置值（openai SDK 的 per-request 语义）
                 create_kwargs["timeout"] = timeout_seconds

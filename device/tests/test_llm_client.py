@@ -714,3 +714,16 @@ class TestModelObservation:
         done = _events(tel, "llm_done")[0].text
         assert done.startswith("x" * 4000)
         assert "截断" in done and "6000" in done  # 截断并注明总长
+
+@pytest.mark.parametrize('endpoint_url,model,voice,expected',[
+    ('https://api.moonshot.cn/v1','kimi-k3',True,{'reasoning_effort':'low'}),
+    ('https://api.moonshot.ai/v1/','kimi-k3',True,{'reasoning_effort':'low'}),
+    ('https://api.moonshot.cn/v1','kimi-k3',False,{}),
+    ('https://compatible.example/v1','kimi-k3',True,{}),
+    ('https://api.moonshot.cn/other','kimi-k3',True,{}),
+    ('https://api.moonshot.cn/v1','kimi-k2.6',True,{}),
+])
+def test_short_voice_reasoning_options_are_native_k3_only(endpoint_url,model,voice,expected):
+    client=object.__new__(LlmClient)
+    client._base_url=endpoint_url;client._model=model
+    assert client._voice_options(voice)==expected

@@ -1,0 +1,20 @@
+<!doctype html><meta charset="utf-8"><title>小字 OCR 新旧对照</title>
+<style>body{font:16px system-ui;max-width:1200px;margin:24px auto;padding:16px}section{display:grid;grid-template-columns:1fr 1fr;gap:24px}img{width:100%;max-height:720px;object-fit:contain;background:#eee}pre{white-space:pre-wrap;line-height:1.7}article{border:1px solid #ddd;padding:16px}@media(max-width:750px){section{grid-template-columns:1fr}}</style>
+<h1>小字 OCR 新旧对照</h1>
+<p>2026-10-06：同一张之前保存的 3136×4224 书页 JPEG，在设备 RKNN 模型上对照。模型和照片相同，仅检测视图不同。以下为未人工修正的输出；增加的小字仍可能有错字，插画仍有误检。</p>
+<section><article><h2>旧算法：整页检测</h2><p>检测加识别 0.257 秒；6 条非空结果。</p><a href="verified/before.jpg"><img src="verified/before.jpg"></a><pre>1、2、3，木头人
+小动物们正在玩“木头人”游戏。趁
+它们一动不动的时候， 看看它们身上分别
+有哪些图形，再数一数每种图形的数量,
+把数量最多的图形贴纸贴在方框里。
+oo</pre><a href="verified/before.txt">原始识别文本</a></article>
+<article><h2>新算法：整页＋重叠分块</h2><p>检测加识别 1.276 秒；7 条非空结果。</p><a href="verified/after.jpg"><img src="verified/after.jpg"></a><pre>1、2、3，木头人
+焦昱设计
+小动物们正在玩“木头人”游戏。趁
+它们一动不动的时候， 看看它们身上分别
+有哪些图形，再数一数每种图形的数量,
+把数量最多的图形贴纸贴在方框里。
+o</pre><a href="verified/after.txt">原始识别文本</a></article></section>
+<h2>本次实时拍摄</h2><p>当前镜头拍到暗桌面和线材，未正对书页，新旧算法识别内容均为空。因此本次实时拍摄不能证明小字识别改善；上述改善来自同一张已保存书页的算法对照。</p>
+<section><article><a href="capture.jpg"><img src="capture.jpg"></a></article><article><h3>对应识别内容</h3><pre>旧算法：（空）
+新算法：（空）</pre><a href="remote/report.json">实时拍摄记录</a></article></section>

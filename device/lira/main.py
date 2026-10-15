@@ -24,6 +24,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
 import signal
 import socket
 import sys
@@ -83,7 +84,7 @@ __all__ = [
 ]
 
 #: 唤醒词回退值（词表读取失败时；正常路径从拼音表首行解析）
-WAKEWORD_FALLBACK = "小丽拉"
+WAKEWORD_FALLBACK = "小鹿"
 
 
 class RingBufferHandler(logging.Handler):
@@ -421,6 +422,16 @@ class DeviceCallbacks:
     def __init__(self, runtime: "DeviceRuntime") -> None:
         self._rt = runtime
 
+    def remember_turn(self, user, answer):
+        identity=getattr(self._rt,'speaker_identity',None)
+        if identity is not None and identity.pending is not None:
+            if any(phrase in str(answer) for phrase in ('怎么称呼','叫什么','你的名字','我该叫你')):
+                identity.pending['asked']=True
+        memory=getattr(self._rt,"personal_memory",None)
+        if memory is not None:
+            try:memory.completed(self._rt.voice_member_id,user,answer)
+            except Exception:logging.warning('memory event=record_failed')
+
     def _dnd_muted(self) -> bool:
         """R8 勿扰静默谓词：出声通道统一经此判断（新增通道勿忘接门）。"""
         return self._rt.engine.dnd
@@ -455,7 +466,10 @@ class DeviceCallbacks:
             return None  # R8：勿扰中裸唤醒词不提示（勿扰形同虚设防线）
         if owner is not None and not self._rt.engine.is_current(owner):
             return None
-        return self._rt.tts.chime(owner=owner, volume=self._rt.settings.volume)
+        self._rt.tts.chime(owner=owner, volume=self._rt.settings.volume)
+        # Queue the short spoken acknowledgment behind the wake tone, using
+        # the same owner so a new wake or privacy change cancels both together.
+        return self.speak(pb.WAKE_ACK, owner=owner)
 
     def cancel_audio(self, owner) -> None:
         if self._rt.tts is not None:
@@ -688,6 +702,21 @@ class DeviceRuntime:
                 on_wait_feedback=None,
             )
         self._llm = llm
+        self.personal_memory = None
+        self.speaker_identity = None
+        self.voice_member_id = None
+        if os.environ.get("LIRA_PERSONAL_MEMORY", "0") == "1":
+            from lira.personal_memory import PersonalMemory, SpeakerIdentity
+            self.personal_memory=PersonalMemory(cfg.db_path,llm._client,cfg.llm.model,
+                lambda:self.privacy.is_on,self._network_ok)
+            llm.memory=self.personal_memory
+            llm.voice_member_provider=lambda:self.voice_member_id
+            llm.voice_context_provider=self.voice_identity_context
+            model_path=cfg.db_path.parent.parent / 'models' / 'lira-speaker.onnx'
+            if not model_path.is_file():
+                from lira.config import REPO_ROOT
+                model_path=REPO_ROOT / 'models' / 'lira-speaker.onnx'
+            self.speaker_identity=SpeakerIdentity(self.personal_memory,model_path)
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
 
         self.engine = self._build_engine(llm)
@@ -709,6 +738,7 @@ class DeviceRuntime:
         self.privacy.subscribe(self._gate.apply)
         self.privacy.subscribe(self.dispatcher.apply_privacy)
         self.privacy.subscribe(self.engine.apply_privacy)
+        self.privacy.subscribe(self.clear_voice_identity)
         # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
         attach_announcer(self.privacy, self.callbacks.speak)
 
@@ -726,6 +756,57 @@ class DeviceRuntime:
             self.callbacks,
             wake_allowed=lambda: not self.privacy.is_on,
         )
+
+    async def handle_voice_input(self,text,samples,generation,wake_prefixed):
+        from lira.dialog.state_machine import State
+        if self.speaker_identity is None or self.engine.state not in (State.LISTENING,State.FOLLOWUP):
+            return await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed)
+        vector=await asyncio.to_thread(self.speaker_identity.embedding,samples)
+        if self.privacy.is_on or generation!=self.dispatcher.generation or self.engine.state not in (State.LISTENING,State.FOLLOWUP):return
+        previous_pending=getattr(self.speaker_identity,'pending',None)
+        member,notice,replay=self.speaker_identity.resolve(text,vector)
+        if member!=self.voice_member_id or (member is None and previous_pending is not getattr(self.speaker_identity,'pending',None)):
+            self.engine._history.clear()
+        self.voice_member_id=member
+        if member is None and notice in ('我们好像还没认识过，你希望我怎么称呼你呀？','你希望我怎么称呼你呀？'):
+            # Answer the real request now. Naming is an optional conversational follow-up.
+            if self.speaker_identity.pending is not None:self.speaker_identity.pending['text']=None
+            await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed)
+            return
+        if member is not None and text.strip() in ('忘记我的记忆','清除我的记忆','删除我的记忆'):
+            self.personal_memory.forget(member)
+            self.engine._history.clear()
+            self.engine._speak_answer('好，以前的聊天记忆已经清掉了。',owner=self.engine._owner,user_text=text,record=False)
+            return
+        if notice:
+            # This is conversational speech through the ordinary owner/cancel path.
+            owner=self.engine._owner
+            self.engine._speak_answer(notice,owner=self.engine._owner,user_text=text,record=False)
+            if replay:
+                completion=self.engine._last_completion
+                if completion is not None:await completion.wait()
+                await asyncio.sleep(0)
+                if not self.engine.is_current(owner) or self.privacy.is_on:return
+                await self.engine.on_asr_text(replay,wake_prefixed=False)
+            return
+        await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed)
+
+    def clear_voice_identity(self, enabled):
+        if enabled:
+            self.voice_member_id=None
+            if self.speaker_identity is not None:self.speaker_identity.pending=None
+
+    def voice_identity_context(self):
+        pending=self.speaker_identity.pending if self.speaker_identity is not None else None
+        if pending is None:return ''
+        if pending.get('existing_name'):
+            return '身份关联尚未确认，但这不妨碍提供帮助。先回答用户当前问题，不催促确认身份，不重复询问称呼。'
+        if pending.get('asked'):
+            return '之前已经问过称呼。用户现在提出了新问题，先正常回应，不重复追问姓名，不强迫建立身份。'
+        return ('这是首次遇到的说话人。先完整回应用户当前的问题、请求或情绪，再决定是否适合自然问一句称呼。'
+                '例如用户问你是谁，先介绍自己，再问怎么称呼；不是先问姓名，也不是等姓名确认后才回答。'
+                '如果用户在处理紧急情况、情绪低落、需要澄清任务条件或只是下达设备指令，先处理这些事，暂不问称呼。'
+                '问题已回答且时机合适时，可以问“对了，我该怎么称呼你呀？”。不必每次都问，不把确认身份当作提供帮助的前提。')
 
     # ---------- 生命周期 ----------
 
@@ -1122,6 +1203,8 @@ class DeviceRuntime:
             await asyncio.gather(*tasks, return_exceptions=True)
         if self.tts is not None:
             await self.tts.close()
+        if self.personal_memory is not None:
+            await self.personal_memory.close()
         await stack.aclose()
         logging.info("LIRA 已退出，HAL 资源已释放。")
 

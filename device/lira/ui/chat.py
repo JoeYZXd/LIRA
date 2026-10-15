@@ -21,6 +21,8 @@
     动态值绝不拼进属性字符串。
   - 文本参数一律 POST body；数据端点错误回 JSON 不 302。
   - chat=None 装配：入口显式"暂不可用"，端点显式报错（不 500、不静默）。
+    库读写失败（sqlite3.Error）同态映射：页面渲染"暂不可用"态、JSON 端点
+    回 503 错误形（不 500）。
   - 文案单一出处：页面提示与 JSON 错误串一律取自 phrasebook CHAT_* 族
     （与发送降级文案同库审校）。
 
@@ -31,6 +33,7 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, HTTPException, Request
@@ -99,11 +102,20 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
 
     def _picker_context(error: str | None = None) -> dict:
         chat = _chat()
+        members: list[dict] = []
+        readable = chat is not None
+        if chat is not None:
+            try:
+                members = chat.store.list_members()
+            except sqlite3.Error:
+                # 读库失败与未装配同态：显式"暂不可用"卡片（不 500、不静默空表）
+                readable = False
+                logger.warning("chat event=store_read_failed what=members source=web-chat")
         return {
             "mode": "picker",
-            "chat_available": chat is not None,
+            "chat_available": readable,
             "unavailable_note": CHAT_OFFLINE_NOTE,
-            "members": [] if chat is None else chat.store.list_members(),
+            "members": members,
             "emoji_presets": EMOJI_PRESETS,
             "max_name_chars": _MAX_NAME_CHARS,
             "error": error,
@@ -111,7 +123,16 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
 
     def _conversation_context(member: dict, *, rename_error: str | None = None) -> dict:
         store = _chat().store
-        rows, has_more = _page(store.recent_messages(member["id"], limit=PAGE_SIZE + 1))
+        try:
+            rows, has_more = _page(store.recent_messages(member["id"], limit=PAGE_SIZE + 1))
+        except sqlite3.Error:
+            # 历史读失败：复用选人页的"暂不可用"态（不 500、不静默；调用方
+            # 状态码不变，沿 chat=None 页面 GET 200 的既有先例）
+            logger.warning(
+                "chat event=store_read_failed what=history source=web-chat member_id=%d",
+                member["id"],
+            )
+            return _picker_context(error=CHAT_OFFLINE_NOTE)
         return {
             "mode": "conversation",
             "chat_available": True,
@@ -234,9 +255,17 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
         resp = _form_guard(request)
         if resp is not None:
             return resp
-        member = _member_or_404(member_id)
-        # 级联删除其全部消息（store FK ON DELETE CASCADE）
-        _chat().store.delete_member(member["id"])
+        try:
+            member = _member_or_404(member_id)
+            # 级联删除其全部消息（store FK ON DELETE CASCADE）
+            _chat().store.delete_member(member["id"])
+        except sqlite3.Error:
+            # 库读写失败显式呈现（503 暂不可用，沿 _form_guard 的未装配先例；
+            # HTTPException 的 404 不在此列、照常上抛）
+            logger.warning("chat event=store_read_failed what=delete source=web-chat member_id=%d", member_id)
+            return templates.TemplateResponse(
+                request, "chat.html", _picker_context(error=CHAT_OFFLINE_NOTE), status_code=503
+            )
         logger.info("chat event=member_deleted source=web-chat member_id=%d", member["id"])
         return RedirectResponse("/chat", status_code=303)
 
@@ -278,13 +307,21 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
         if chat is None:
             return JSONResponse({"error": CHAT_OFFLINE_NOTE}, status_code=503)
         store = chat.store
-        if store.get_member(member_id) is None:
-            return JSONResponse({"error": CHAT_MEMBER_MISSING}, status_code=404)
-        if before is None:
-            rows, has_more = _page(store.recent_messages(member_id, limit=PAGE_SIZE + 1))
-        else:
-            # 多取一条判断"更早还有没有"；_page 丢弃最旧一条（贴近 before 的一页）
-            rows, has_more = _page(store.messages_before(member_id, before, limit=PAGE_SIZE + 1))
+        try:
+            if store.get_member(member_id) is None:
+                return JSONResponse({"error": CHAT_MEMBER_MISSING}, status_code=404)
+            if before is None:
+                rows, has_more = _page(store.recent_messages(member_id, limit=PAGE_SIZE + 1))
+            else:
+                # 多取一条判断"更早还有没有"；_page 丢弃最旧一条（贴近 before 的一页）
+                rows, has_more = _page(store.messages_before(member_id, before, limit=PAGE_SIZE + 1))
+        except sqlite3.Error:
+            # 历史读失败回既有的 503 JSON 错误形（与 chat=None 一致，不 500）
+            logger.warning(
+                "chat event=store_read_failed what=history source=web-chat member_id=%d",
+                member_id,
+            )
+            return JSONResponse({"error": CHAT_OFFLINE_NOTE}, status_code=503)
         return JSONResponse(
             {
                 "messages": [

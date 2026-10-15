@@ -13,7 +13,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import re
 import logging
+import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -24,6 +27,7 @@ import sherpa_onnx
 
 from lira.audio._paths import DOWNLOAD_HINT, TTS_MODEL_DIR, VOCODER_ONNX
 from lira.hal import AudioIO
+from lira.audio.speech_text import spoken_text
 
 __all__ = ["TtsEngine", "PlaybackCompletion"]
 
@@ -77,30 +81,65 @@ class TtsEngine:
         on_occupied: Callable[[], None] | None = None,
         on_released: Callable[[], None] | None = None,
         num_threads: int = 2,
+        backend: str | None = None,
     ) -> None:
+        backend = backend or os.environ.get("LIRA_TTS_BACKEND", "matcha")
+        num_threads = int(os.environ.get("LIRA_TTS_THREADS", str(num_threads)))
+        if backend not in ("matcha", "kokoro", "melo"):
+            raise ValueError("LIRA_TTS_BACKEND must be matcha, kokoro or melo")
+        self._backend = backend
+        self._speaker_zh = int(os.environ.get("LIRA_TTS_SPEAKER_ZH", "3"))
+        self._speaker_en = int(os.environ.get("LIRA_TTS_SPEAKER_EN", "0"))
+        if backend == "kokoro" and Path(model_dir) == TTS_MODEL_DIR:
+            model_dir = TTS_MODEL_DIR.parent / "kokoro-multi-lang-v1_1"
+        if backend == "melo" and Path(model_dir) == TTS_MODEL_DIR:
+            model_dir = TTS_MODEL_DIR.parent / "vits-melo-tts-zh_en"
         model_dir = Path(model_dir)
-        vocoder = _resolve_vocoder(Path(vocoder))
         if not model_dir.is_dir():
             raise FileNotFoundError(f"TTS 模型目录不存在: {model_dir}。{DOWNLOAD_HINT}")
 
         acoustic = _pick_onnx(model_dir, "model")
+        rule_names = ("phone-zh.fst", "date-zh.fst", "number-zh.fst") if backend == "kokoro" else _RULE_FSTS
         rule_fsts = ",".join(
-            str(model_dir / f) for f in _RULE_FSTS if (model_dir / f).is_file()
+            str(model_dir / f) for f in rule_names if (model_dir / f).is_file()
         )
 
-        config = sherpa_onnx.OfflineTtsConfig(
-            model=sherpa_onnx.OfflineTtsModelConfig(
-                matcha=sherpa_onnx.OfflineTtsMatchaModelConfig(
-                    acoustic_model=str(acoustic),
-                    vocoder=str(vocoder),
-                    lexicon=str(model_dir / "lexicon.txt"),
-                    tokens=str(model_dir / "tokens.txt"),
-                    dict_dir=str(model_dir / "dict"),
+        if backend == "melo":
+            config = sherpa_onnx.OfflineTtsConfig(
+                model=sherpa_onnx.OfflineTtsModelConfig(
+                    vits=sherpa_onnx.OfflineTtsVitsModelConfig(
+                        model=str(acoustic), lexicon=str(model_dir / "lexicon.txt"),
+                        tokens=str(model_dir / "tokens.txt"), dict_dir=str(model_dir / "dict")),
+                    num_threads=num_threads), rule_fsts=rule_fsts)
+            self._english_engine = TtsEngine(backend="kokoro", num_threads=num_threads)
+        elif backend == "kokoro":
+            config = sherpa_onnx.OfflineTtsConfig(
+                model=sherpa_onnx.OfflineTtsModelConfig(
+                    kokoro=sherpa_onnx.OfflineTtsKokoroModelConfig(
+                        model=str(acoustic), voices=str(model_dir / "voices.bin"),
+                        tokens=str(model_dir / "tokens.txt"),
+                        data_dir=str(model_dir / "espeak-ng-data"),
+                        lexicon=",".join(str(model_dir / f) for f in
+                                         ("lexicon-us-en.txt", "lexicon-zh.txt")),
+                        dict_dir=str(model_dir / "dict"),
+                    ), num_threads=num_threads,
+                ), rule_fsts=rule_fsts,
+            )
+        else:
+            vocoder = _resolve_vocoder(Path(vocoder))
+            config = sherpa_onnx.OfflineTtsConfig(
+                model=sherpa_onnx.OfflineTtsModelConfig(
+                    matcha=sherpa_onnx.OfflineTtsMatchaModelConfig(
+                        acoustic_model=str(acoustic),
+                        vocoder=str(vocoder),
+                        lexicon=str(model_dir / "lexicon.txt"),
+                        tokens=str(model_dir / "tokens.txt"),
+                        dict_dir=str(model_dir / "dict"),
+                    ),
+                    num_threads=num_threads,
                 ),
-                num_threads=num_threads,
-            ),
-            rule_fsts=rule_fsts,
-        )
+                rule_fsts=rule_fsts,
+            )
         self.tts = sherpa_onnx.OfflineTts(config)
         self.sample_rate: int = self.tts.sample_rate
         self._player = player
@@ -110,7 +149,7 @@ class TtsEngine:
         self.occupied = False
         self._init_playback()
         logging.info(
-            "TTS 已加载: %s + vocos (rule_fsts=%s, sr=%d)",
+            "TTS 已加载: %s (rule_fsts=%s, sr=%d)",
             model_dir.name,
             rule_fsts,
             self.sample_rate,
@@ -118,7 +157,15 @@ class TtsEngine:
 
     def generate(self, text: str, speed: float = 1.0) -> np.ndarray:
         """同步合成，返回 float32 波形（模型采样率）。"""
-        audio = self.tts.generate(text, sid=0, speed=speed)
+        if self._backend == "melo" and re.search(r'[A-Za-z]', text):
+            samples = self._english_engine.generate(text, speed)
+            ratio = self.sample_rate / self._english_engine.sample_rate
+            return np.interp(np.arange(int(len(samples)*ratio))/ratio,
+                             np.arange(len(samples)), samples).astype(np.float32)
+        sid = 0
+        if self._backend == "kokoro":
+            sid = self._speaker_zh if re.search(r"[\u3400-\u9fff]", text) else self._speaker_en
+        audio = self.tts.generate(text, sid=sid, speed=speed)
         return np.asarray(audio.samples, dtype=np.float32)
 
     def _init_playback(self) -> None:
@@ -196,6 +243,7 @@ class TtsEngine:
     async def _drain(self) -> None:
         while self._queue:
             request = self._active = self._queue.popleft()
+            pending_synthesis = None
             try:
                 self.occupied = True
                 self._notify(self._on_occupied)
@@ -204,7 +252,30 @@ class TtsEngine:
                     samples = (0.18 * np.sin(2 * np.pi * 880 * t)
                                * np.sin(np.pi * np.arange(len(t)) / len(t)) ** 2)
                 else:
-                    samples = await asyncio.to_thread(self.generate, request.text, request.speed)
+                    chunks = list(speech_chunks(spoken_text(request.text)))
+                    for index, chunk in enumerate(chunks):
+                        if request.cancelled:
+                            break
+                        started = time.monotonic()
+                        if pending_synthesis is None:
+                            samples = await asyncio.to_thread(self.generate, chunk, request.speed)
+                        else:
+                            samples = await pending_synthesis
+                            pending_synthesis = None
+                        logging.info("tts event=chunk_ready chars=%d elapsed=%.3f", len(chunk), time.monotonic()-started)
+                        if not request.cancelled and index + 1 < len(chunks):
+                            pending_synthesis = asyncio.create_task(asyncio.to_thread(
+                                self.generate, chunks[index+1], request.speed))
+                        if not request.cancelled and self._player is not None:
+                            request.playing = True
+                            await self._player.play(to_pcm16(samples, request.volume))
+                            request.playing = False
+                        if request.abort is not None:
+                            await request.abort
+                        if request.cancelled:
+                            break
+                    request.done.finish("cancelled" if request.cancelled else "success")
+                    continue
                 if not request.cancelled and self._player is not None:
                     request.playing = True
                     await self._player.play(to_pcm16(samples, request.volume))
@@ -215,6 +286,9 @@ class TtsEngine:
                 logging.exception("Audio output failed")
                 request.done.finish("failed", exc)
             finally:
+                # A cancelled reply must not leave a synth worker racing its successor.
+                if pending_synthesis is not None:
+                    await asyncio.gather(pending_synthesis, return_exceptions=True)
                 # An abort must finish before a new request acquires the player.
                 if request.abort is not None:
                     try:
@@ -238,6 +312,34 @@ def to_pcm16(samples: np.ndarray, volume: float = 1.0) -> bytes:
     """float32 [-1,1] 波形 → 音量缩放后的 16bit PCM 字节（HAL play 输入）。"""
     scaled = np.clip(samples * volume, -1.0, 1.0)
     return (scaled * 32767.0).astype(np.int16).tobytes()
+
+
+def speech_chunks(text: str):
+    """Bound startup synthesis without splitting decimal numbers or English words."""
+    remaining = text.strip()
+    first = True
+    while remaining:
+        limit = 24 if first else 32
+        if len(remaining) <= limit:
+            yield remaining
+            return
+        head = remaining[:limit]
+        boundaries = list(re.finditer(r"[。！？!?；;，,]|\.(?=\s)", head))
+        if boundaries:
+            useful = [b for b in boundaries if b.end() >= 10]
+            end = (useful[0] if first else useful[-1]).end() if useful else limit
+        elif " " in head:
+            end = head.rfind(" ") + 1
+        else:
+            end = limit
+            # Keep a long English token intact.
+            while end < len(remaining) and remaining[end-1:end+1].isascii() and remaining[end-1:end+1].isalnum():
+                end += 1
+        while end < len(remaining) and remaining[end-1:end+1].isascii() and remaining[end-1:end+1].isalnum():
+            end += 1
+        yield remaining[:end].strip()
+        remaining = remaining[end:].lstrip()
+        first = False
 
 
 def _pick_onnx(model_dir: Path, prefix: str) -> Path:

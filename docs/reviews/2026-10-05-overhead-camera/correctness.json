@@ -1,0 +1,8 @@
+{
+  "reviewer": "correctness",
+  "findings": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "device/tests/test_camera_isp_quality.py does not exercise adaptive sensor gain on a dark frame containing bright paper; a mocked _capture_batch_adaptive test should verify the new peak-based cap prevents a gain-increasing recapture when highlights are already near saturation."
+  ]
+}

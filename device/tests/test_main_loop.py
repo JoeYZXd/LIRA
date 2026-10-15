@@ -293,12 +293,12 @@ class TestOwnedEffects:
     async def test_wake_only_preroll_endpoint_keeps_original_eight_second_deadline(self, tmp_path):
         rig = make_rig(tmp_path, clock=lambda: 1000.0)
         rt = rig.runtime
-        rt.wake_stream.hits.append("小丽拉")
+        rt.wake_stream.hits.append("小鹿")
         rt._gate.feed(np.full(1600, .1, dtype=np.float32))
         await settle(rt)
         assert rt.engine.state.value == "listening"
         assert rt.engine._awaiting_endpoint
-        rt.asr_stream.text = lambda: "小丽拉"
+        rt.asr_stream.text = lambda: "小鹿"
         rt.asr_stream.is_endpoint = lambda: True
         rt._gate.feed(np.zeros(12000, dtype=np.float32))
         await settle(rt)
@@ -308,7 +308,7 @@ class TestOwnedEffects:
     async def test_queued_wake_before_privacy_cycle_is_discarded(self, tmp_path):
         rig = make_rig(tmp_path)
         rt = rig.runtime
-        rt.wake_stream.hits.append("小丽拉")
+        rt.wake_stream.hits.append("小鹿")
         rt._gate.feed(np.zeros(1600, dtype=np.float32))
         await rt.privacy.set_enabled(True, source="test")
         await rt.privacy.set_enabled(False, source="test")
@@ -372,8 +372,8 @@ class TestDialogWiring:
         await settle(rt)
         spoken = [text for text, _, _ in rig.tts.spoken]
         assert rig.tts.chimes == 1
-        assert spoken[:2] == [pb.CAPTURE_GUIDANCE, pb.OCR_COMPLETE]
-        assert "".join(spoken[2:]) == original
+        assert spoken[:3] == [pb.WAKE_ACK, pb.CAPTURE_GUIDANCE, pb.OCR_COMPLETE]
+        assert "".join(spoken[3:]) == original
         assert rt.camera.capture_calls == 1
         assert rt.engine.state.value == "standby"
 
@@ -446,7 +446,7 @@ class TestDialogWiring:
         task = asyncio.ensure_future(rig.runtime.run())
         try:
             await asyncio.sleep(0.05)
-            rig.runtime.wake_stream.hits.append("小丽拉 @xiao li la")
+            rig.runtime.wake_stream.hits.append("小鹿 @xiao lu")
             samples = np.zeros(1600, dtype=np.float32)
             rig.runtime._gate.feed(samples)
             await asyncio.sleep(0.1)
@@ -755,7 +755,7 @@ class TestReviewFixes:
             await asyncio.sleep(0.15)
             await settle(rig.runtime)
             assert rig.runtime.engine.state.value == "standby"
-            assert rig.tts.spoken == []
+            assert [text for text, _, _ in rig.tts.spoken] == ["我在。"]
             assert rig.tts.chimes == 1
         finally:
             rig.source.push_eof()
@@ -770,7 +770,7 @@ class TestCommandChannel:
         """LISTENING 中命令命中喊停词 → 会话立即回待机（生产接线全链）。"""
         rig = make_rig(tmp_path, clock=lambda: 1000.0)
         rt = rig.runtime
-        rt.wake_stream.hits.append("小丽拉")
+        rt.wake_stream.hits.append("小鹿")
         rt._gate.feed(np.full(1600, .1, dtype=np.float32))
         await settle(rt)
         assert rt.engine.state.value == "listening"
@@ -833,7 +833,7 @@ class TestDndAssemblyGate:
         rig = make_rig(tmp_path, clock=lambda: 1000.0)
         rt = rig.runtime
         rt.engine.dnd = True
-        rt.wake_stream.hits.append("小丽拉")
+        rt.wake_stream.hits.append("小鹿")
         rt._gate.feed(np.full(1600, .1, dtype=np.float32))
         await settle(rt)
         assert rt.engine.state.value == "listening"
@@ -845,7 +845,7 @@ class TestDndAssemblyGate:
         rig = make_rig(tmp_path, clock=lambda: 1000.0)
         rt = rig.runtime
         rt.engine.dnd = True
-        rt.wake_stream.hits.append("小丽拉")
+        rt.wake_stream.hits.append("小鹿")
         rt._gate.feed(np.full(1600, .1, dtype=np.float32))
         await settle(rt)
         rt.asr_stream.text = lambda: "退出勿扰模式"
@@ -1017,12 +1017,29 @@ class TestChatAssembly:
                 created = await client.post(f"{base}/chat/members", data={"name": "妈妈"})
                 assert created.status_code == 303
                 assert created.headers["location"].startswith("/chat/")
+                # R5 装配接线证明：消息端点走生产 ChatService——remote_available
+                # 与 LlmClient.is_available 同源（FakeLlm 恒 False → unavailable；
+                # FakeLlm 无 .chat，若谓词未接线而误发起真实调用会 500 使测试失败）
+                mid = created.headers["location"].rsplit("/", 1)[-1]
+                sent = await client.post(f"{base}/chat/{mid}/messages", json={"text": "你好"})
+                assert sent.status_code == 200
+                assert sent.json()["state"] == "unavailable"
+                # 隐私谓词与主循环同一 PrivacyState：开启后隐私拦截优先于可用性
+                # 检查（同样零 LLM 调用，user 消息按 R7 单独落库）
+                await rig.runtime.privacy.set_enabled(True, source="test")
+                sent_privacy = await client.post(
+                    f"{base}/chat/{mid}/messages", json={"text": "你好"}
+                )
+                assert sent_privacy.status_code == 200
+                assert sent_privacy.json()["state"] == "privacy"
                 # 会话页可达且选人页列出该成员（store 读写经同一装配的 ChatService）
                 convo = await client.get(f"{base}{created.headers['location']}")
                 assert convo.status_code == 200 and "妈妈" in convo.text
                 after = await client.get(f"{base}/chat")
                 assert after.status_code == 200 and "妈妈" in after.text
         finally:
+            # 还原隐私关闭（幂等：本就关闭时无广播）：状态改动不外溢到其他测试
+            await rig.runtime.privacy.set_enabled(False, source="test")
             rig.source.push_eof()
             await asyncio.wait_for(task, timeout=5.0)
         assert len(closed) == 1, "ChatStore.close() 必须挂在 _run_ui 退出路径"

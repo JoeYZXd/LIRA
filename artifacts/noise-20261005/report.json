@@ -1,0 +1,74 @@
+[
+  {
+    "name": "01-exp3200-gain1984",
+    "sample": "/home/orangepi/lira/camera-experiments/noise-20261005/sample-20261005-205112-7907fb7542",
+    "exposure": 3200,
+    "gain": 1984,
+    "aligned": true,
+    "random_luma_noise": 4.478308877035767,
+    "source_luma": 73.4566879272461,
+    "source_clipped_fraction": 0.02781708386479592,
+    "text": "1、2、3，木头人\n集显 设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noo",
+    "lines": 7
+  },
+  {
+    "name": "02-exp3200-gain1024",
+    "sample": "/home/orangepi/lira/camera-experiments/noise-20261005/sample-20261005-205121-0b36e5851e",
+    "exposure": 3200,
+    "gain": 1024,
+    "aligned": true,
+    "random_luma_noise": 2.543741990542152,
+    "source_luma": 38.70989227294922,
+    "source_clipped_fraction": 2.5667227118119974e-06,
+    "text": "1、2、3，木头人\n焦显设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里\noo",
+    "lines": 7
+  },
+  {
+    "name": "03-exp6400-gain512",
+    "sample": "/home/orangepi/lira/camera-experiments/noise-20261005/sample-20261005-205131-3f0dfa55e3",
+    "exposure": 6400,
+    "gain": 512,
+    "aligned": true,
+    "random_luma_noise": 2.0772002721361957,
+    "source_luma": 38.75416946411133,
+    "source_clipped_fraction": 2.3402471784168214e-06,
+    "text": "1、2、3，头人\n焦显设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noo",
+    "lines": 7
+  },
+  {
+    "name": "04-exp6400-gain384",
+    "sample": "/home/orangepi/lira/camera-experiments/noise-20261005/sample-20261005-205140-959054a574",
+    "exposure": 6400,
+    "gain": 384,
+    "aligned": true,
+    "random_luma_noise": 1.6003106482368954,
+    "source_luma": 29.028583526611328,
+    "source_clipped_fraction": 1.7363124226963513e-06,
+    "text": "1、2、3，木头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里",
+    "lines": 6
+  },
+  {
+    "name": "05-exp6400-gain768",
+    "sample": "/home/orangepi/lira/camera-experiments/noise-20261005/sample-20261005-205149-4d572db121",
+    "exposure": 6400,
+    "gain": 768,
+    "aligned": true,
+    "random_luma_noise": 2.922232328366899,
+    "source_luma": 57.815635681152344,
+    "source_clipped_fraction": 0.0032362598803726034,
+    "text": "1、2、3，木头人\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\no",
+    "lines": 6
+  },
+  {
+    "name": "06-exp6400-gain512",
+    "sample": "/home/orangepi/lira/camera-experiments/noise-20261005/sample-20261005-205159-9fcfaab4c8",
+    "exposure": 6400,
+    "gain": 512,
+    "aligned": true,
+    "random_luma_noise": 2.077999637808133,
+    "source_luma": 38.755950927734375,
+    "source_clipped_fraction": 2.4912308673469386e-06,
+    "text": "1、2、3，木头人\n焦是设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量。\n把数量最多的图形贴纸贴在方框里。",
+    "lines": 6
+  }
+]

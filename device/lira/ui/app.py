@@ -24,7 +24,7 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -35,6 +35,9 @@ from lira.dialog.phrasebook import CHAT_OFFLINE_NOTE
 from lira.privacy import PassphraseVault, PrivacyState
 from lira.settings import DeviceSettings
 from lira.ui.chat import mount_chat
+
+if TYPE_CHECKING:
+    from lira.chat.service import ChatService
 
 __all__ = [
     "DeviceSettings",
@@ -68,8 +71,9 @@ class UiServices:
     #: 开发者控制台句柄（dev_console.enabled 时由装配层注入；None = 不挂载）
     dev: object | None = None
     #: 聊天服务（home-console U3 的 ChatService；None = 未装配——聊天入口
-    #: 显式"暂不可用"，不 404、不隐藏、不 500）
-    chat: object | None = None
+    #: 显式"暂不可用"，不 404、不隐藏、不 500）。字符串注解保持运行时惰性
+    #: 导入（TYPE_CHECKING 块，不引入新的运行时依赖）
+    chat: "ChatService | None" = None
     #: 整机状态提供者（R1 状态面；/status JSON 合并其返回的枚举/布尔/数值字段）
     status_provider: Callable[[], dict] = lambda: {}
 

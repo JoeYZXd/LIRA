@@ -48,13 +48,23 @@ class RouteDispatch:
         #: （ADV-03：标记不绑话语会被下一条任意来源投递偷走——唤醒后他人/电视
         #: 说出关机变体即无指令关机。8s 覆盖 replay + 自然接话节奏）
         self._wake_prefix_until = 0
+        self._audio_samples = 0
+        self._audio_energy = 0.0
+        self._audio_peak = 0.0
+        self._audio_clipped = 0
+        self._asr_gate_reason = None
+        self._identity_audio = deque(maxlen=100)
 
     @property
     def generation(self):
         return self._generation
 
     def clear(self) -> None:
+        self._identity_audio.clear()
         self._generation += 1
+        self._audio_samples = self._audio_clipped = 0
+        self._audio_energy = self._audio_peak = 0.0
+        self._asr_gate_reason = None
         self._ring.clear()
         self._fed_until = self._next_sample
         self._activity.reset()
@@ -74,8 +84,11 @@ class RouteDispatch:
 
     def apply_privacy(self, enabled: bool) -> None:
         self.clear()
+        VOICE_LOG.log("audio_gate", "隐私开启：停止向识别链路送音频" if enabled
+                      else "隐私关闭：恢复识别链路输入")
 
     def begin_listening(self, *, replay: bool = True) -> None:
+        self._identity_audio.clear()
         self._generation += 1
         if self._streams.asr_stream is not None:
             self._streams.asr_stream.reset()
@@ -118,8 +131,12 @@ class RouteDispatch:
             self._event("on_speech_" + event)
         self._event("on_audio_progress")
         stream.feed(samples)
+        if getattr(self._streams, "speaker_identity", None) is not None and float(np.mean(samples*samples)) > 0.00001:
+            self._identity_audio.append(samples.copy())
         self._segment_samples += len(samples)
         text = stream.text().strip()
+        if text and text != self._last_text:
+            VOICE_LOG.log("asr_partial", f"ASR 中间结果（未提交）：{text}")
         usable_text = text
         if usable_text.startswith(self._wakeword):
             usable_text = usable_text[len(self._wakeword):].lstrip(" ，,。.!！?？、")
@@ -146,16 +163,20 @@ class RouteDispatch:
                 text = text[len(self._wakeword):].lstrip(" ，,。.!！?？、")
             if text:
                 VOICE_LOG.log("asr", f"识别到指令：{text}")
-                self._deliver(text)
+                voice_samples=np.concatenate(list(self._identity_audio)) if self._identity_audio else None
+                self._identity_audio.clear()
+                self._deliver(text, voice_samples=voice_samples)
             else:
+                VOICE_LOG.log("asr", "ASR 句末结果为空，未投递指令")
                 self._event("on_empty_endpoint")
 
-    def _deliver(self, text, *, wake_prefixed=None):
+    def _deliver(self, text, *, wake_prefixed=None, voice_samples=None):
         """投递一句话文本。wake_prefixed=None（ASR 通道）时消费一次唤醒前缀
         标记——唤醒命中后的首条投递视为带前缀（「小丽拉立即去休息」）；
         KWS 通道（播放白名单/命令）显式传 False（命中词与唤醒无关，不得误耗标记）。
         """
         generation = self._generation
+        from_asr = wake_prefixed is None
         if wake_prefixed is None:
             # ADV-03：前缀标记绑定唤醒后采样窗——窗外首条投递（他人/环境语音）
             # 不继承前缀，防无指令关机
@@ -166,6 +187,10 @@ class RouteDispatch:
             if generation != self._generation:
                 return
             engine = self._streams.engine
+            handler=getattr(self._streams,"handle_voice_input",None)
+            if from_asr and handler is not None and getattr(self._streams,"speaker_identity",None) is not None:
+                await handler(text,voice_samples if voice_samples is not None else np.empty(0,np.float32),generation,wake_prefixed)
+                return
             if hasattr(engine, "listening_generation"):
                 # U2 起引擎签名带 wake_prefixed（与 listening_generation 门同批判定）
                 await engine.on_asr_text(text, generation=generation,
@@ -182,6 +207,21 @@ class RouteDispatch:
             samples = np.asarray(samples, dtype=np.float32)
         route = rt.route
         occupied = bool(getattr(getattr(rt, "tts", None), "occupied", False))
+        self._audio_samples += samples.size
+        self._audio_energy += float(np.sum(samples * samples))
+        if samples.size:
+            self._audio_peak = max(self._audio_peak, float(np.max(np.abs(samples))))
+            self._audio_clipped += int(np.count_nonzero(np.abs(samples) >= 0.999))
+        if self._audio_samples >= _SAMPLE_RATE:
+            rms = np.sqrt(self._audio_energy / self._audio_samples)
+            db = 20 * np.log10(max(float(rms), 1e-10))
+            VOICE_LOG.log("audio", f"收到处理后音频：RMS={db:.1f} dBFS，峰值={self._audio_peak:.3f}，"
+                          f"削波={100 * self._audio_clipped / self._audio_samples:.1f}%，"
+                          f"路由={route.value}，播报占用={occupied}；"
+                          + ("唤醒 KWS 持续检测（未报告新命中）" if rt.wake_stream is not None
+                             else "唤醒 KWS 未装配"))
+            self._audio_samples = self._audio_clipped = 0
+            self._audio_energy = self._audio_peak = 0.0
         if self._tts_was_occupied and not occupied:
             # TTS 释放沿：AEC 清洗后的尾音尚未到齐，开窗吞弃。
             self._discard_until = max(self._discard_until,
@@ -208,6 +248,11 @@ class RouteDispatch:
         # silent, the state actually consumes ASR text, and no settle window
         # is draining the post-playback echo tail.
         hit = rt.wake_stream.feed_and_poll(samples) if rt.wake_stream is not None else None
+        if hit:
+            reason = ("唤醒事件已排队，忽略重复命中" if self._wake_pending
+                      else "匹配唤醒词，提交唤醒" if self._wakeword in hit
+                      else "与配置唤醒词不匹配，不触发唤醒")
+            VOICE_LOG.log("kws", f"KWS 结果：{hit}；目标={self._wakeword}；{reason}")
         if hit and self._wakeword in hit and not self._wake_pending:
             self._wake_pending = True
             self._wake_prefix_pending = True
@@ -216,8 +261,23 @@ class RouteDispatch:
             VOICE_LOG.log("wake", f"收到语音唤醒（{self._wakeword}）")
             generation = self._generation
             async def wake():
-                if generation == self._generation:
-                    await rt.engine.on_wake()
+                try:
+                    if generation == self._generation:
+                        await rt.engine.on_wake()
+                        state = getattr(rt.engine, "state", None)
+                        VOICE_LOG.log("wake", f"唤醒处理完成：状态={getattr(state, 'value', state)}")
+                    else:
+                        VOICE_LOG.log("wake", "唤醒事件已失效：音频会话代次改变")
+                except Exception:
+                    VOICE_LOG.log("wake", "唤醒处理失败：释放排队标记，可再次唤醒")
+                    if generation == self._generation:
+                        self._wake_prefix_pending = False
+                    raise
+                finally:
+                    # begin_listening/clear may have started a successor. Never
+                    # release that newer wake's pending flag from this task.
+                    if generation == self._generation:
+                        self._wake_pending = False
             self._spawn(wake())
             return
         # 常驻命令 KWS（2026-10-06 计划 U2）：承载退出∪喊停高区分度声学子集——
@@ -240,6 +300,12 @@ class RouteDispatch:
                         VOICE_LOG.log("command", f"命令通道命中：{word}")
                         self._deliver(word, wake_prefixed=False)
         if route is AudioRoute.LISTEN and not self._wake_pending:
+            reason = ("播报占用" if occupied else "播报结束后的回声吞弃窗"
+                      if start < self._discard_until else "当前状态不接收 ASR"
+                      if getattr(rt.engine, "state", None) in _ASR_IGNORED_STATES else "正常识别")
+            if reason != self._asr_gate_reason:
+                VOICE_LOG.log("audio_gate", f"ASR 输入：{reason}")
+                self._asr_gate_reason = reason
             if (start < self._discard_until
                     or getattr(getattr(rt, "engine", None), "state", None) in _ASR_IGNORED_STATES
                     or occupied):

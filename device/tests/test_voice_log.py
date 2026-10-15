@@ -187,6 +187,38 @@ class _Holder:
 class TestRouteDispatchEntries:
     SAMPLES = b"\x00\x00" * 160
 
+    async def test_failed_wake_releases_pending_for_next_hit(self):
+        holder = _Holder(AudioRoute.WAKE, wake=_KwsStub("小鹿", "小鹿"))
+        async def failed_wake():
+            raise RuntimeError("stop failed")
+        holder.engine.on_wake = failed_wake
+        pending = []
+        dispatch = RouteDispatch(streams=holder, wakeword="小鹿", spawn=pending.append)
+        dispatch.feed(self.SAMPLES)
+        with pytest.raises(RuntimeError):
+            await pending.pop()
+        dispatch.feed(self.SAMPLES)
+        assert len(pending) == 1
+        pending.pop().close()
+
+    def test_audio_without_wake_reports_level_once_per_second(self):
+        holder = _Holder(AudioRoute.WAKE, wake=_KwsStub(None))
+        dispatch = RouteDispatch(streams=holder, wakeword="小丽拉", spawn=lambda coro: None)
+        for _ in range(100):
+            dispatch.feed(self.SAMPLES)
+        audio = [e.text for e in VOICE_LOG.snapshot() if e.kind == "audio"]
+        assert len(audio) == 1
+        assert "RMS=-200.0 dBFS" in audio[0]
+        assert "未报告新命中" in audio[0]
+        assert not any(e.kind == "wake" for e in VOICE_LOG.snapshot())
+
+    def test_wrong_keyword_explains_rejection(self):
+        holder = _Holder(AudioRoute.WAKE, wake=_KwsStub("其他词"))
+        dispatch = RouteDispatch(streams=holder, wakeword="小丽拉", spawn=lambda coro: None)
+        dispatch.feed(self.SAMPLES)
+        assert any("不匹配，不触发唤醒" in t for t in _texts())
+        assert not any(e.kind == "wake" for e in VOICE_LOG.snapshot())
+
     async def test_wake_hit_logged(self):
         holder = _Holder(AudioRoute.WAKE, wake=_KwsStub("xiǎolìlā@小丽拉"))
         dispatch = RouteDispatch(
@@ -208,6 +240,7 @@ class TestRouteDispatchEntries:
         dispatch.feed(self.SAMPLES)
         await asyncio.sleep(0)
         assert "识别到指令：打开台灯" in _texts()
+        assert "ASR 中间结果（未提交）：打开台灯" in _texts()
 
     async def test_playback_whitelist_logged(self):
         holder = _Holder(AudioRoute.PLAYBACK, playback=_KwsStub("zàntíng@暂停"))

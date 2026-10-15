@@ -1,0 +1,113 @@
+[
+  {
+    "group": "新增灯光，沿用旧参数（过曝）",
+    "results": [
+      {
+        "round": 1,
+        "image": "light-1.jpg",
+        "gain": 512,
+        "source_luma": 136.74917602539062,
+        "random_luma_noise": 2.3461874646414045,
+        "source_clipped_fraction": 0.3608774386885436,
+        "output_clipped_fraction": 0.4794667467484153,
+        "text": "好\n、，头人"
+      },
+      {
+        "round": 2,
+        "image": "light-2.jpg",
+        "gain": 512,
+        "source_luma": 136.76158142089844,
+        "random_luma_noise": 2.3454787379824094,
+        "source_clipped_fraction": 0.36084097612766697,
+        "output_clipped_fraction": 0.47960746354649814,
+        "text": "2、3，头"
+      },
+      {
+        "round": 3,
+        "image": "light-3.jpg",
+        "gain": 512,
+        "source_luma": 136.76307678222656,
+        "random_luma_noise": 2.3465606325976784,
+        "source_clipped_fraction": 0.3608796279520331,
+        "output_clipped_fraction": 0.4797110383571042,
+        "text": "好\n2、3，头"
+      }
+    ]
+  },
+  {
+    "group": "降低曝光／增益对照",
+    "results": [
+      {
+        "round": 1,
+        "image": "light-1.jpg",
+        "gain": 128,
+        "exposure": 6400,
+        "source_luma": 48.63892364501953,
+        "random_luma_noise": 1.272870324967326,
+        "source_clipped_fraction": 2.717706400742115e-06,
+        "output_clipped_fraction": 0.04645164173623995,
+        "text": "1、2、3，木头人\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。"
+      },
+      {
+        "round": 2,
+        "image": "light-2.jpg",
+        "gain": 128,
+        "exposure": 3200,
+        "source_luma": 24.29427146911621,
+        "random_luma_noise": 0.9295154408641483,
+        "source_clipped_fraction": 6.794266001855287e-07,
+        "output_clipped_fraction": 1.509836889301175e-06,
+        "text": "1、2、3，木头人\n动物们正在玩\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里"
+      },
+      {
+        "round": 3,
+        "image": "light-3.jpg",
+        "gain": 192,
+        "exposure": 3200,
+        "source_luma": 36.2177734375,
+        "random_luma_noise": 1.3044324678745043,
+        "source_clipped_fraction": 1.5853287337662339e-06,
+        "output_clipped_fraction": 2.8686900896722326e-06,
+        "text": "1、2、3，木头人\n动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n把数量最多的图形贴纸贴在方框里。"
+      }
+    ]
+  },
+  {
+    "group": "曝光6400、增益128、新灯光校色",
+    "results": [
+      {
+        "round": 1,
+        "image": "light-1.jpg",
+        "gain": 128,
+        "exposure": 6400,
+        "source_luma": 47.980281829833984,
+        "random_luma_noise": 1.2654535821251292,
+        "source_clipped_fraction": 2.7931982452071738e-06,
+        "output_clipped_fraction": 3.62360853432282e-06,
+        "text": "1、2、3，木头人\n焦显设\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noQ"
+      },
+      {
+        "round": 2,
+        "image": "light-2.jpg",
+        "gain": 128,
+        "exposure": 6400,
+        "source_luma": 47.99615478515625,
+        "random_luma_noise": 1.2656147431728646,
+        "source_clipped_fraction": 2.717706400742115e-06,
+        "output_clipped_fraction": 3.4726248453927025e-06,
+        "text": "1、2、3，木头人\n小动物们正在玩“木头人” 游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noo"
+      },
+      {
+        "round": 3,
+        "image": "light-3.jpg",
+        "gain": 128,
+        "exposure": 6400,
+        "source_luma": 48.00157928466797,
+        "random_luma_noise": 1.2657830679470043,
+        "source_clipped_fraction": 2.5667227118119974e-06,
+        "output_clipped_fraction": 3.4726248453927025e-06,
+        "text": "1、2、3，木头人\n集显设\n小动物们正在玩“木头人” 游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noQ"
+      }
+    ]
+  }
+]

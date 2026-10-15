@@ -1,0 +1,35 @@
+[
+  {
+    "round": 1,
+    "image": "light-1.jpg",
+    "gain": 128,
+    "exposure": 6400,
+    "source_luma": 47.980281829833984,
+    "random_luma_noise": 1.2654535821251292,
+    "source_clipped_fraction": 2.7931982452071738e-06,
+    "output_clipped_fraction": 3.62360853432282e-06,
+    "text": "1、2、3，木头人\n焦显设\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noQ"
+  },
+  {
+    "round": 2,
+    "image": "light-2.jpg",
+    "gain": 128,
+    "exposure": 6400,
+    "source_luma": 47.99615478515625,
+    "random_luma_noise": 1.2656147431728646,
+    "source_clipped_fraction": 2.717706400742115e-06,
+    "output_clipped_fraction": 3.4726248453927025e-06,
+    "text": "1、2、3，木头人\n小动物们正在玩“木头人” 游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "round": 3,
+    "image": "light-3.jpg",
+    "gain": 128,
+    "exposure": 6400,
+    "source_luma": 48.00157928466797,
+    "random_luma_noise": 1.2657830679470043,
+    "source_clipped_fraction": 2.5667227118119974e-06,
+    "output_clipped_fraction": 3.4726248453927025e-06,
+    "text": "1、2、3，木头人\n集显设\n小动物们正在玩“木头人” 游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noQ"
+  }
+]

@@ -26,6 +26,8 @@ def board_player_module(monkeypatch):
     if "lira.hal.board.audio" not in sys.modules:
         monkeypatch.setitem(sys.modules, "sounddevice", SimpleNamespace(
             RawOutputStream=None, PortAudioError=type("PortAudioError", (Exception,), {}),
+            CallbackAbort=type("CallbackAbort", (Exception,), {}),
+            CallbackStop=type("CallbackStop", (Exception,), {}),
         ))
     import lira.hal.board.audio as audio
     return audio
@@ -118,6 +120,62 @@ class TestMockIr:
 
 
 class TestMockAudio:
+    async def test_board_callback_keeps_final_samples_and_pads_silence(self, monkeypatch):
+        board_audio = board_player_module(monkeypatch)
+        chunks = []
+        class Stream:
+            def __init__(self, **kwargs):
+                self.callback, self.finished = kwargs["callback"], kwargs["finished_callback"]
+            def start(self):
+                while True:
+                    buffer = bytearray(4)
+                    try:
+                        self.callback(buffer, 2, None, None)
+                    except board_audio.sd.CallbackStop:
+                        chunks.append(bytes(buffer))
+                        self.finished()
+                        return
+                    chunks.append(bytes(buffer))
+            def close(self):
+                pass
+        monkeypatch.setattr(board_audio.sd, "RawOutputStream", Stream)
+        player = board_audio.SoundDevicePlayer()
+        await asyncio.wait_for(player.play(b"\1\0\2\0\3\0"), 1)
+        assert chunks == [b"\1\0\2\0", b"\3\0\0\0"]
+
+    async def test_board_stop_does_not_wait_for_blocked_portaudio_write(self, monkeypatch):
+        import threading
+        board_audio = board_player_module(monkeypatch)
+        entered, release = threading.Event(), threading.Event()
+        class Stream:
+            def __init__(self, **kwargs):
+                self.finished = kwargs.get("finished_callback", lambda: None)
+            def __enter__(self):
+                self.start()
+                return self
+            def __exit__(self, *args):
+                self.close()
+            def start(self):
+                entered.set()
+            def write(self, data):
+                entered.set()
+                release.wait(2)
+            def abort(self):
+                # Real board abort returned while Pa_WriteStream stayed blocked.
+                self.finished()
+            def close(self):
+                pass
+        monkeypatch.setattr(board_audio.sd, "RawOutputStream", Stream)
+        player = board_audio.SoundDevicePlayer()
+        play = asyncio.create_task(player.play(b"\0\0" * 22050))
+        assert await asyncio.to_thread(entered.wait, 1)
+        try:
+            await asyncio.wait_for(player.stop(), .3)
+            await asyncio.wait_for(play, .3)
+        finally:
+            release.set()
+            await play
+
     async def test_held_output_stop_confirms_finished(self, tmp_path):
         audio = MockAudioIO(make_wav(tmp_path), hold_playback=True)
         task = asyncio.create_task(audio.play(b"\x01\x02"))
@@ -127,28 +185,29 @@ class TestMockAudio:
         await task
         assert audio.playback_finished.is_set()
 
-    async def test_board_abort_stops_blocking_write_before_successor(self, monkeypatch):
+    async def test_board_abort_stops_callback_output_before_successor(self, monkeypatch):
         import threading
         board_audio = board_player_module(monkeypatch)
         SoundDevicePlayer = board_audio.SoundDevicePlayer
         streams = []
         class Stream:
             def __init__(self, **kwargs):
+                self.callback = kwargs["callback"]
+                self.finished = kwargs["finished_callback"]
                 self.entered = threading.Event()
                 self.aborted = threading.Event()
                 self.writes = 0
                 streams.append(self)
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
-            def write(self, data):
+            def start(self):
                 self.writes += 1
                 self.entered.set()
-                if len(streams) == 1:
-                    assert self.aborted.wait(2)
+                if len(streams) > 1:
+                    self.finished()
+            def close(self):
+                pass
             def abort(self):
                 self.aborted.set()
+                self.finished()
         monkeypatch.setattr(board_audio.sd, "RawOutputStream", Stream)
         player = SoundDevicePlayer()
         first = asyncio.create_task(player.play(b"\0\0" * 22050))
@@ -173,12 +232,10 @@ class TestMockAudio:
             def __init__(self, **kwargs):
                 entered.set()
                 assert release.wait(2)
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
+            def close(self):
                 pass
-            def write(self, data):
-                writes.append(data)
+            def start(self):
+                writes.append("started")
             def abort(self):
                 pass
         monkeypatch.setattr(board_audio.sd, "RawOutputStream", Stream)

@@ -766,6 +766,7 @@ def _dev_page_html() -> str:
 
 <section id="sec-voicelog">
   <h2>语音交互日志（实时）</h2>
+  <p class="muted">每秒显示处理后音频电平（dBFS 越接近 0 越响）、KWS 命中与唤醒判定、ASR 中间结果及输入拦截原因。待机仅检测唤醒词，不转写普通语音；无 KWS 命中不代表没有收到声音。音频条目停止更新时，请检查隐私模式、录音独占或采集异常。</p>
   <div class="row">
     <label><input type="checkbox" id="vl-auto" checked onchange="vlAuto(this)"> 自动刷新（1s）</label>
     <button onclick="vlClear()">清空</button>
@@ -787,6 +788,9 @@ def _dev_page_html() -> str:
 
 <section id="sec-vision">
   <h2>视觉链路测试</h2>
+  <p><strong>文本距离：镜头到纸面约 20 cm。</strong>
+    请保持机位固定、整页完整入镜，纸面尽量平整，照明均匀并避免反光。
+    此距离为当前 OV13855 实测机位参考，拍摄 A4 时请先通过预览确认四边完整可见。</p>
   <div class="row">
     <button id="preview-btn" onclick="previewToggle()">开启实时预览（~0.5fps）</button>
     <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
@@ -989,9 +993,9 @@ async function loadVoiceLog() {
   }
   const es = r.body.entries || [];
   const view = document.getElementById('vl-view');
-  if (es.length === 0) { view.innerHTML = '（暂无语音交互，说一句“小丽拉”试试）'; }
+  if (es.length === 0) { view.innerHTML = '（暂无语音交互，说一句“小鹿”试试）'; }
   else {
-    const tag = {state:'', wake:'唤醒', asr:'识别', playback:'播放控制', llm:'LLM', llm_reply:'LLM', llm_fail:'LLM', speak:'播报', privacy:'隐私'};
+    const tag = {state:'', audio:'收音', kws:'关键词', audio_gate:'输入门控', asr_partial:'识别中', wake:'唤醒', asr:'识别', playback:'播放控制', llm:'LLM', llm_reply:'LLM', llm_fail:'LLM', speak:'播报', privacy:'隐私'};
     const cls = {wake:'vl-wake', llm:'vl-llm', llm_reply:'vl-llm', speak:'vl-speak', llm_fail:'vl-bad', privacy:'vl-bad'};
     view.innerHTML = es.slice().reverse().map(e => {
       const t = new Date(e.ts * 1000).toLocaleTimeString('zh-CN', {hour12: false});

@@ -149,6 +149,12 @@
   var memberId = Number(root.dataset.memberId); // 数值 ID 只走 dataset
   var oldestId = Number(root.dataset.oldestId);
   var sending = false; // 单飞：在途期间忽略再次提交（服务端另有全局单飞）
+  var SEND_TIMEOUT_MS = 90000; // 单次请求总时限：fetch 无默认超时，需显式兜底
+
+  function abortLater(ctrl) {
+    var timer = setTimeout(function () { ctrl.abort(); }, SEND_TIMEOUT_MS);
+    return timer;
+  }
 
   // 转义纪律：动态文本一律 createElement + textContent 进 DOM（元素内容
   // 位置）；不拼 HTML 字符串注入节点，动态值绝不拼进属性字符串。
@@ -173,7 +179,8 @@
     return wrap;
   }
 
-  // meta 行三态：发送中（pending）/ 未发送 + 降级文案 + 重发 / 清除（null）
+  // meta 行多态：发送中（pending）/ 未发送 + 降级文案 + 重发 / 已保存未回复
+  // （无重发）/ 已回复但未存历史（常驻标注）/ 清除（null）
   function renderMeta(wrap, opts) {
     var old = wrap.querySelector('.chat-meta');
     if (old) { old.parentNode.removeChild(old); }
@@ -209,22 +216,38 @@
     var wrap = existing || addBubble(text, 'user'); // 乐观待定气泡
     renderMeta(wrap, { label: '发送中…' });
     scrollBottom();
+    var ctrl = new AbortController(); // 90s 兜底；超时走下方网络异常分支（中止即 reject）
+    var timer = abortLater(ctrl);
     fetch('/chat/' + memberId + '/messages', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: text })
+      body: JSON.stringify({ text: text }),
+      signal: ctrl.signal
     }).then(function (r) {
       return r.json().catch(function () { return null; });
     }).then(function (j) {
       if (j && j.state === 'ok') {
-        renderMeta(wrap, null);
-        input.value = ''; // 仅成功后清空输入框
+        if (j.message) {
+          // 落库失败（saved=False）：回复照常展示，meta 常驻标注；不给重发
+          // ——再发一次生成的是新回复，找不回本条
+          renderMeta(wrap, { label: '已回复', copy: String(j.message) });
+        } else {
+          renderMeta(wrap, null);
+        }
+        // 仅当输入框仍是发出的那句时清空（等待期间用户新打的内容保留）
+        if (input.value.replace(/^\s+|\s+$/g, '') === text) { input.value = ''; }
         if (j.reply) { addBubble(String(j.reply), 'assistant'); }
         return;
       }
-      // 任一降级态：保留气泡、标注"未发送"、附降级文案与一键重发
+      // 任一降级态：保留气泡、附降级文案；已落库轮（隐私拦截，saved=true）
+      // 标注"已保存（未回复）"且不给重发——重发会把同一条文本再存一遍
+      var saved = !!(j && j.saved);
       var copy = (j && j.message) ? String(j.message) : '发送失败，请稍后再试。';
-      renderMeta(wrap, { label: '未发送', copy: copy, retry: true });
+      renderMeta(wrap, {
+        label: saved ? '已保存（未回复）' : '未发送',
+        copy: copy,
+        retry: !saved
+      });
       errEl.textContent = copy;
       errEl.hidden = false;
     }).catch(function () {
@@ -232,6 +255,7 @@
       errEl.textContent = '网络异常，消息没有发出去。';
       errEl.hidden = false;
     }).finally(function () {
+      clearTimeout(timer);
       sending = false;
       btn.disabled = false;
       btn.textContent = '发送';
@@ -247,7 +271,9 @@
     btnMore.addEventListener('click', function () {
       if (btnMore.disabled) { return; }
       btnMore.disabled = true;
-      fetch('/chat/' + memberId + '/messages?before=' + oldestId)
+      var ctrl = new AbortController(); // 与发送同款 90s 兜底（中止走网络异常分支）
+      var timer = abortLater(ctrl);
+      fetch('/chat/' + memberId + '/messages?before=' + oldestId, { signal: ctrl.signal })
         .then(function (r) { return r.json(); })
         .then(function (j) {
           var items = (j && j.messages) ? j.messages : [];
@@ -267,7 +293,10 @@
           errEl.textContent = '加载更早的聊天失败，请再试一次。';
           errEl.hidden = false;
         })
-        .finally(function () { btnMore.disabled = false; });
+        .finally(function () {
+          clearTimeout(timer);
+          btnMore.disabled = false;
+        });
     });
   }
 

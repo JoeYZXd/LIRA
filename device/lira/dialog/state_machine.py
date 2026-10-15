@@ -293,6 +293,7 @@ class DialogEngine:
         """
         if not self._wake_allowed():
             logging.info("唤醒事件被唤醒门拦截 event=wake_blocked reason=privacy")
+            VOICE_LOG.log("wake", "唤醒未触发：被隐私唤醒门拦截")
             return
         # ADV-01：唤醒即接管——逃生舱两阶段对话随新会话作废（否则 exit 阶段
         # 拒绝腿会把聆听窗 disarm 成永久开放会话；exec 阶段他人口语「开吧」
@@ -306,7 +307,9 @@ class DialogEngine:
         stop = getattr(self._cb, "stop_audio", None)
         if stop is not None:
             try:
+                VOICE_LOG.log("wake", "唤醒处理中：正在停止旧语音输出")
                 await stop(old_owner)
+                VOICE_LOG.log("wake", "旧语音输出已停止，准备进入聆听")
             except Exception:
                 logging.exception("dialog event=playback_stop_failed")
                 if self.is_current(owner):
@@ -669,14 +672,26 @@ class DialogEngine:
         self._transition(State.PROCESSING)
         self._disarm()
         self._route_task = asyncio.current_task()
+        streamed = []
+        def reply_chunk(chunk):
+            if self.is_current(owner):
+                completion = self._speak(chunk)
+                if completion is None:
+                    completion = asyncio.Event()
+                    completion.set()
+                streamed.append(completion)
         try:
             result = await self._router.route(
-                text, context=context, on_wait_feedback=lambda: self.speak_progress(owner, pb.WAIT_REMOTE))
+                text, context=context, on_wait_feedback=lambda message=None: self.speak_progress(owner, message or "我想一下啊。"), on_reply_chunk=reply_chunk)
         except asyncio.CancelledError:
             return
         except Exception:
             logging.exception("dialog event=understanding_failed")
             if self.is_current(owner):
+                if streamed:
+                    cancel = getattr(self._cb, "cancel_audio", None)
+                    if cancel is not None:
+                        cancel(owner)
                 self._speak(pb.UNDERSTANDING_FAILED)
                 self._begin_listening(replay=False)
                 self._arm(self.LISTEN_WINDOW_SECONDS)
@@ -689,9 +704,13 @@ class DialogEngine:
         if result.tier is RouterTier.LOCAL_RULE and result.intent is not None:
             self._dispatch(result.intent)
         elif result.reply:
-            self._speak_answer(result.reply, owner=owner, user_text=text)
+            self._speak_answer(result.reply, owner=owner, user_text=text, streamed=streamed)
         else:
             # 规则与 LLM 均无结果 → R24 识别失败引导
+            if streamed:
+                cancel = getattr(self._cb, "cancel_audio", None)
+                if cancel is not None:
+                    cancel(owner)
             self._recognition_failure(text)
 
     def _start_reading_clarification(self) -> None:
@@ -1057,16 +1076,19 @@ class DialogEngine:
         task.add_done_callback(self._completion_tasks.discard)
 
     def _speak_answer(self, text: str, *, owner: OperationOwner, user_text: str,
-                      record: bool = True) -> None:
+                      record: bool = True, streamed=None) -> None:
         self._transition(State.SPEAKING)
         self._disarm()
-        completion = self._speak(text)
+        completion = streamed[-1] if streamed else self._speak(text)
         def finished():
             if not self.is_current(owner) or self.state is not State.SPEAKING:
                 return
-            if completion is None or getattr(completion, "status", "success") == "success":
+            if (completion is None or getattr(completion, "status", "success") == "success") and all(
+                    getattr(item, "status", "success") == "success" for item in (streamed or [])):
                 if record:
                     self._history.record_completed(user_text, text)
+                    remember=getattr(self._cb,"remember_turn",None)
+                    if remember is not None:remember(user_text,text)
                 self._begin_listening(replay=False)
                 self._transition(State.FOLLOWUP)
                 self._arm(self.FOLLOWUP_WINDOW_SECONDS)

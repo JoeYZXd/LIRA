@@ -1,0 +1,11 @@
+{
+  "testing_gaps": [
+    "Successful calibration loading through capture JPEG lacks unit coverage.",
+    "Adaptive sensor highlight cap needs dark/near-white and uniformly-dark branch coverage.",
+    "Subprocess timeout/cancellation kill-and-reap lacks unit coverage."
+  ],
+  "residual_risks": [
+    "Measured gains target current white references and lighting; full true-color reproduction not established.",
+    "Inherited full-range NV12 conversion limitation remains documented."
+  ]
+}

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 import numpy as np
@@ -64,7 +65,8 @@ class StreamingAsr:
             decoder=str(_pick(model_dir, "decoder")),
             joiner=str(_pick(model_dir, "joiner")),
             num_threads=num_threads,
-            decoding_method="greedy_search",
+            decoding_method=os.environ.get("LIRA_ASR_DECODING_METHOD", "greedy_search"),
+            max_active_paths=4,
             enable_endpoint_detection=enable_endpoint_detection,
             rule1_min_trailing_silence=2.0,
             rule2_min_trailing_silence=0.8,

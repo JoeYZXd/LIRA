@@ -8,6 +8,8 @@ llm:
   # 必填项：建议用环境变量注入，不要提交真实 key 到仓库
   api_key: ""
   model: glm-4-flash
+  # Kimi Agent 按需搜索（需要 Moonshot 官方端点；搜索和模型调用分别计费）
+  web_search_enabled: false
   timeout_seconds: 10.0
   # U5 熔断降级：连续失败 N 次开断路，冷却后放行试探（R10）
   breaker_failure_threshold: 3

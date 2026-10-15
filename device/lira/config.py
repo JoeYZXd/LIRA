@@ -51,6 +51,7 @@ class LlmConfig:
     wait_feedback_seconds: float
     # U5：复杂文本转白话的长度阈值（字符数）；医疗类别词不受阈值限制
     colloquial_threshold_chars: int
+    web_search_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -122,6 +123,7 @@ DEFAULTS: dict[str, Any] = {
         "breaker_cooldown_seconds": 60.0,
         "wait_feedback_seconds": 2.0,
         "colloquial_threshold_chars": 150,
+        "web_search_enabled": False,
     },
     "hal": {
         "backend": "mock",
@@ -159,6 +161,7 @@ DEFAULTS: dict[str, Any] = {
 
 # 环境变量覆盖表：env 名 -> (yaml 段, 键, 类型)
 ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
+    "LIRA_LLM_WEB_SEARCH_ENABLED": ("llm", "web_search_enabled", "bool"),
     "LIRA_LLM_BASE_URL": ("llm", "base_url", str),
     "LIRA_LLM_API_KEY": ("llm", "api_key", str),
     "LIRA_LLM_MODEL": ("llm", "model", str),
@@ -239,6 +242,12 @@ def _apply_env(config: dict[str, Any], env: Mapping[str, str]) -> None:
 
 def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
     llm = config["llm"]
+    if not isinstance(llm["web_search_enabled"], bool):
+        raise ConfigError("llm.web_search_enabled 必须为布尔值。")
+    if llm["web_search_enabled"] and llm["base_url"].rstrip("/") not in (
+        "https://api.moonshot.cn/v1", "https://api.moonshot.ai/v1"
+    ):
+        raise ConfigError("联网搜索目前需要 Kimi 开放平台端点。")
     if not llm["base_url"]:
         raise ConfigError("LLM base_url 为空。请设置 config.yaml 的 llm.base_url 或环境变量 LIRA_LLM_BASE_URL。")
     if require_api_key and not llm["api_key"]:
@@ -356,6 +365,7 @@ def load_config(
             breaker_cooldown_seconds=float(config["llm"]["breaker_cooldown_seconds"]),
             wait_feedback_seconds=float(config["llm"]["wait_feedback_seconds"]),
             colloquial_threshold_chars=int(config["llm"]["colloquial_threshold_chars"]),
+            web_search_enabled=config["llm"]["web_search_enabled"],
         ),
         hal=HalConfig(
             backend=str(hal["backend"]),

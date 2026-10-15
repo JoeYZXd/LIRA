@@ -8,7 +8,8 @@
     即执行（文字通道触发家电直接违反 R9），且语音适配器把降级折叠为单一
     None，聊天需要独立的多态降级语义。调用约束两条铁律按传参落实：
     `on_wait_feedback=None`（聊天永不触发设备发声）、`voice_log=False`
-    （回复预览与"交互中"条目不进 VOICE_LOG）、独立超时（约 30s）。
+    （回复预览与"交互中"条目不进 VOICE_LOG）、独立超时（单读约 30s + 总预算
+    120s 防慢生成占锁）。
   - 护栏（均内存实现、重启重置，家庭规模接受）：设备级全局单飞
     （同时最多 1 个在途聊天 LLM 调用，镜像 ui/dev.py 的 dev_mutex 先例，
     任一成员在途期间所有二次发送得 busy）+ 每成员固定窗口限流。
@@ -49,6 +50,7 @@ from lira.dialog.phrasebook import (
     CHAT_FAILED,
     CHAT_MEMBER_GONE,
     CHAT_PRIVACY,
+    CHAT_SAVE_FAILED_NOTE,
     CHAT_TOO_LONG,
     CHAT_UNAVAILABLE,
 )
@@ -62,6 +64,7 @@ __all__ = [
     "WINDOW_PAIRS",
     "WINDOW_MAX_CHARS",
     "CHAT_TIMEOUT_SECONDS",
+    "CHAT_TOTAL_TIMEOUT_SECONDS",
 ]
 
 logger = logging.getLogger(__name__)
@@ -75,6 +78,11 @@ WINDOW_MAX_CHARS = 4000
 #: 聊天调用独立超时（秒）：共享客户端默认 10s 按语音回复长度调校，长回复
 #: 中途卡顿即计一次熔断失败；聊天放宽但不改语音行为（默认不变的可选参数）
 CHAT_TIMEOUT_SECONDS = 30.0
+#: 单次发送总预算（秒）：上面是 httpx 单读超时，只约束单个读操作——慢生成/
+#: 分段读叠加可远超单读上限，无限占住设备级全局单飞锁（所有成员都得到
+#: busy）。wait_for 到点取消整个调用（_stream_chat 的 finally 负责关流），
+#: 按 failed 收敛（不落库、锁随 async with 退出释放）。
+CHAT_TOTAL_TIMEOUT_SECONDS = 120.0
 #: 每成员固定窗口限流默认值（条 / 窗口秒；纯内存，重启重置）
 RATE_LIMIT_MAX = 6
 RATE_WINDOW_SECONDS = 60.0
@@ -86,8 +94,9 @@ class ChatSendResult:
 
     state: ok | privacy | unavailable | busy | failed | member_gone |
            too_long | empty
-    message: 用户可见降级文案（phrasebook CHAT_* 单一出处；ok 态为空串，
-        回复即内容）；一律不含消息文本（R10）。
+    message: 用户可见降级文案（phrasebook CHAT_* 单一出处；ok 态落库成功
+        为空串（回复即内容），落库失败为 CHAT_SAVE_FAILED_NOTE 常驻标注）；
+        一律不含消息文本（R10）。
     reply: 仅 ok 态非 None；落库失败时回复仍返回（saved=False 标记，非静默）。
     saved: 本轮是否有内容落库——ok 态 user+assistant 成对；privacy 态仅
         user 消息（R7）；failed/busy/unavailable/校验拒绝轮与落库失败为 False。
@@ -141,11 +150,19 @@ class ChatService:
     async def send(self, member_id: int, text: str) -> ChatSendResult:
         """发一条消息并等待完整回复。
 
-        校验/护栏未过不调 LLM 不落库；LlmError 轮不落库（重试干净）；
+        校验/护栏未过不调 LLM 不落库；LlmError/总预算超时轮不落库（重试干净）；
         隐私拦截轮单独落 user 消息（R7）。
         """
-        # 成员存在性先行：写事务前的早期复查（发送中被删由落库 FK 兜底）
-        if self._store.get_member(member_id) is None:
+        # 成员存在性先行：写事务前的早期复查（发送中被删由落库 FK 兜底）；
+        # 读失败显式降级（与写路径的 save_failed 对称，不 500、不落库）
+        try:
+            member_missing = self._store.get_member(member_id) is None
+        except sqlite3.Error:
+            self._log(
+                "unavailable", member_id, len(text), reason="store_read", level=logging.WARNING
+            )
+            return ChatSendResult(state="unavailable", message=CHAT_UNAVAILABLE)
+        if member_missing:
             self._log("member_gone", member_id, len(text))
             return ChatSendResult(state="member_gone", message=CHAT_MEMBER_GONE)
 
@@ -244,17 +261,31 @@ class ChatService:
         )
 
     async def _call_llm_and_persist(self, member_id: int, message: str, started: float) -> ChatSendResult:
-        window = self._build_window(member_id)
+        try:
+            window = self._build_window(member_id)
+        except sqlite3.Error:
+            # 滑窗读失败：与写路径 save_failed 对称，显式降级（不调 LLM、不落库）
+            self._log(
+                "unavailable", member_id, len(message), started,
+                reason="store_read", level=logging.WARNING,
+            )
+            return ChatSendResult(state="unavailable", message=CHAT_UNAVAILABLE)
         # task 恒为 None（默认值）：阅读任务事实绝不进入聊天调用
         snapshot = ContextSnapshot(pairs=tuple(ConversationPair(u, a) for u, a in window))
         try:
-            reply = await self._llm.chat(
-                message,
-                system=CHAT_SYSTEM_PROMPT,
-                context=snapshot,
-                on_wait_feedback=None,  # 铁律：聊天永不触发设备发声
-                timeout_seconds=CHAT_TIMEOUT_SECONDS,
-                voice_log=False,  # 回复预览与"交互中"条目不进语音展示面
+            # 总预算兜底（CHAT_TOTAL_TIMEOUT_SECONDS）：单读超时只约束单个读
+            # 操作，wait_for 到点取消整个调用并释放全局单飞锁
+            reply = await asyncio.wait_for(
+                self._llm.chat(
+                    message,
+                    system=CHAT_SYSTEM_PROMPT,
+                    context=snapshot,
+                    on_wait_feedback=None,  # 铁律：聊天永不触发设备发声
+                    timeout_seconds=CHAT_TIMEOUT_SECONDS,
+                    voice_log=False,  # 回复预览与"交互中"条目不进语音展示面
+                    **({"memory_member_id": member_id} if getattr(self._llm,"memory",None) is not None else {}),
+                ),
+                timeout=CHAT_TOTAL_TIMEOUT_SECONDS,
             )
         except PrivacyBlocked:
             # 服务端检查与客户端入口之间的隐私开关竞态：客户端 fail-closed
@@ -264,13 +295,29 @@ class ChatService:
             # 失败不落库：user+assistant 均不落，重试干净无重复（Key Decisions）
             self._log("fail", member_id, len(message), started)
             return ChatSendResult(state="failed", message=CHAT_FAILED)
-        # 单事务成对落库 + 裁剪（store 内部完成）；落库失败不吞回复（非静默、非 500）
-        return self._persist(
+        except asyncio.TimeoutError:
+            # 总预算超时同 LlmError 收敛：失败不落库（重试干净），锁随
+            # async with 退出释放（慢生成不得无限占锁）
+            self._log("fail", member_id, len(message), started)
+            return ChatSendResult(state="failed", message=CHAT_FAILED)
+        # 单事务成对落库 + 裁剪（store 内部完成）；落库失败不吞回复（非静默、
+        # 非 500）——saved=False 时携带显式标注（前端常驻呈现，R1 残留修复）
+        outcome = self._persist(
             member_id,
             [("user", message), ("assistant", reply)],
             started,
-            lambda saved: ChatSendResult(state="ok", reply=reply, saved=saved),
+            lambda saved: ChatSendResult(
+                state="ok",
+                reply=reply,
+                saved=saved,
+                message="" if saved else CHAT_SAVE_FAILED_NOTE,
+            ),
         )
+        memory=getattr(self._llm,"memory",None)
+        if outcome.saved and memory is not None:
+            try:memory.completed(member_id,message,reply)
+            except Exception:logger.warning('chat event=memory_record_failed')
+        return outcome
 
     def _build_window(self, member_id: int) -> list[tuple[str, str]]:
         """从库组装滑窗：最近 WINDOW_PAIRS 对 + WINDOW_MAX_CHARS 字符预算双界。

@@ -1,0 +1,26 @@
+[
+  {
+    "mode": "before",
+    "shape": [
+      4224,
+      3136,
+      3
+    ],
+    "seconds": 0.05681916797766462,
+    "lines": 0,
+    "text": "",
+    "polygons": []
+  },
+  {
+    "mode": "after",
+    "shape": [
+      4224,
+      3136,
+      3
+    ],
+    "seconds": 1.5797416420246009,
+    "lines": 0,
+    "text": "",
+    "polygons": []
+  }
+]

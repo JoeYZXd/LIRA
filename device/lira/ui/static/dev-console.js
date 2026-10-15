@@ -236,7 +236,7 @@ function renderVoiceCandidates(data) {
       '<div class="vc-meta">' + pct + '% · ' + vlEscape(vcProgressBasis(c)) + '</div>' + extra + '</div>';
   }).join('');
   parts.push('<div class="vc-block"><div class="vc-block-title">声音候选 ' + (data.candidates || []).length + '</div>' +
-    (candidateCards || '<p class="muted">（暂无候选——与 LIRA 自然交谈时会自动积累）</p>') + '</div>');
+    (candidateCards || '<p class="muted">（暂无旧候选；请对 LIRA 说“录入声纹”，按提示确认后保存）</p>') + '</div>');
   document.getElementById('voice-candidates-view').innerHTML = parts.join('');
 }
 

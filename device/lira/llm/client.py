@@ -259,13 +259,11 @@ class LlmClient:
         # A single turn timer owns conversational feedback, including tool waits.
         # First real content silences it even before a sentence is ready for TTS.
         content_started = False
-        original_delta = observe.delta
         def observe_delta(content):
             nonlocal content_started
             if content:
                 content_started = True
-            original_delta(content)
-        observe.delta = observe_delta
+            observe.delta(content)
         async def waiting_feedback():
             await asyncio.sleep(min(self._wait_feedback_seconds, 0.3))
             if not content_started and not self._privacy():
@@ -275,11 +273,11 @@ class LlmClient:
         started = time.monotonic()
         try:
             if use_search:
-                text = await self._search_chat(messages, on_wait_feedback, voice_log,
-                                               on_reply_chunk, observe)
+                text = await self._search_chat(messages, voice_log,
+                                               on_reply_chunk, observe_delta)
             else:
-                text = await self._stream_chat(messages, on_wait_feedback=on_wait_feedback,
-                                               timeout_seconds=timeout_seconds, observe=observe,
+                text = await self._stream_chat(messages,
+                                               timeout_seconds=timeout_seconds, on_delta=observe_delta,
                                                on_reply_chunk=on_reply_chunk,
                                                request_options=self._voice_options(voice_log and system != PLAIN_SPEAK_SYSTEM_PROMPT))
         except asyncio.CancelledError:
@@ -327,7 +325,7 @@ class LlmClient:
             return {"reasoning_effort": "low"}
         return {}
 
-    async def _search_chat(self, messages, feedback, voice, on_reply_chunk=None, observe=None):
+    async def _search_chat(self, messages, voice, on_reply_chunk=None, on_delta=None):
         from lira.llm.search_agent import run_search_agent
 
         def check_privacy():
@@ -337,7 +335,7 @@ class LlmClient:
         task = asyncio.create_task(run_search_agent(
             self._client, self._model, messages, check_privacy, voice=voice,
             on_sentence=on_reply_chunk,
-            on_delta=observe.delta if observe is not None else None,
+            on_delta=on_delta,
             request_options=self._voice_options(voice)))
         try:
             return await asyncio.wait_for(task, timeout=90)
@@ -347,12 +345,11 @@ class LlmClient:
             await asyncio.gather(task, return_exceptions=True)
 
     async def _stream_chat(self, messages: list[dict[str, str]], *,
-                           on_wait_feedback=_DEFAULT_FEEDBACK,
                            timeout_seconds: float | None = None,
-                           observe=None, on_reply_chunk=None, request_options=None) -> str:
+                           on_delta=None, on_reply_chunk=None, request_options=None) -> str:
         """建流并回收全部增量；等待反馈统一由 chat 的轮次计时器处理。
 
-        observe（可选）：逐非空内容增量旁路上报（U3/KTD7），不影响回收。
+        on_delta（可选）：逐非空内容增量旁路上报，不影响回收。
         """
 
         stream = None
@@ -392,8 +389,8 @@ class LlmClient:
                     check_privacy()
                     content = self._append_delta([], chunk)
                     if content:
-                        if observe is not None:
-                            observe.delta(content)
+                        if on_delta is not None:
+                            on_delta(content)
                         yield content
                     try:
                         chunk = await anext(stream)

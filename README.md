@@ -116,3 +116,20 @@ DeviceHarness）、`test_ae1_privacy.py` … `test_ae7_sync.py`（每个 AE 一�
 `test_sync_adversarial.py`（旧 epoch 回放 / 重复投递 / 应用中崩溃 / 库重建换新 /
 多次离线变更）、`audio_fixtures/`（TTS 合成 wav）、`make_audio_fixtures.py`。
 
+
+Optional online voice is disabled by default (`online_tts.enabled: false`). To opt in,
+install the device `audio` extra, set `LIRA_ONLINE_TTS_API_KEY` in the process environment,
+and configure the account's `online_tts.resource_id` and `online_tts.speaker`.
+Only live answer sessions use Volcengine V3 bidirectional TTS; wake cues, error cues,
+finite speech and local reading retain offline synthesis. The adapter requests mono
+signed 16-bit PCM at the existing output sample rate (including 22050 Hz), so there
+is no per-packet resampling. The API key is excluded from configuration repr and YAML.
+
+A connection failure disables online voice for subsequent turns until restart.
+Before the HAL consumes any audio, at most 256 characters can be replayed locally
+once. If that replay budget is exceeded, or any audio has reached the output callback,
+the answer fails without replaying or guessing an offset; the existing local failure
+cue handles feedback. Privacy activation closes active sessions and clears queued
+speech. Tests use simulated protocol frames, without cloud credentials or paid calls;
+real account compatibility, cost, cloud latency and acoustic playback remain unverified.
+Protocol reference: [Volcengine V3](https://docs.volcengine.com/docs/DoubaoVoice/WebSocketBidirectionalStreaming-V3?lang=zh).

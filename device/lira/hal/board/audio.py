@@ -39,6 +39,7 @@ class SoundDevicePlayer(AudioIO):
     """One RawOutputStream per answer, with at most two seconds queued PCM."""
 
     def __init__(self, device: int | str | None = None, samplerate: int = 22050) -> None:
+        self.output_frames = 0
         self.device = device
         self.samplerate = int(samplerate)
         self._play_lock = asyncio.Lock()
@@ -194,6 +195,8 @@ class SoundDevicePlayer(AudioIO):
                 pending = pending[count:]
                 position += count
             output.consumed += position
+            self.output_frames += position // 2
+            mark(output.trace, 'buffer', buffer_frames=(output.submitted-output.consumed)//2)
             if position and output.first:
                 output.first = False
                 mark(output.trace, 'output_consumed', frames=position // 2, answer=int(output.answer))

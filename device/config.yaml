@@ -53,3 +53,11 @@ sync:
   device_token: ""         # 开发期预置：后台「注册设备」一次性展示的 token（或环境变量 LIRA_SYNC_DEVICE_TOKEN）
 
 log_level: INFO
+
+# Optional live-answer cloud voice; prompts, reading and controls remain local.
+online_tts:
+  enabled: false
+  resource_id: seed-tts-2.0
+  speaker: ""
+  timeout_seconds: 10.0
+# API key is environment-only: LIRA_ONLINE_TTS_API_KEY

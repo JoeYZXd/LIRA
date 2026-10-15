@@ -245,3 +245,24 @@ class TestErrorPaths:
         assert DEFAULTS["llm"]["api_key"] == "", "DEFAULTS 被 env 覆盖污染"
         cfg2 = load_config(env={}, require_api_key=False)
         assert cfg2.llm.api_key == "", "env 覆盖跨 load_config 调用泄漏"
+
+def test_online_config_env_secret_only(tmp_path):
+    from lira.config import load_config, ConfigError
+    import pytest
+    path = tmp_path/'config.yaml'
+    cfg = load_config(path, env={'LIRA_ONLINE_TTS_API_KEY': 'hidden-key'}, require_api_key=False)
+    assert not cfg.online_tts.ready
+    assert 'hidden-key' not in repr(cfg)
+    cfg = load_config(path, env={'LIRA_ONLINE_TTS_ENABLED': 'true', 'LIRA_ONLINE_TTS_API_KEY': 'hidden-key', 'LIRA_ONLINE_TTS_SPEAKER': 'voice'}, require_api_key=False)
+    assert cfg.online_tts.ready
+    path.write_text('online_tts:\n  api_key: forbidden\n')
+    with pytest.raises(ConfigError):
+        load_config(path, env={}, require_api_key=False)
+
+@pytest.mark.parametrize('value', ['null', '"invalid"', 'true', '-1', '.inf'])
+def test_online_invalid_timeout_is_config_error(tmp_path, value):
+    from lira.config import load_config, ConfigError
+    path = tmp_path/'config.yaml'
+    path.write_text('online_tts:\n  timeout_seconds: '+value+'\n')
+    with pytest.raises(ConfigError):
+        load_config(path, env={}, require_api_key=False)

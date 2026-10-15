@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from lira.audio.tts_provider import OnlineTtsConfig
+
 import copy
 import os
 from dataclasses import dataclass
@@ -141,10 +143,12 @@ class AppConfig:
     speaker: SpeakerConfig
     db_path: Path
     log_level: str
+    online_tts: OnlineTtsConfig = OnlineTtsConfig()
 
 
 # 内置默认值 = yaml 缺失时的兜底。api_key 故意不设默认值（必填项）。
 DEFAULTS: dict[str, Any] = {
+    "online_tts": {"enabled": False, "resource_id": "seed-tts-2.0", "speaker": "", "timeout_seconds": 10.0},
     "llm": {
         "base_url": DEFAULT_GLM_BASE_URL,
         "api_key": "",
@@ -207,6 +211,9 @@ DEFAULTS: dict[str, Any] = {
 
 # 环境变量覆盖表：env 名 -> (yaml 段, 键, 类型)
 ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
+    "LIRA_ONLINE_TTS_ENABLED": ("online_tts", "enabled", "bool"),
+    "LIRA_ONLINE_TTS_RESOURCE_ID": ("online_tts", "resource_id", str),
+    "LIRA_ONLINE_TTS_SPEAKER": ("online_tts", "speaker", str),
     "LIRA_LLM_WEB_SEARCH_ENABLED": ("llm", "web_search_enabled", "bool"),
     "LIRA_LLM_BASE_URL": ("llm", "base_url", str),
     "LIRA_LLM_API_KEY": ("llm", "api_key", str),
@@ -293,6 +300,16 @@ def _apply_env(config: dict[str, Any], env: Mapping[str, str]) -> None:
 
 
 def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
+    online = config["online_tts"]
+    import math
+    if (not isinstance(online["enabled"], bool)
+            or isinstance(online["timeout_seconds"], bool)
+            or not isinstance(online["timeout_seconds"], (int, float))
+            or not math.isfinite(online["timeout_seconds"])
+            or online["timeout_seconds"] <= 0
+            or not isinstance(online["speaker"], str)
+            or not isinstance(online["resource_id"], str)):
+        raise ConfigError("online_tts requires a boolean enabled and positive finite timeout")
     llm = config["llm"]
     if not isinstance(llm["web_search_enabled"], bool):
         raise ConfigError("llm.web_search_enabled 必须为布尔值。")
@@ -438,6 +455,7 @@ def load_config(
 
     hal = config["hal"]
     return AppConfig(
+        online_tts=OnlineTtsConfig(**config["online_tts"], api_key=env.get("LIRA_ONLINE_TTS_API_KEY", "")),
         llm=LlmConfig(
             base_url=str(config["llm"]["base_url"]),
             api_key=str(config["llm"]["api_key"]),

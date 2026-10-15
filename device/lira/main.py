@@ -712,6 +712,9 @@ class DeviceRuntime:
         self.wakeword = _wakeword_text()
         self.route = AudioRoute.WAKE
         self.tts = audio.tts
+        if hasattr(self.tts, 'configure_online'):
+            self.tts.configure_online(cfg.online_tts, allowed=lambda: not self.privacy.is_on)
+            self.privacy.subscribe(self.tts.apply_privacy)
         self.speaker = speaker or TtsBlockSpeaker(audio.tts)
         #: ASR 引擎引用（dev 控制台识别测试用；离线喂流自建独立流）
         self.asr = audio.asr

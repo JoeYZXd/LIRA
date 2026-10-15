@@ -23,6 +23,7 @@ class MockAudioIO(AudioIO):
     """
 
     def __init__(self, wav_path: Path, *, hold_playback: bool = False) -> None:
+        self.output_frames = 0
         self.wav_path = Path(wav_path)
         self._wave_file: wave.Wave_read | None = None
         self.sample_rate = 0
@@ -91,6 +92,7 @@ class MockAudioIO(AudioIO):
                 if len(data) % 2:
                     raise HalError("PCM 必须包含完整 int16 帧")
                 self.played.append(bytes(data))
+                self.output_frames += len(data) // 2
         self._stream_producer = asyncio.create_task(consume())
         try:
             await self._stream_producer

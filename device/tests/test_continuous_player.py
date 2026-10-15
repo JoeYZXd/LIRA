@@ -5,6 +5,8 @@ from test_hal_mock import board_player_module
 async def test_stream_uses_one_output_and_waits_for_final_drain(monkeypatch):
     board = board_player_module(monkeypatch)
     streams = []
+    marks = []
+    monkeypatch.setattr(board, 'mark', lambda trace, event, **fields: marks.append((event, fields)))
     class Stream:
         def __init__(self, **kw):
             self.callback = kw['callback']; self.finished = kw['finished_callback']
@@ -29,7 +31,9 @@ async def test_stream_uses_one_output_and_waits_for_final_drain(monkeypatch):
         if streams: break
         await asyncio.sleep(.001)
     assert len(streams) == 1
+    assert player.output_frames == 0
     assert streams[0].consume() == b'\1\0\2\0'
+    assert player.output_frames == 2
     assert not task.done()
     assert streams[0].consume() == b'\0' * 4
     more.set()
@@ -39,6 +43,10 @@ async def test_stream_uses_one_output_and_waits_for_final_drain(monkeypatch):
     streams[0].finished()
     await asyncio.wait_for(task, 1)
     assert len(streams) == 1
+    assert player.output_frames == 4
+    occupancy = [fields['buffer_frames'] for event, fields in marks if 'buffer_frames' in fields]
+    assert occupancy and all(0 <= value <= 8 for value in occupancy)
+    assert occupancy[-1] == 0
 
 async def test_pcm_rejects_partial_frame(monkeypatch):
     board = board_player_module(monkeypatch)

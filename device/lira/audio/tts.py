@@ -63,6 +63,8 @@ class _PlaybackRequest:
     playing: bool = False
     abort: asyncio.Task | None = None
     session: SpeechSession | None = None
+    network: asyncio.Task | None = None
+    replay: list | None = None
 
 #: 规则 FST 优先级顺序（后挂的先匹配会被前面的覆盖，号码放最前最具体）
 _RULE_FSTS = ("phone.fst", "date.fst", "number.fst")
@@ -180,6 +182,77 @@ class TtsEngine:
         self._worker: asyncio.Task | None = None
         self._active: _PlaybackRequest | None = None
         self._closed = False
+        self._online = None
+        self._online_disabled = False
+        self._online_allowed = lambda: False
+
+    def configure_online(self, config, *, allowed):
+        from lira.audio.tts_volcengine import VolcengineProvider
+        self._online = VolcengineProvider(config) if config.ready else None
+        self._online_allowed = allowed
+
+    @property
+    def accepts_text_deltas(self):
+        return self._online is not None and not self._online_disabled
+
+    async def apply_privacy(self, enabled):
+        if enabled:
+            await self.stop()
+
+    async def _play_online(self, request):
+        replay, count, replayable = [], 0, True
+        baseline = getattr(self._player, 'output_frames', None)
+        def allowed():
+            return not request.cancelled and self._online_allowed()
+        async def text():
+            nonlocal count, replayable
+            async for delta in request.session.fragments():
+                if not allowed():
+                    raise asyncio.CancelledError()
+                if replayable:
+                    count += len(delta)
+                    if count <= 256:
+                        replay.append(delta)
+                    else:
+                        replay.clear()
+                        replayable = False
+                yield delta
+        async def pcm():
+            source = self._online.stream(text(), sample_rate=self.sample_rate,
+                                         speed=request.speed, allowed=allowed)
+            try:
+                async for data in source:
+                    if not allowed():
+                        raise asyncio.CancelledError()
+                    samples = np.frombuffer(data, dtype='<i2').astype(np.float32) / 32768
+                    yield to_pcm16(samples, request.volume)
+            finally:
+                await source.aclose()
+        source = pcm()
+        request.playing = True
+        request.network = asyncio.create_task(self._player.play_stream(source))
+        try:
+            await request.network
+            if count and baseline is not None and self._player.output_frames == baseline:
+                raise RuntimeError("online speech produced no audio")
+            return True
+        except asyncio.CancelledError:
+            request.cancelled = True
+            request.session.cancel()
+            await self._player.stop()
+            return True
+        except Exception:
+            self._online_disabled = True
+            await self._player.stop()
+            emitted = baseline is None or self._player.output_frames != baseline
+            if emitted or not replayable or not allowed():
+                raise RuntimeError('online speech failed') from None
+            request.replay = replay
+            return False
+        finally:
+            request.network = None
+            request.playing = False
+            await source.aclose()
 
     def start_session(self, speed: float = 1.0, volume: float = 1.0,
                       *, owner: object = None) -> SpeechSession:
@@ -232,6 +305,8 @@ class TtsEngine:
         if request is not None and matches(request):
             mark(request.trace, "cancel_requested")
             request.cancelled = True
+            if request.network is not None:
+                request.network.cancel()
             if request.session is not None:
                 request.session.cancel()
             if request.playing and request.abort is None:
@@ -278,7 +353,40 @@ class TtsEngine:
         logging.info("tts event=synthesis_ready chars=%d elapsed=%.3f", len(chunk), ended-started)
         return samples
 
+    async def _fallback_fragments(self, request):
+        # Only online fallback needs local segmentation: ordinary local input
+        # has already passed through this same incremental segmenter upstream.
+        from lira.audio.text_stream import consume_text
+        queue = asyncio.Queue(maxsize=1)
+        replay, request.replay = request.replay, None
+        async def source():
+            for delta in replay:
+                yield delta
+            async for delta in request.session.fragments():
+                yield delta
+        async def segment():
+            try:
+                await consume_text(source(), queue.put, max_buffer_chars=256)
+            finally:
+                if not asyncio.current_task().cancelling():
+                    await queue.put(None)
+        task = asyncio.create_task(segment())
+        try:
+            while True:
+                chunk = await queue.get()
+                if chunk is None:
+                    await task
+                    return
+                yield chunk
+        finally:
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
     async def _request_fragments(self, request):
+        if request.replay is not None:
+            async for chunk in self._fallback_fragments(request):
+                yield chunk
+            return
         if request.session is not None:
             async for text in request.session.fragments():
                 cleaned = spoken_text(text)
@@ -321,6 +429,11 @@ class TtsEngine:
 
             try:
                 iterator = None
+                if (request.session is not None and self.accepts_text_deltas
+                        and self._player is not None and self._online_allowed()):
+                    if await self._play_online(request):
+                        request.done.finish('cancelled' if request.cancelled else 'success')
+                        continue
                 if request.text is None:
                     t = np.arange(int(self.sample_rate * 0.08)) / self.sample_rate
                     samples = (0.18 * np.sin(2 * np.pi * 880 * t)
@@ -357,9 +470,13 @@ class TtsEngine:
                 logging.exception("Audio output failed")
                 request.done.finish("failed", exc)
             finally:
+                if request.session is not None:
+                    request.session.cancel()
                 # Never cancel native inference: successors share this model.
                 if pending is not None:
                     await asyncio.gather(pending, return_exceptions=True)
+                if iterator is not None:
+                    await iterator.aclose()
                 if request.abort is not None:
                     try:
                         await request.abort

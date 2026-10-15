@@ -33,3 +33,12 @@ rknn_model_zoo/
 
 .idea/
 node_modules/
+
+# 实验产物、模型包与本地工具数据（体积大，不入库；历史已清理，勿再提交）
+artifacts/
+/.agents/
+/.codegraph/
+/diag_frame.jpg
+/diag_frame_180.jpg
+/ocr_retry2.jpg
+/w2_blursharp.jpg

@@ -12,6 +12,11 @@
 
 并发纪律：变更类测试端点经 `dev_mutex` 串行（双击/双标签页 → 409）。
 日志纪律：本模块只记路由级事件（操作 + 结果），文本/识别内容不落日志。
+
+页面（dev-console 改版 U1，KTD1）：登录页与控制台页渲染自本包
+templates/dev_login.html、templates/dev.html；CSS/JS 为本地静态资源
+（static/dev-console.*），无构建链、无 CDN。模板与静态目录自管实例、
+不从 ui.app 导入（避免 ui.app <-> ui.dev 循环导入）。
 """
 
 from __future__ import annotations
@@ -21,16 +26,32 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PassphraseVault
+from lira.settings import DeviceSettings
 
-__all__ = ["DevHandle", "mount_dev", "reset_dev_session_secret", "SESSION_COOKIE"]
+__all__ = [
+    "DevHandle",
+    "STATIC_DIR",
+    "mount_dev",
+    "reset_dev_session_secret",
+    "SESSION_COOKIE",
+]
 
 logger = logging.getLogger("lira.dev")
+
+_UI_DIR = Path(__file__).resolve().parent
+#: dev 专用 Jinja 环境（与 ui/app.py 的 TEMPLATES_DIR 同一目录，实例各自持有）
+templates = Jinja2Templates(directory=str(_UI_DIR / "templates"))
+#: 控制台静态资源（CSS/JS）；仅 dev 挂载时存在，控制台关闭时不挂载
+STATIC_DIR = _UI_DIR / "static"
 
 SESSION_COOKIE = "lira_dev_session"
 _SESSION_TTL_SECONDS = 4 * 3600
@@ -253,6 +274,11 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
     """向设备 UI 应用挂载 dev 路由（仅 dev_console.enabled 时由 create_app 调用）。"""
     limiter = _RateLimiter()
 
+    # 静态资源（CSS/JS）：与 dev 路由同生命周期——仅控制台开启时挂载。
+    # 无鉴权可匿名获取：CSS/JS 不含敏感内容（tests/test_dev_console.py
+    # 的 TestStaticAssets 固定该事实，将来若放敏感内容须改造为鉴权挂载）。
+    app.mount("/dev/static", StaticFiles(directory=str(STATIC_DIR)), name="dev-static")
+
     def _issue_cookie(response: JSONResponse) -> JSONResponse:
         token = _serializer(handle.store).dumps("dev-session")
         response.set_cookie(
@@ -296,12 +322,12 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
     @app.get("/dev")
     async def dev_page(request: Request):
         if _session_ok(request):
-            return HTMLResponse(_dev_page_html())
+            return templates.TemplateResponse(request, "dev.html", {})
         if not handle.vault.is_set():
             # 首启引导：口令未设（fail-closed，去设备 UI 的设置页）
             return RedirectResponse("/passphrase/setup", status_code=303)
         # 口令已设：返回控制台专属登录页（浏览器唯一登录入口）
-        return HTMLResponse(_dev_login_html())
+        return templates.TemplateResponse(request, "dev_login.html", {})
 
     @app.post("/dev/login")
     async def dev_login(request: Request):
@@ -336,6 +362,22 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             return denied
         s = handle.runtime.status()
         s["sync_detail"] = dict(handle.runtime.sync_status)
+        # U1 真实设置回读：旧页音量/语速从未回显（恒 undefined 的缺陷在此
+        # 补齐）。值一律取运行时真实状态；允许范围与 DeviceSettings 服务端
+        # 校验同源（类常量），前端据此做客户端预检。
+        s["volume"] = handle.runtime.settings.volume
+        s["tts_speed"] = handle.runtime.settings.tts_speed
+        s["volume_range"] = list(DeviceSettings.VOLUME_RANGE)
+        s["speed_range"] = list(DeviceSettings.SPEED_RANGE)
+        # 生效级别映射名字（未显式设置时沿继承链取有效级别，恒有真实名字）
+        s["loglevel"] = logging.getLevelName(
+            logging.getLogger("lira").getEffectiveLevel()
+        )
+        # 相机实际方向；相机缺失（未装配/不支持）时省略字段
+        camera = getattr(handle.runtime, "camera", None)
+        if camera is not None and hasattr(camera, "rotation"):
+            s["camera_rotation"] = camera.rotation
+            s["camera_hflip"] = bool(getattr(camera, "hflip", False))
         return JSONResponse(s)
 
     @app.get("/dev/api/logs")
@@ -683,332 +725,3 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             "state": rt.engine.state.value,
         })
 
-
-def _dev_login_html() -> str:
-    """控制台登录页（口令已设时的 /dev 未鉴权着陆页；fetch 提交）。"""
-    return """<!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>LIRA 开发者控制台 - 登录</title>
-<style>
- body{font-family:system-ui,sans-serif;margin:0;display:flex;align-items:center;
-      justify-content:center;height:100vh;background:#fafafa}
- .card{border:1px solid #ccc;border-radius:10px;padding:28px;background:#fff;width:300px}
- input{width:100%;padding:8px;margin:8px 0;box-sizing:border-box}
- button{width:100%;padding:8px} .err{color:#c00;font-size:13px;min-height:18px}
- h1{font-size:17px;margin:0 0 12px}
-</style></head><body>
-<div class="card">
- <h1>LIRA 开发者控制台</h1>
- <input id="pass" type="password" placeholder="设备口令" onkeydown="if(event.key==='Enter')doLogin()">
- <button onclick="doLogin()">登录</button>
- <div id="err" class="err"></div>
- <p class="muted" style="font-size:12px;color:#666">首次使用请先在 <a href="/passphrase/setup">设备面板</a> 设置口令</p>
-</div>
-<script>
-async function doLogin() {
-  const r = await fetch('/dev/login', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({passphrase: document.getElementById('pass').value})
-  });
-  if (r.ok) { location.href = '/dev'; return; }
-  const j = await r.json().catch(() => ({error: 'HTTP ' + r.status}));
-  document.getElementById('err').textContent = j.error || ('HTTP ' + r.status);
-}
-</script>
-</body></html>"""
-
-
-def _dev_page_html() -> str:
-    """v1 单页（fetch JSON + 原生 JS；结果渲染无构建链）。"""
-    return """<!doctype html>
-<html lang="zh"><head><meta charset="utf-8"><title>LIRA 开发者控制台</title>
-<style>
- body{font-family:system-ui,sans-serif;margin:16px;max-width:920px;background:#fafafa}
- section{border:1px solid #ccc;border-radius:8px;padding:12px;margin-bottom:12px;background:#fff}
- h2{margin:4px 0 8px;font-size:16px} button{margin:4px;padding:6px 12px}
- pre{background:#f6f6f6;padding:8px;white-space:pre-wrap;max-height:280px;overflow:auto}
- input,select{margin:4px;padding:4px} .row{margin:6px 0}
- .muted{color:#666;font-size:13px} .ok{color:#0a0} .err{color:#c00}
- .vl-view{max-height:320px;overflow:auto;background:#f6f6f6;padding:8px;font-size:13px}
- .vl-row{padding:2px 0;border-bottom:1px dashed #e4e4e4}
- .vl-ts{color:#888;font-family:monospace} .vl-kind{font-weight:600}
- .vl-wake .vl-kind{color:#b60} .vl-llm .vl-kind{color:#06c}
- .vl-speak .vl-kind{color:#090} .vl-bad{color:#c00}
-</style></head><body>
-<h1>LIRA 开发者控制台</h1>
-
-<section id="sec-status">
-  <h2>整机状态</h2>
-  <div class="row"><button onclick="loadStatus()">刷新状态</button>
-    <span id="status-out" class="muted"></span></div>
-  <pre id="status-view">（未加载）</pre>
-</section>
-
-<section id="sec-settings">
-  <h2>运行参数</h2>
-  <div class="row">音量 <input id="vol" type="number" step="0.1" min="0.1" max="2">
-    <button onclick="postForm('/volume','vol')">设置音量</button>
-    语速 <input id="spd" type="number" step="0.1" min="0.5" max="2">
-    <button onclick="postForm('/speed','spd')">设置语速</button>
-    <span id="set-out"></span></div>
-  <div class="row">日志级别
-    <select id="lvl">
-      <option>DEBUG</option><option selected>INFO</option>
-      <option>WARNING</option><option>ERROR</option>
-    </select>
-    <button onclick="setLevel()">调整</button><span id="lvl-out"></span></div>
-</section>
-
-<section id="sec-logs">
-  <h2>运行日志（最近 100 条）</h2>
-  <div class="row"><button onclick="loadLogs()">刷新日志</button><span id="log-out"></span></div>
-  <pre id="log-view">（未加载）</pre>
-</section>
-
-<section id="sec-voicelog">
-  <h2>语音交互日志（实时）</h2>
-  <p class="muted">每秒显示处理后音频电平（dBFS 越接近 0 越响）、KWS 命中与唤醒判定、ASR 中间结果及输入拦截原因。待机仅检测唤醒词，不转写普通语音；无 KWS 命中不代表没有收到声音。音频条目停止更新时，请检查隐私模式、录音独占或采集异常。</p>
-  <div class="row">
-    <label><input type="checkbox" id="vl-auto" checked onchange="vlAuto(this)"> 自动刷新（1s）</label>
-    <button onclick="vlClear()">清空</button>
-    <span id="vl-out" class="muted"></span></div>
-  <div id="vl-view" class="vl-view">（未加载）</div>
-</section>
-
-<section id="sec-voice">
-  <h2>语音链路测试</h2>
-  <div class="row">TTS 文本（POST body）：<input id="tts-text" size="40">
-    <button onclick="ttsSpeak()">播报</button><span id="tts-out"></span></div>
-  <div class="row">
-    <button id="rec-btn" onclick="recordToggle()">开始录音</button>
-    <span id="rec-out" class="muted">录音期间主循环语音暂停（独占设备）</span>
-    <audio id="clip" controls style="display:none"></audio></div>
-  <div class="row"><button onclick="asrTest()">识别上一步录音（ASR→意图）</button>
-    <span id="asr-out"></span></div>
-</section>
-
-<section id="sec-vision">
-  <h2>视觉链路测试</h2>
-  <p><strong>文本距离：镜头到纸面约 20 cm。</strong>
-    请保持机位固定、整页完整入镜，纸面尽量平整，照明均匀并避免反光。
-    此距离为当前 OV13855 实测机位参考，拍摄 A4 时请先通过预览确认四边完整可见。</p>
-  <div class="row">
-    <button id="preview-btn" onclick="previewToggle()">开启实时预览（~0.5fps）</button>
-    <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
-  <img id="preview-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="preview">
-  <div class="row" style="margin-top:8px">
-    <button onclick="orientBy(90)">旋转 90°</button>
-    <button onclick="orientBy(-90)">反向 90°</button>
-    <button onclick="orientBy(0)">复位</button>
-    <button onclick="flip()">水平翻转</button>
-    <span id="orient-out" class="muted"></span></div>
-  <div class="row"><button onclick="visionTest()">拍摄 + OCR</button>
-    <span id="vis-out"></span></div>
-  <img id="vis-img" style="max-width:640px;display:none;border:1px solid #ddd" alt="capture">
-  <pre id="vis-view"></pre>
-</section>
-
-<section id="sec-sync">
-  <h2>同步</h2>
-  <div class="row"><button onclick="syncPull()">立即拉取后台快照</button>
-    <span id="sync-out"></span></div>
-</section>
-
-<section id="sec-replay">
-  <h2>整机场景回放</h2>
-  <div class="row">指令文本：<input id="replay-text" size="30" value="打开台灯">
-    <button onclick="replay(true)">回放（真实出声）</button>
-    <span id="replay-out"></span></div>
-  <pre id="replay-view"></pre>
-</section>
-
-<script>
-let recording = false, previewOn = false, previewTimer = null, fetching = false;
-let authRedirecting = false;
-async function api(path, opts) {
-  let r;
-  try {
-    r = await fetch(path, Object.assign({headers: {'Content-Type': 'application/json'}}, opts||{}));
-  } catch (e) {
-    // 网络级失败（服务重启/断连）：不再静默，调用方面板直接显示错误
-    return {status: 0, body: {error: '无法连接设备服务（服务可能已重启，请刷新页面重新登录）'}};
-  }
-  if (r.status === 401 && !authRedirecting) {
-    // 会话缺失/过期/签名失效：统一回登录页，不停留在僵尸页面
-    authRedirecting = true;
-    location.href = '/dev';
-    return {status: 401, body: {error: '会话已失效，正在返回登录页…'}};
-  }
-  const t = await r.text();
-  let j; try { j = JSON.parse(t); } catch { j = {raw: t}; }
-  return {status: r.status, body: j};
-}
-function out(id, msg, cls) {
-  const el = document.getElementById(id);
-  el.textContent = msg; el.className = cls || 'muted';
-}
-async function loadStatus() {
-  const r = await api('/dev/api/status');
-  if (r.status !== 200) {
-    const msg = r.body.error || ('加载失败: ' + r.status);
-    document.getElementById('status-view').textContent = '（' + msg + '）';
-    return out('status-out', msg, 'err');
-  }
-  const s = r.body;
-  document.getElementById('status-view').textContent = JSON.stringify(s, null, 2);
-  document.getElementById('vol').value = s.privacy_on ? undefined : (s.volume === undefined ? undefined : undefined);
-  out('status-out', '引擎=' + s.engine + ' 路由=' + s.route +
-    (s.privacy_on ? ' [隐私开启：采集类测试将被拒绝]' : ''), 'ok');
-}
-async function loadLogs() {
-  const r = await api('/dev/api/logs');
-  if (r.status !== 200) return out('log-out', '加载失败: ' + r.status, 'err');
-  document.getElementById('log-view').textContent = (r.body.lines || []).join('\\n') || '（空）';
-  out('log-out', r.body.lines.length + ' 条', 'ok');
-}
-async function postForm(path, inputId) {
-  const fd = new FormData();
-  fd.append('value', document.getElementById(inputId).value);
-  try {
-    const r = await fetch(path, {method: 'POST', body: fd});
-    out('set-out', r.ok ? '已提交' : '失败: ' + r.status, r.ok ? 'ok' : 'err');
-  } catch (e) {
-    out('set-out', '无法连接设备服务（请刷新页面重新登录）', 'err');
-  }
-}
-async function setLevel() {
-  const r = await api('/dev/api/loglevel', {method: 'POST', body: JSON.stringify({level: document.getElementById('lvl').value})});
-  out('lvl-out', r.status === 200 ? '已调整' : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
-}
-async function ttsSpeak() {
-  const text = document.getElementById('tts-text').value;
-  const r = await api('/dev/api/tts', {method: 'POST', body: JSON.stringify({text})});
-  out('tts-out', r.status === 200 ? ('已播报 ' + r.body.elapsed_ms + 'ms') : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
-}
-async function recordToggle() {
-  const btn = document.getElementById('rec-btn');
-  if (!recording) {
-    const r = await api('/dev/api/record/start', {method: 'POST', body: '{}'});
-    if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
-    recording = true;
-    btn.textContent = '结束录音';
-    recLeft = 0;
-    recTimer = setInterval(() => { recLeft += 1; out('rec-out', '录音中… ' + recLeft + 's（上限 60s）'); }, 1000);
-    out('rec-out', '录音中…', 'ok');
-  } else {
-    clearInterval(recTimer);
-    const r = await api('/dev/api/record/stop', {method: 'POST', body: '{}'});
-    recording = false;
-    btn.textContent = '开始录音';
-    if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
-    if (r.body.discarded) return out('rec-out', '已按隐私联锁丢弃本次录音', 'err');
-    out('rec-out', '完成 ' + r.body.seconds + 's / ' + r.body.bytes + 'B', 'ok');
-    const clip = document.getElementById('clip');
-    clip.src = '/dev/api/clip?ts=' + Date.now(); clip.style.display = 'block'; clip.play();
-  }
-}
-async function asrTest() {
-  const r = await api('/dev/api/asr', {method: 'POST', body: '{}'});
-  out('asr-out', r.status === 200 ? ('文本: ' + r.body.text + ' | 意图: ' + JSON.stringify(r.body.intent)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
-}
-async function orientBy(delta) {
-  // delta=0 复位；90/-90 相对当前方向累加（可多次点击循环）
-  const payload = delta === 0 ? {rotation: 0} : {rotate_by: delta};
-  const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify(payload)});
-  if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
-  flipped = !!r.body.hflip;
-  out('orient-out', '方向: ' + r.body.rotation + '°' + (flipped ? '（已翻转）' : ''), 'ok');
-  if (previewOn) { await frame(); }
-}
-let flipped = false;
-async function visionTest() {
-  out('vis-out', '拍摄识别中…（慢速单帧，约数秒）');
-  const r = await api('/dev/api/vision', {method: 'POST', body: '{}'});
-  if (r.status !== 200) return out('vis-out', r.body.error || r.status, 'err');
-  const img = document.getElementById('vis-img');
-  img.src = r.body.image; img.style.display = 'block';
-  document.getElementById('vis-view').textContent = r.body.text || '（无文字）';
-  out('vis-out', '耗时: ' + JSON.stringify(r.body.timings_ms), 'ok');
-}
-async function previewToggle() {
-  const btn = document.getElementById('preview-btn');
-  if (previewOn) {
-    previewOn = false; clearInterval(previewTimer);
-    btn.textContent = '开启实时预览（~0.5fps）';
-    document.getElementById('preview-img').style.display = 'none';
-    return out('preview-out', '预览已停止');
-  }
-  previewOn = true;
-  btn.textContent = '停止预览';
-  const frame = async () => {
-    let r;
-    try {
-      r = await fetch('/dev/api/vision/frame?ts=' + Date.now());
-    } catch (e) {
-      previewOn = false; clearInterval(previewTimer);
-      btn.textContent = '开启实时预览（~0.5fps）';
-      return out('preview-out', '无法连接设备服务，预览已停止', 'err');
-    }
-    if (r.status === 200) {
-      const blob = await r.blob();
-      const img = document.getElementById('preview-img');
-      img.src = URL.createObjectURL(blob); img.style.display = 'block';
-      out('preview-out', '预览中…');
-    } else {
-      previewOn = false; clearInterval(previewTimer);
-      btn.textContent = '开启实时预览（~0.5fps）';
-      out('preview-out', '取帧失败已停止: ' + r.status, 'err');
-    }
-  };
-  await frame();
-  previewTimer = setInterval(async () => {
-    if (!previewOn || fetching) return;
-    fetching = true;
-    try { await frame(); } finally { fetching = false; }
-  }, 2200);
-}
-async function syncPull() {
-  const r = await api('/dev/api/sync/pull', {method: 'POST', body: '{}'});
-  out('sync-out', r.status === 200 ? ('状态: ' + JSON.stringify(r.body.sync)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
-}
-async function replay(confirm) {
-  const text = document.getElementById('replay-text').value;
-  const r = await api('/dev/api/replay', {method: 'POST', body: JSON.stringify({text, confirm})});
-  if (r.status !== 200) return out('replay-out', r.body.error || r.status, 'err');
-  document.getElementById('replay-view').textContent =
-    '迁移: ' + (r.body.transitions || []).join(' -> ') + '\\n播报: ' + (r.body.spoken || []).join(' | ');
-  out('replay-out', '完成', 'ok');
-}
-let vlTimer = setInterval(loadVoiceLog, 1000);
-function vlAuto(cb) {
-  clearInterval(vlTimer);
-  if (cb.checked) vlTimer = setInterval(loadVoiceLog, 1000);
-}
-function vlEscape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-async function loadVoiceLog() {
-  const r = await api('/dev/api/voice-log');
-  if (r.status !== 200) {
-    const msg = r.body.error || ('加载失败: ' + r.status);
-    document.getElementById('vl-view').textContent = '（' + msg + '）';
-    return out('vl-out', msg, 'err');
-  }
-  const es = r.body.entries || [];
-  const view = document.getElementById('vl-view');
-  if (es.length === 0) { view.innerHTML = '（暂无语音交互，说一句“小鹿”试试）'; }
-  else {
-    const tag = {state:'', audio:'收音', kws:'关键词', audio_gate:'输入门控', asr_partial:'识别中', wake:'唤醒', asr:'识别', playback:'播放控制', llm:'LLM', llm_reply:'LLM', llm_fail:'LLM', speak:'播报', privacy:'隐私'};
-    const cls = {wake:'vl-wake', llm:'vl-llm', llm_reply:'vl-llm', speak:'vl-speak', llm_fail:'vl-bad', privacy:'vl-bad'};
-    view.innerHTML = es.slice().reverse().map(e => {
-      const t = new Date(e.ts * 1000).toLocaleTimeString('zh-CN', {hour12: false});
-      return '<div class="vl-row ' + (cls[e.kind]||'') + '"><span class="vl-ts">' + t +
-        '</span> <span class="vl-kind">[' + (tag[e.kind]||e.kind) + ']</span> ' + vlEscape(e.text) + '</div>';
-    }).join('');
-  }
-  out('vl-out', es.length + ' 条 · 引擎=' + r.body.state, 'ok');
-}
-async function vlClear() {
-  await api('/dev/api/voice-log/clear', {method: 'POST', body: '{}'});
-  loadVoiceLog();
-}
-loadStatus();
-</script>
-</body></html>"""

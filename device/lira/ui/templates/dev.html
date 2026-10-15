@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LIRA 开发者控制台</title>
+  <link rel="stylesheet" href="/dev/static/dev-console.css">
+</head>
+<body>
+<main id="dev-console" class="dev-console" data-page="dev-console">
+  <h1>LIRA 开发者控制台</h1>
+
+  <!-- 概览磁贴：摘要先行（磁贴头摘要行），展开看明细；手动刷新，语义同旧版 -->
+  <section class="tile tile--overview" id="tile-overview">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-overview-body">
+      <span class="tile-title">运行概览</span>
+      <span class="tile-summary" id="overview-summary">引擎 / 路由 / 隐私 / 同步（手动刷新）</span>
+    </button>
+    <div class="tile-body" id="tile-overview-body" hidden>
+      <div class="row">
+        <button type="button" onclick="loadStatus()">刷新状态</button>
+        <span id="status-out" class="muted"></span>
+      </div>
+      <pre id="status-view">（未加载）</pre>
+    </div>
+  </section>
+
+  <!-- 运行参数磁贴（原位展开）：当前值由 /dev/api/status 真实回读 -->
+  <section class="tile tile--settings" id="tile-settings">
+    <button type="button" class="tile-head" aria-expanded="true" aria-controls="tile-settings-body">
+      <span class="tile-title">运行参数</span>
+      <span class="tile-summary">音量 / 语速 / 日志级别 · 当前值真实回读</span>
+    </button>
+    <div class="tile-body" id="tile-settings-body">
+      <div class="row">
+        <label for="vol">音量</label>
+        <input id="vol" type="number" step="0.1" min="0.1" max="2">
+        <button type="button" onclick="postForm('/volume','vol','音量','volume','set-out')">设置音量</button>
+      </div>
+      <div class="row">
+        <label for="spd">语速</label>
+        <input id="spd" type="number" step="0.1" min="0.5" max="2">
+        <button type="button" onclick="postForm('/speed','spd','语速','speed','set-out')">设置语速</button>
+        <span id="set-out"></span>
+      </div>
+      <p class="muted">允许范围来自设备当前能力（/dev/api/status）；保存失败时输入值保留并显示原因。</p>
+      <div class="row">
+        <label for="lvl">日志级别</label>
+        <select id="lvl">
+          <option>DEBUG</option><option selected>INFO</option>
+          <option>WARNING</option><option>ERROR</option>
+        </select>
+        <button type="button" onclick="setLevel()">调整</button><span id="lvl-out"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 实时区磁贴（工作区，跨双列）：语音交互日志整体迁入 + 声音曲线诚实占位 -->
+  <section class="tile tile--live" id="tile-voicelog">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voicelog-body">
+      <span class="tile-title">实时区：语音交互日志</span>
+      <span class="tile-summary">每秒刷新 · 可暂停 / 清空 · 实时声音曲线占位</span>
+    </button>
+    <div class="tile-body" id="tile-voicelog-body" hidden>
+      <p class="muted">每秒显示处理后音频电平（dBFS 越接近 0 越响）、KWS 命中与唤醒判定、ASR 中间结果及输入拦截原因。待机仅检测唤醒词，不转写普通语音；无 KWS 命中不代表没有收到声音。音频条目停止更新时，请检查隐私模式、录音独占或采集异常。</p>
+      <div class="row">
+        <label><input type="checkbox" id="vl-auto" checked onchange="vlAuto(this)"> 自动刷新（1s）</label>
+        <button type="button" onclick="vlClear()">清空</button>
+        <span id="vl-out" class="muted"></span>
+      </div>
+      <div id="vl-view" class="vl-view">（未加载）</div>
+      <div class="curve-placeholder" id="curve-placeholder">
+        <p class="curve-title">实时声音曲线</p>
+        <p>实时声音曲线将在后续单元接入（真实处理后包络、激活标记与间断提示）。</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- 语音链路测试磁贴 -->
+  <section class="tile tile--voice" id="tile-voice">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voice-body">
+      <span class="tile-title">语音链路测试</span>
+      <span class="tile-summary">TTS 播报 · 录音回放 · ASR 识别</span>
+    </button>
+    <div class="tile-body" id="tile-voice-body" hidden>
+      <div class="row">TTS 文本（POST body）：<input id="tts-text" size="40">
+        <button type="button" onclick="ttsSpeak()">播报</button><span id="tts-out"></span></div>
+      <div class="row">
+        <button type="button" id="rec-btn" onclick="recordToggle()">开始录音</button>
+        <span id="rec-out" class="muted">录音期间主循环语音暂停（独占设备）</span>
+        <audio id="clip" controls class="hidden-audio"></audio></div>
+      <div class="row"><button type="button" onclick="asrTest()">识别上一步录音（ASR→意图）</button>
+        <span id="asr-out"></span></div>
+    </div>
+  </section>
+
+  <!-- 视觉链路磁贴（工作区式，跨双列）：预览 / 方向 / 拍摄+OCR -->
+  <section class="tile tile--vision" id="tile-vision">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-vision-body">
+      <span class="tile-title">视觉链路</span>
+      <span class="tile-summary">实时预览 · 方向控制 · 拍摄 + OCR</span>
+    </button>
+    <div class="tile-body" id="tile-vision-body" hidden>
+      <p><strong>文本距离：镜头到纸面约 20 cm。</strong>
+        请保持机位固定、整页完整入镜，纸面尽量平整，照明均匀并避免反光。
+        此距离为当前 OV13855 实测机位参考，拍摄 A4 时请先通过预览确认四边完整可见。</p>
+      <div class="row">
+        <button type="button" id="preview-btn" onclick="previewToggle()">开启实时预览（~0.5fps）</button>
+        <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
+      <img id="preview-img" class="shot hidden" alt="preview">
+      <div class="row row-gap-top">
+        <button type="button" onclick="orientBy(90)">旋转 90°</button>
+        <button type="button" onclick="orientBy(-90)">反向 90°</button>
+        <button type="button" onclick="orientBy(0)">复位</button>
+        <button type="button" onclick="flip()">水平翻转</button>
+        <span id="orient-out" class="muted"></span></div>
+      <div class="row"><button type="button" onclick="visionTest()">拍摄 + OCR</button>
+        <span id="vis-out"></span></div>
+      <img id="vis-img" class="shot hidden" alt="capture">
+      <pre id="vis-view"></pre>
+    </div>
+  </section>
+
+  <!-- 同步磁贴 -->
+  <section class="tile tile--sync" id="tile-sync">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-sync-body">
+      <span class="tile-title">同步</span>
+      <span class="tile-summary">设备 ↔ 后台快照手动拉取</span>
+    </button>
+    <div class="tile-body" id="tile-sync-body" hidden>
+      <div class="row"><button type="button" onclick="syncPull()">立即拉取后台快照</button>
+        <span id="sync-out"></span></div>
+    </div>
+  </section>
+
+  <!-- 整机场景回放磁贴 -->
+  <section class="tile tile--replay" id="tile-replay">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-replay-body">
+      <span class="tile-title">整机场景回放</span>
+      <span class="tile-summary">真实出声并驱动状态机（需确认）</span>
+    </button>
+    <div class="tile-body" id="tile-replay-body" hidden>
+      <div class="row">指令文本：<input id="replay-text" size="30" value="打开台灯">
+        <button type="button" onclick="replay(true)">回放（真实出声）</button>
+        <span id="replay-out"></span></div>
+      <pre id="replay-view"></pre>
+    </div>
+  </section>
+
+  <!-- 运行日志磁贴 -->
+  <section class="tile tile--logs" id="tile-logs">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-logs-body">
+      <span class="tile-title">运行日志</span>
+      <span class="tile-summary">最近 100 条 · 手动刷新</span>
+    </button>
+    <div class="tile-body" id="tile-logs-body" hidden>
+      <div class="row"><button type="button" onclick="loadLogs()">刷新日志</button><span id="log-out"></span></div>
+      <pre id="log-view">（未加载）</pre>
+    </div>
+  </section>
+</main>
+<script src="/dev/static/dev-console.js"></script>
+</body>
+</html>

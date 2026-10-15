@@ -8,6 +8,9 @@
                R4：既有端点/表单参数/`/status` 全部不变，纯呈现层重排）
   - `/passphrase/setup`  设备本地口令首启设置（无默认值，fail-closed）
   - `/status`  只读状态 JSON（kiosk 轮询用，不鉴权）
+  - `/dev`     开发者控制台（dev_console.enabled 时挂载；页面模板与
+               /dev/static 静态资源由 lira.ui.dev 自管实例，不共享本模块
+               templates——避免 ui.app <-> ui.dev 循环导入）
 
 鉴权纪律：
   - 隐私开关的 UI 路径必须出示设备本地口令（`PassphraseVault.verify`，

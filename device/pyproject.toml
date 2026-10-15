@@ -44,6 +44,9 @@ include = ["lira*"]
 
 [tool.setuptools.package-data]
 "lira.llm" = ["*.md"]
+# KTD8：dev 控制台模板与本地静态资源随 wheel 交付（无 CDN 依赖；
+# vendor/* 为 U8 可选本地化第三方资产预留）
+"lira.ui" = ["templates/*.html", "static/*.css", "static/*.js", "static/vendor/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

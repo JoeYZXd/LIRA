@@ -125,12 +125,15 @@ class TestSkeletonAuth:
 
     def test_route_guard_all_dev_routes(self):
         """路由级守卫回归：全部 /dev/* 路由未鉴权一律 401/303（GET-only 路由的
-        POST 为 405 亦算守卫生效）；/dev/login 是鉴权入口本身，不参加 POST 守卫。"""
+        POST 为 405 亦算守卫生效）；/dev/login 是鉴权入口本身，不参加 POST 守卫。
+        /dev/static 是匿名静态挂载（Mount 无 methods），其匿名性由
+        TestStaticAssets 单独固定，不参加本守卫遍历。"""
         app, client, _rt = make_client()
         dev_routes = [
             route.path
             for route in app.routes
             if getattr(route, "path", "").startswith("/dev") and route.path != "/dev/login"
+            and getattr(route, "methods", None)
         ]
         assert dev_routes, "dev 路由应已注册"
         for path in dev_routes:
@@ -177,8 +180,8 @@ class TestSkeletonAuth:
         assert r.status_code == 303, r.status_code
         page = client.get("/dev")
         assert page.status_code == 200
-        assert "doLogin" in page.text, "旧会话应已失效（密钥轮换后落登录页）"
-        assert "sec-status" not in page.text, "控制台功能区块不得出现"
+        assert 'data-page="dev-login"' in page.text, "旧会话应已失效（密钥轮换后落登录页）"
+        assert 'data-page="dev-console"' not in page.text, "控制台功能区块不得出现"
         # 新口令可重新登录
         r = client.post("/dev/login", json={"passphrase": "new-pass-1234"})
         assert r.status_code == 200
@@ -791,19 +794,19 @@ class TestBrowserLoginFlow:
         _app, client, _rt = make_client()
         page = client.get("/dev")
         assert page.status_code == 200
-        assert "设备口令" in page.text and "doLogin" in page.text
+        assert "设备口令" in page.text and 'data-page="dev-login"' in page.text
 
     def test_full_browser_flow_login_to_console(self):
         """浏览器全流程：登录页 -> POST /dev/login -> cookie -> 控制台。"""
         _app, client, _rt = make_client()
         page = client.get("/dev")  # 登录页
-        assert "doLogin" in page.text
+        assert 'data-page="dev-login"' in page.text
         r = client.post("/dev/login", json={"passphrase": PASSPHRASE})
         assert r.status_code == 200
         console = client.get("/dev")
         assert console.status_code == 200
         assert "LIRA 开发者控制台</h1>" in console.text
-        assert "sec-status" in console.text  # 功能区块出现
+        assert 'data-page="dev-console"' in console.text  # 功能区块出现
 
     def test_no_passphrase_still_redirects_to_setup(self):
         """首启引导：口令未设 -> /dev 重定向设置页（不变）。"""
@@ -814,44 +817,194 @@ class TestBrowserLoginFlow:
 
 
 class TestConsoleErrorFeedback:
+    """控制台 JS 行为断言（U1 起 JS 外置为 /dev/static/dev-console.js，
+    断言对象从页面 HTML 改为静态 JS 本体，强度不变）。"""
+
+    @staticmethod
+    def _console_js(client) -> str:
+        return client.get("/dev/static/dev-console.js").text
+
     def test_console_js_surfaces_network_failure(self):
         """僵尸页面防护（2026-10-04 实机问题）：网络级失败不再静默——
         api() 捕获 fetch 异常返回 status=0 + 可见错误文案。"""
         _app, client, _rt = make_client()
         login(client)
-        page = client.get("/dev").text
-        assert "catch (e)" in page
-        assert "无法连接设备服务" in page
-        assert "status: 0" in page
+        js = self._console_js(client)
+        assert "catch (e)" in js
+        assert "无法连接设备服务" in js
+        assert "status: 0" in js
 
     def test_console_js_redirects_on_401(self):
         """会话失效自愈：任一 API 401 -> 统一回 /dev 登录页（防僵尸页面停留）。"""
         _app, client, _rt = make_client()
         login(client)
-        page = client.get("/dev").text
-        assert "r.status === 401" in page
-        assert "location.href = '/dev'" in page
-        assert "authRedirecting" in page  # 并发轮询只跳一次
+        js = self._console_js(client)
+        assert "r.status === 401" in js
+        assert "location.href = '/dev'" in js
+        assert "authRedirecting" in js  # 并发轮询只跳一次
 
     def test_console_panels_show_failure_in_place(self):
         """整机状态/语音日志面板：加载失败时面板主体显示原因，不停留占位符。"""
         _app, client, _rt = make_client()
         login(client)
-        page = client.get("/dev").text
+        js = self._console_js(client)
         # loadStatus / loadVoiceLog 失败路径写入面板主体（status-view / vl-view）
-        assert "getElementById('status-view').textContent = '（' + msg + '）'" in page
-        assert "getElementById('vl-view').textContent = '（' + msg + '）'" in page
+        assert "getElementById('status-view').textContent = '（' + msg + '）'" in js
+        assert "getElementById('vl-view').textContent = '（' + msg + '）'" in js
 
-    def test_console_page_script_tags_balanced(self):
-        """回归防线（2026-10-05 实机问题）：19fb8b8 丢失 </script> 导致控制台
-        页 JS 整块不执行（两个面板永远"未加载"、1s 轮询不启动）。断言两个
-        页面的 <script> 与 </script> 成对，且 JS 主体可被闭合标签完整包裹。"""
-        import re
+    def test_console_settings_readback_and_validation_in_js(self):
+        """U1 真实回读：JS 把 status 当前值/范围写入控件，保存前按范围预检，
+        失败路径保留输入（旧版恒 undefined 缺陷的回归防线）。"""
+        _app, client, _rt = make_client()
+        login(client)
+        js = self._console_js(client)
+        assert "applyStatusReadback" in js
+        assert "document.getElementById('vol').value = s.volume" in js
+        assert "document.getElementById('spd').value = s.tts_speed" in js
+        assert "volume_range" in js and "speed_range" in js
+        assert "settingProblem" in js  # 客户端范围校验（非法值不提交）
 
-        from lira.ui.dev import _dev_login_html, _dev_page_html
-
-        for html in (_dev_login_html(), _dev_page_html()):
-            assert html.count("<script>") == html.count("</script>") >= 1
-            assert re.search(r"<script>.*</script>", html, re.S), "script 块必须可完整提取"
+    def test_console_pages_reference_external_script(self):
+        """回归防线（2026-10-05 实机问题，19fb8b8 丢 </script> 使页面 JS 整块
+        失效）：U1 起 JS 外置——登录页与控制台页必须各恰好引用一次
+        /dev/static/dev-console.js，script 标签成对且闭合先于 </body>；
+        JS 本体语法由 node --check 把关（CI/本地），页面侧只保结构完整。"""
+        _app, client, _rt = make_client()
+        pages = [client.get("/dev").text]  # 口令已设、未登录 -> 登录页
+        login(client)
+        pages.append(client.get("/dev").text)  # 控制台页
+        for html in pages:
+            assert html.count("<script") == html.count("</script>") >= 1
+            assert html.count('src="/dev/static/dev-console.js"') == 1
             # 结构顺序：闭合标签必须在 </body> 之前（吞掉 </body> 即语法错误）
             assert html.index("</script>") < html.index("</body>")
+
+
+# ---------- U1：真实设置回读 / 静态资源 / 磁贴结构 ----------
+
+
+class TestStatusReadback:
+    """U1 真实设置回读：/dev/api/status 暴露当前值与允许范围
+    （旧页音量/语速恒 undefined、从未回显的缺陷在服务端补齐）。"""
+
+    def test_status_carries_settings_values_and_ranges(self):
+        _app, client, rt = make_client()
+        login(client)
+        rt.settings.set_volume(1.3)
+        rt.settings.set_tts_speed(0.8)
+        s = client.get("/dev/api/status").json()
+        assert s["volume"] == 1.3
+        assert s["tts_speed"] == 0.8
+        assert s["volume_range"] == list(DeviceSettings.VOLUME_RANGE)
+        assert s["speed_range"] == list(DeviceSettings.SPEED_RANGE)
+
+    def test_status_loglevel_name_readback(self):
+        """日志级别回读为名字；调整端点改动后 status 如实跟随。"""
+        import logging as logging_mod
+
+        _app, client, _rt = make_client()
+        login(client)
+        assert client.get("/dev/api/status").json()["loglevel"] in {
+            "DEBUG", "INFO", "WARNING", "ERROR",
+        }
+        r = client.post("/dev/api/loglevel", json={"level": "debug"})
+        assert r.status_code == 200
+        assert client.get("/dev/api/status").json()["loglevel"] == "DEBUG"
+        client.post("/dev/api/loglevel", json={"level": "error"})
+        assert client.get("/dev/api/status").json()["loglevel"] == "ERROR"
+        # 还原级别，不向后续测试泄漏全局改动
+        client.post("/dev/api/loglevel", json={"level": "info"})
+        assert logging_mod.getLogger("lira").level == logging_mod.INFO
+
+    def test_status_camera_fields_when_camera_present(self):
+        """相机实际方向回读（FakeCamera 提供 rotation/hflip）。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        s = client.get("/dev/api/status").json()
+        assert s["camera_rotation"] == 0
+        assert s["camera_hflip"] is False
+        client.post("/dev/api/camera/orientation", json={"rotation": 90})
+        s = client.get("/dev/api/status").json()
+        assert s["camera_rotation"] == 90
+
+    def test_status_camera_fields_omitted_without_camera(self):
+        """相机缺失（未装配/不支持）时省略字段，不虚构默认值。"""
+        _app, client, _rt = make_client()
+        login(client)
+        s = client.get("/dev/api/status").json()
+        assert "camera_rotation" not in s
+        assert "camera_hflip" not in s
+
+
+class TestStaticAssets:
+    """U1 静态资源：随 dev 挂载（控制台关闭即不存在）；匿名可取——
+    CSS/JS 必须保持无敏感内容，本测试固定该事实作为将来的报警线。"""
+
+    def test_assets_served_anonymously(self):
+        """未登录即可获取（挂载不鉴权）；内容为控制台自有样式/脚本。"""
+        _app, client, _rt = make_client()  # 故意不登录
+        css = client.get("/dev/static/dev-console.css")
+        js = client.get("/dev/static/dev-console.js")
+        assert css.status_code == 200 and js.status_code == 200
+        assert "text/css" in css.headers["content-type"]
+        assert "javascript" in js.headers["content-type"]
+        assert "磁贴" in css.text, "CSS 应为控制台自有内容（非空壳）"
+        assert "function" in js.text, "JS 应为控制台自有内容（非空壳）"
+
+    def test_assets_absent_when_console_disabled(self):
+        """开关关闭 -> 静态挂载随控制台一起消失（不残留可取资源）。"""
+        _app, client, _rt = make_client(enabled=False)
+        assert client.get("/dev/static/dev-console.js").status_code == 404
+        assert client.get("/dev/static/dev-console.css").status_code == 404
+
+
+class TestConsoleTiles:
+    """U1 磁贴结构（语义标记级；纯视觉样式不追加镜像测试）。"""
+
+    TILE_IDS = (
+        "tile-overview", "tile-voicelog", "tile-settings", "tile-voice",
+        "tile-vision", "tile-sync", "tile-replay", "tile-logs",
+    )
+
+    def test_console_renders_tile_semantics(self):
+        """控制台渲染磁贴语义：可展开磁贴头（aria-expanded）+ 对应主体。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        assert 'data-page="dev-console"' in page
+        for tile_id in self.TILE_IDS:
+            assert f'id="{tile_id}"' in page, tile_id
+        heads = page.count('class="tile-head"')
+        assert heads == len(self.TILE_IDS)
+        assert page.count("aria-expanded") == heads, "每个磁贴头都带展开状态"
+        assert page.count('class="tile-body"') == heads
+
+    def test_tiles_reach_existing_entry_points(self):
+        """AE6：原有诊断操作在新外壳全部可达（操作函数 + 关键提示文案）。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        for marker in (
+            "loadStatus()", "loadLogs()", "setLevel()",
+            "postForm('/volume'", "postForm('/speed'",
+            "ttsSpeak()", "recordToggle()", "asrTest()",
+            "previewToggle()", "orientBy(", "flip()", "visionTest()",
+            "syncPull()", "replay(", "vlClear()", "vlAuto(this)",
+        ):
+            assert marker in page, marker
+        # 关键提示保留：录音独占 / OCR 机位 / 曲线诚实占位
+        assert "独占设备" in page
+        assert "约 20 cm" in page
+        assert "实时声音曲线将在后续单元接入" in page
+
+    def test_settings_tile_defaults_expanded(self):
+        """常用参数原位展开（B3/B4）：运行参数磁贴默认 aria-expanded=true。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        settings_head = page[page.index('id="tile-settings"'):]
+        settings_head = settings_head[: settings_head.index("tile-body")]
+        assert 'aria-expanded="true"' in settings_head
+        overview_head = page[page.index('id="tile-overview"'):]
+        overview_head = overview_head[: overview_head.index("tile-body")]
+        assert 'aria-expanded="false"' in overview_head

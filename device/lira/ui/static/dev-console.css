@@ -1,0 +1,168 @@
+/* ===== LIRA 开发者控制台（U1 磁贴外壳） =====
+   调色（脑图 A1）：奶油白底 + 杏桃橙主色 + 鼠尾草绿/淡紫分区 + 深棕文字；
+   浅色不等于低对比度（正文深棕对奶油白约 9:1）。
+   圆角软陶磁贴（A2）+ 轻按压反馈（A3）；无构建链、无 CDN、无框架。
+   布局（H3）：<768px 单列，>=768px 双列（实时区/视觉区跨双列）；
+   关键按钮任何宽度都可见，不随磁贴折叠而消失。 */
+
+:root {
+  --bg: #FFF7ED;             /* 奶油白页面底 */
+  --surface: #FFFDF9;        /* 磁贴面 */
+  --ink: #493D35;            /* 深棕正文 */
+  --ink-soft: #7D6C60;       /* 次要文字 */
+  --border: #F0E4D7;         /* 暖色细边 */
+  --panel: #FBF3E8;          /* 面板底（pre / 日志区） */
+  --apricot: #F6C599;        /* 主色：杏桃橙 */
+  --apricot-deep: #B45309;   /* 主色深化（焦点环） */
+  --sage: #CAD8BD;           /* 分区：鼠尾草绿 */
+  --sage-deep: #5F7A4E;
+  --lavender: #DCD2E9;       /* 分区：淡紫 */
+  --lavender-deep: #6F5B8E;
+  --danger: #A63D2F;
+  --ok: #3F6C33;
+  --radius: 20px;
+  --radius-sm: 12px;
+  --shadow: 0 2px 4px rgba(73, 61, 53, .07), 0 6px 18px rgba(73, 61, 53, .10);
+  --press: 90ms;             /* 轻按压反馈时长 */
+}
+
+* { box-sizing: border-box; }
+body {
+  font-family: system-ui, "Noto Sans CJK SC", sans-serif;
+  margin: 0; background: var(--bg); color: var(--ink);
+  font-size: 16px; line-height: 1.55;
+}
+
+/* —— 控制台磁贴网格：窄屏单列，>=768px 双列 —— */
+.dev-console {
+  max-width: 1060px; margin: 0 auto; padding: 16px;
+  display: grid; grid-template-columns: 1fr; gap: 14px; align-items: start;
+}
+.dev-console h1 { grid-column: 1 / -1; font-size: 24px; margin: 8px 4px 0; }
+@media (min-width: 768px) {
+  .dev-console { grid-template-columns: repeat(2, 1fr); padding: 24px; }
+  /* 实时区与视觉区是工作区式磁贴，跨双列展开 */
+  .tile--live, .tile--vision { grid-column: 1 / -1; }
+}
+
+/* —— 磁贴（软陶：圆角 + 暖影 + 分区色顶边） —— */
+.tile {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-top: 5px solid var(--tile-accent, var(--apricot));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+  min-width: 0;
+}
+.tile--overview { --tile-accent: var(--apricot); }
+.tile--live     { --tile-accent: var(--lavender); }
+.tile--settings { --tile-accent: var(--sage); }
+.tile--voice    { --tile-accent: var(--apricot); }
+.tile--vision   { --tile-accent: var(--lavender); }
+.tile--sync     { --tile-accent: var(--sage); }
+.tile--replay   { --tile-accent: var(--lavender); }
+.tile--logs     { --tile-accent: var(--sage); }
+
+/* 磁贴头按钮：整头可点，标题 + 摘要行；aria-expanded 表达展开态 */
+.tile-head {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 100%; margin: 0; padding: 14px 16px 10px;
+  background: transparent; border: none; border-radius: 0;
+  box-shadow: none; text-align: left; cursor: pointer;
+  font: inherit; color: var(--ink);
+  transition: background-color var(--press) ease-out;
+}
+.tile-head:hover { background: rgba(246, 197, 153, .22); }
+.tile-head:active { background: rgba(246, 197, 153, .35); transform: none; box-shadow: none; }
+.tile-title { font-size: 18px; font-weight: 700; }
+.tile-summary { font-size: 13px; color: var(--ink-soft); }
+
+.tile-body { padding: 6px 16px 16px; border-top: 1px dashed var(--border); }
+.tile-body[hidden] { display: none; }
+
+/* —— 控件 —— */
+button {
+  font: inherit; font-weight: 600; color: var(--ink);
+  background: var(--apricot); border: none; border-radius: var(--radius-sm);
+  padding: 8px 16px; cursor: pointer;
+  box-shadow: 0 1px 2px rgba(73, 61, 53, .15);
+  transition: transform var(--press) ease-out, box-shadow var(--press) ease-out;
+}
+button:hover { filter: brightness(1.04); }
+button:active { transform: translateY(1px) scale(.99); box-shadow: none; }
+button:focus-visible, input:focus-visible, select:focus-visible, a:focus-visible {
+  outline: 3px solid var(--apricot-deep); outline-offset: 2px;
+}
+
+input, select {
+  font: inherit; color: var(--ink);
+  padding: 6px 8px; border: 2px solid var(--border); border-radius: 10px;
+  background: #FFFFFF; max-width: 100%;
+}
+label { font-weight: 600; }
+
+.row { margin: 8px 0; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.row-gap-top { margin-top: 12px; }
+
+pre {
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 8px;
+  white-space: pre-wrap; max-height: 280px; overflow: auto;
+}
+
+.muted { color: var(--ink-soft); font-size: 13px; }
+.ok { color: var(--ok); font-weight: 600; }
+.err { color: var(--danger); font-weight: 600; }
+.hidden { display: none; }
+.hidden-audio { display: none; }
+
+img.shot {
+  max-width: 640px; width: 100%; height: auto;
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+
+/* —— 语音交互日志（实时区） —— */
+.vl-view {
+  max-height: 320px; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 8px; font-size: 14px;
+}
+.vl-row { padding: 2px 0; border-bottom: 1px dashed var(--border); }
+.vl-ts { color: var(--ink-soft); font-family: monospace; }
+.vl-kind { font-weight: 600; }
+.vl-wake .vl-kind { color: #B0600A; }
+.vl-llm .vl-kind { color: #3D5EA8; }
+.vl-speak .vl-kind { color: var(--ok); }
+.vl-bad { color: var(--danger); }
+
+/* —— 实时声音曲线占位：诚实占位，不画假波形 —— */
+.curve-placeholder {
+  margin-top: 12px; padding: 20px 12px; text-align: center;
+  border: 2px dashed #C9B8DE; border-radius: var(--radius-sm);
+  background: rgba(220, 210, 233, .25); color: var(--ink-soft);
+}
+.curve-placeholder p { margin: 0; }
+.curve-title { font-weight: 700; color: var(--ink); }
+
+/* —— 登录页 —— */
+.login-wrap {
+  min-height: 100vh; display: flex; align-items: center; justify-content: center;
+  padding: 16px;
+}
+.login-card {
+  width: 320px; background: var(--surface);
+  border: 1px solid var(--border); border-top: 5px solid var(--apricot);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 26px;
+}
+.login-card h1 { font-size: 18px; margin: 0 0 14px; }
+.login-card input { width: 100%; margin: 8px 0; }
+.login-card button { width: 100%; margin-top: 4px; }
+.login-card .err { min-height: 18px; font-size: 13px; }
+.login-card .muted { margin-bottom: 0; }
+
+/* —— 减少动态效果（H3）：过渡与按压位移全部关闭 —— */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; }
+  button:hover, button:active { transform: none; filter: none; }
+}

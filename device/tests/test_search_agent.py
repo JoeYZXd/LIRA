@@ -121,9 +121,9 @@ async def test_voice_progress_is_context_and_success_intro_only_after_evidence()
     answer = await run_search_agent(sdk, 'kimi-k2.6',
         [{'role':'user','content':'上海明天天气怎么样？'}], lambda: None,
         voice=True, on_progress=progress.append)
-    assert progress == ['我帮你看看天气啊。']
+    assert progress == []
     assert answer == '明天有雨。'
-    assert any('已向用户播报' in str(m.get('content')) for m in sdk.requests[-1]['messages'])
+    assert not any('已向用户播报' in str(m.get('content')) for m in sdk.requests[-1]['messages'])
     layout = sdk.requests[-1]['messages']
     assert layout[0]['role'] == 'system'
     assert all(m['role'] != 'system' for m in layout[1:])

@@ -1579,3 +1579,32 @@ class TestTurnTelemetry:
         dones = _tel_events(tel, "speak_done")
         assert [e.turn_id for e in dones] == [turn2]
         assert [e.turn_id for e in _tel_events(tel, "turn")] == [turn1, turn2]
+
+
+async def test_wait_feedback_once_and_never_after_answer_chunk():
+    async def remote(text, *, on_wait_feedback=None, on_reply_chunk=None, **kwargs):
+        on_wait_feedback("嗯。")
+        on_wait_feedback("重复提示")
+        on_reply_chunk("答案。")
+        on_wait_feedback("迟到提示")
+        return "答案。"
+    rec = Recorder()
+    sm = build_engine(rec, remote_llm=remote, remote_available=lambda: True)
+    await enter_state(sm, rec, State.LISTENING)
+    await sm.on_asr_text("复杂问题")
+    assert rec.spoken.count("嗯。") == 1
+    assert "重复提示" not in rec.spoken
+    assert "迟到提示" not in rec.spoken
+
+
+async def test_wait_feedback_after_owner_invalidation_is_silent():
+    async def remote(text, *, on_wait_feedback=None, **kwargs):
+        sm.apply_privacy(True)
+        on_wait_feedback("迟到提示")
+        return "答案。"
+    rec = Recorder()
+    sm = build_engine(rec, remote_llm=remote, remote_available=lambda: True)
+    await enter_state(sm, rec, State.LISTENING)
+    await sm.on_asr_text("复杂问题")
+    assert "迟到提示" not in rec.spoken
+    assert "答案。" not in rec.spoken

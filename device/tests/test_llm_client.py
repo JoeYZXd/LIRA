@@ -727,3 +727,53 @@ def test_short_voice_reasoning_options_are_native_k3_only(endpoint_url,model,voi
     client=object.__new__(LlmClient)
     client._base_url=endpoint_url;client._model=model
     assert client._voice_options(voice)==expected
+
+
+async def test_home_text_slow_response_never_emits_voice_cue():
+    calls = []
+    client = make_client(FakeRemote(slow_sse_response(0.05, "好")),
+                         make_llm_cfg(wait_feedback_seconds=0.01),
+                         on_wait_feedback=calls.append)
+    assert await client.chat("怎么做", voice_log=False) == "好"
+    assert calls == []
+
+
+async def test_search_first_content_suppresses_pending_cue(monkeypatch):
+    async def search(*args, on_delta=None, **kwargs):
+        on_delta("答案")
+        await asyncio.sleep(0.04)
+        return "答案"
+    monkeypatch.setattr("lira.llm.search_agent.run_search_agent", search)
+    calls = []
+    client = make_client(FakeRemote(ok_response("unused")),
+                         make_llm_cfg(wait_feedback_seconds=0.01, web_search_enabled=True),
+                         on_wait_feedback=calls.append)
+    assert await client.chat("天气") == "答案"
+    assert calls == []
+
+
+async def test_search_wait_uses_one_neutral_local_cue(monkeypatch):
+    async def search(*args, **kwargs):
+        await asyncio.sleep(0.05)
+        return "答案"
+    monkeypatch.setattr("lira.llm.search_agent.run_search_agent", search)
+    calls = []
+    client = make_client(FakeRemote(ok_response("unused")),
+                         make_llm_cfg(wait_feedback_seconds=0.01, web_search_enabled=True),
+                         on_wait_feedback=calls.append)
+    assert await client.chat("怎么理解这个问题") == "答案"
+    assert calls == ["嗯，我想想。"]
+
+
+async def test_cancelled_request_leaves_no_pending_cue():
+    calls = []
+    client = make_client(FakeRemote(slow_sse_response(0.1, "好")),
+                         make_llm_cfg(wait_feedback_seconds=0.04),
+                         on_wait_feedback=calls.append)
+    task = asyncio.create_task(client.chat("问题"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    await asyncio.sleep(0.06)
+    assert calls == []

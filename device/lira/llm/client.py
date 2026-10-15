@@ -9,8 +9,8 @@
     现查（可注入谓词），中途开关即时生效。
   - R10：`is_available()` 把联网检测（可注入 `network_ok`）与熔断状态合并为
     "远程可用性"单一信号，喂给 U3 路由层。
-  - R28：流式首 token 超过 `wait_feedback_seconds` 仍未来时触发一次
-    `on_wait_feedback` 回调；实际播报（phrasebook.WAIT_REMOTE）由装配层接。
+  - 等待反馈：语音轮次统一延迟 min(wait_feedback_seconds, 0.3) 秒，
+    尚无可播回答时最多发出一次本地短提示；文字聊天不触发语音反馈。
   - 模型显示观察器（U3/KTD7）：`telemetry` 属性运行时装配（仿 `memory=` 惯例，
     默认 None = 零事件零开销）。观察是纯旁路：`llm_request/llm_first_delta/
     llm_text/llm_done/llm_fail/llm_cancel` 在发射时绑定调用传入的 turn token
@@ -35,6 +35,7 @@ from openai import APIConnectionError, APIStatusError, AsyncOpenAI
 
 from lira.config import LlmConfig
 from lira.dialog.context import ContextSnapshot
+from lira.dialog.interaction_feedback import waiting_cue
 from lira.dialog.phrasebook import WAIT_REMOTE
 from lira.llm.breaker import CircuitBreaker
 from lira.llm.prompts import (
@@ -255,6 +256,22 @@ class LlmClient:
         observe = _ModelObserve(self.telemetry if voice_log else None, turn_id=turn_id,
                                 path="search" if use_search else "stream")
         observe.request(len(prompt))
+        # A single turn timer owns conversational feedback, including tool waits.
+        # First real content silences it even before a sentence is ready for TTS.
+        content_started = False
+        original_delta = observe.delta
+        def observe_delta(content):
+            nonlocal content_started
+            if content:
+                content_started = True
+            original_delta(content)
+        observe.delta = observe_delta
+        async def waiting_feedback():
+            await asyncio.sleep(min(self._wait_feedback_seconds, 0.3))
+            if not content_started and not self._privacy():
+                self._fire_wait_feedback(on_wait_feedback, waiting_cue(prompt))
+        feedback_task = (asyncio.create_task(waiting_feedback())
+                         if voice_log and system != PLAIN_SPEAK_SYSTEM_PROMPT else None)
         started = time.monotonic()
         try:
             if use_search:
@@ -289,6 +306,10 @@ class LlmClient:
             if voice_log:
                 VOICE_LOG.log("llm_fail", f"大模型返回错误（HTTP {exc.status_code}），已降级")
             raise LlmError("远程服务返回错误") from exc
+        finally:
+            if feedback_task is not None:
+                feedback_task.cancel()
+                await asyncio.gather(feedback_task, return_exceptions=True)
         self._breaker.record_success()
         observe.done(text)
         logger.info("llm.chat event=ok elapsed=%.3fs", time.monotonic() - started)
@@ -313,20 +334,12 @@ class LlmClient:
             if self._privacy():
                 raise PrivacyBlocked("隐私模式开启，已拦截远程调用")
 
-        progress_sent = False
-        def progress(message):
-            nonlocal progress_sent
-            progress_sent = True
-            self._fire_wait_feedback(feedback, message)
         task = asyncio.create_task(run_search_agent(
             self._client, self._model, messages, check_privacy, voice=voice,
-            on_progress=progress if voice else None, on_sentence=on_reply_chunk,
+            on_sentence=on_reply_chunk,
             on_delta=observe.delta if observe is not None else None,
             request_options=self._voice_options(voice)))
         try:
-            done, _ = await asyncio.wait({task}, timeout=self._wait_feedback_seconds)
-            if not done and not progress_sent:
-                self._fire_wait_feedback(feedback, "我想一下啊。")
             return await asyncio.wait_for(task, timeout=90)
         finally:
             if not task.done():
@@ -337,7 +350,7 @@ class LlmClient:
                            on_wait_feedback=_DEFAULT_FEEDBACK,
                            timeout_seconds: float | None = None,
                            observe=None, on_reply_chunk=None, request_options=None) -> str:
-        """建流并回收全部增量；首 token 等待超窗时触发一次 R28 回调。
+        """建流并回收全部增量；等待反馈统一由 chat 的轮次计时器处理。
 
         observe（可选）：逐非空内容增量旁路上报（U3/KTD7），不影响回收。
         """
@@ -365,13 +378,9 @@ class LlmClient:
             except StopAsyncIteration:
                 return None
 
-        # Opening and first token share the feedback window. Only an explicit
-        # cancellation aborts the operation and closes its acquired stream.
+        # Only explicit cancellation aborts opening and closes its acquired stream.
         task = asyncio.ensure_future(_open_and_first_chunk())
         try:
-            done, _ = await asyncio.wait({task}, timeout=self._wait_feedback_seconds)
-            if not done:
-                self._fire_wait_feedback(on_wait_feedback)
             first_chunk = await task
             from lira.audio.text_stream import consume_text
 

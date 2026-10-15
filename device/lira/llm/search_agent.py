@@ -267,9 +267,6 @@ async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, 
                 if call.function.name == "search_web" and valid and searches < 3 and query not in seen:
                     if searches == 0:
                         weather = weather or any(word in query.lower() for word in ("天气", "weather", "气温", "下雨"))
-                    if searches == 0 and on_progress is not None:
-                        on_progress("我帮你看看天气啊。" if weather else "我帮你查一下啊。")
-                        messages.append({"role": "system", "content": "设备已向用户播报查询进度提示。最终回答不要重复我帮你查一下、请稍等；若确实取得资料，自然接着说结果。"})
                     searches += 1
                     seen.add(query)
                     try:

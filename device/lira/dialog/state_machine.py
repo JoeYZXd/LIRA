@@ -736,8 +736,17 @@ class DialogEngine:
         self._route_task = asyncio.current_task()
         streamed = []
         session = None
+        feedback_sent = False
+        answer_started = False
+        def wait_feedback(message=None):
+            nonlocal feedback_sent
+            if not feedback_sent and not answer_started and self.is_current(owner):
+                feedback_sent = True
+                self.speak_progress(owner, message or "嗯。")
         def reply_chunk(chunk):
-            nonlocal session
+            nonlocal session, answer_started
+            if chunk:
+                answer_started = True
             if self.is_current(owner):
                 start = getattr(self._cb, "start_answer", None)
                 if start is not None:
@@ -765,7 +774,7 @@ class DialogEngine:
         try:
             result = await self._router.route(
                 text, context=context, turn_id=turn_id,
-                on_wait_feedback=lambda message=None: self.speak_progress(owner, message or "我想一下啊。"), on_reply_chunk=reply_chunk)
+                on_wait_feedback=wait_feedback, on_reply_chunk=reply_chunk)
         except asyncio.CancelledError:
             cancel_stream()
             return

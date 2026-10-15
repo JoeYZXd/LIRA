@@ -186,3 +186,126 @@ async def test_partial_prebuffer_starts_despite_stalled_upstream(monkeypatch):
     await asyncio.wait_for(opened.wait(), .8)
     await player.stop()
     await asyncio.wait_for(task, 1)
+
+
+def install_metrics_stream(monkeypatch, board):
+    """Expose callbacks without making starvation duration depend on wall time."""
+    loop = asyncio.get_running_loop()
+    opened = asyncio.Event()
+    streams = []
+
+    class Stream:
+        def __init__(self, **kw):
+            self.callback = kw['callback']
+            self.finished = kw['finished_callback']
+            streams.append(self)
+
+        def start(self):
+            loop.call_soon_threadsafe(opened.set)
+
+        def close(self):
+            pass
+
+        def abort(self):
+            self.finished()
+
+        def consume(self, frames):
+            data = bytearray(frames * 2)
+            stopped = False
+            try:
+                self.callback(data, frames, None, None)
+            except board.sd.CallbackStop:
+                stopped = True
+            return bytes(data), stopped
+
+    monkeypatch.setattr(board.sd, 'RawOutputStream', Stream)
+    return opened, streams
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+async def test_starvation_counts_episodes_and_missing_frames(monkeypatch, enabled):
+    from lira.audio.voice_metrics import VoiceMetrics, current_trace
+
+    board = board_player_module(monkeypatch)
+    opened, streams = install_metrics_stream(monkeypatch, board)
+    metrics = VoiceMetrics(enabled=True) if enabled else VoiceMetrics()
+    assert metrics.enabled is enabled
+    resume = asyncio.Event()
+    recovered = asyncio.Event()
+    finish = asyncio.Event()
+    eof = asyncio.Event()
+
+    async def source():
+        yield b'\1\0' * 2
+        await resume.wait()
+        yield b'\0' * 4  # Real silent PCM is still producer-supplied audio.
+        recovered.set()
+        await finish.wait()
+        eof.set()
+
+    player = board.SoundDevicePlayer(samplerate=8)
+    token = current_trace.set(metrics.trace(utterance_id=42))
+    task = asyncio.create_task(player.play_stream(source()))
+    current_trace.reset(token)
+    try:
+        await asyncio.wait_for(opened.wait(), 1)
+        stream = streams[0]
+        # Two content frames and one missing frame begin the first episode.
+        assert stream.consume(3) == (b'\1\0' * 2 + b'\0' * 2, False)
+        assert stream.consume(2) == (b'\0' * 4, False)
+        assert stream.consume(1) == (b'\0' * 2, False)
+        resume.set()
+        await asyncio.wait_for(recovered.wait(), 1)
+        assert stream.consume(2) == (b'\0' * 4, False)
+        # A full callback of supplied zero PCM ends the previous episode.
+        assert stream.consume(2) == (b'\0' * 4, False)
+        rows = [row for row in metrics.snapshot() if 'starvation_count' in row]
+        if enabled:
+            assert [row['starvation_count'] for row in rows] == [1, 0, 0, 1]
+            assert [row['starvation_seconds'] for row in rows] == pytest.approx(
+                [1 / 8, 2 / 8, 1 / 8, 2 / 8])
+            assert sum(row['starvation_count'] for row in rows) == 2
+            assert sum(row['starvation_seconds'] for row in rows) == pytest.approx(6 / 8)
+            assert all(row['utterance_id'] == 42 for row in rows)
+        else:
+            assert metrics.snapshot() == []
+        assert player.output_frames == 4
+        finish.set()
+        await asyncio.wait_for(eof.wait(), 1)
+        assert stream.consume(2) == (b'\0' * 4, True)
+        assert [row for row in metrics.snapshot() if 'starvation_count' in row] == rows
+        stream.finished()
+        await asyncio.wait_for(task, 1)
+    finally:
+        if not task.done():
+            await player.stop()
+            await asyncio.wait_for(task, 1)
+
+
+async def test_finite_silent_pcm_and_eof_padding_are_not_starvation(monkeypatch):
+    from lira.audio.voice_metrics import VoiceMetrics, current_trace
+
+    board = board_player_module(monkeypatch)
+    opened, streams = install_metrics_stream(monkeypatch, board)
+    metrics = VoiceMetrics(enabled=True)
+    player = board.SoundDevicePlayer(samplerate=8)
+    token = current_trace.set(metrics.trace(utterance_id=43))
+    task = asyncio.create_task(player.play(b'\0' * 6))
+    current_trace.reset(token)
+    try:
+        await asyncio.wait_for(opened.wait(), 1)
+        stream = streams[0]
+        assert stream.consume(2) == (b'\0' * 4, False)
+        # The final frame is content; the remaining three are finite EOF padding.
+        assert stream.consume(4) == (b'\0' * 8, True)
+        assert player.output_frames == 3
+        stream.finished()
+        await asyncio.wait_for(task, 1)
+        rows = metrics.snapshot()
+        assert any(row['event'] == 'output_consumed' for row in rows)
+        assert any(row['event'] == 'output_drained' for row in rows)
+        assert not any('starvation_count' in row or 'starvation_seconds' in row for row in rows)
+    finally:
+        if not task.done():
+            await player.stop()
+            await asyncio.wait_for(task, 1)

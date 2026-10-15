@@ -11,6 +11,7 @@
 
 from __future__ import annotations
 
+import logging
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -48,8 +49,15 @@ class VoiceLog:
 
     def log(self, kind: str, text: str) -> None:
         self._entries.append(VoiceLogEntry(time.time(), kind, text))
+        # 镜像守卫（U8 评审）：本方法在 asr_partial 等每音频块热路径上——
+        # sink 异常（如 lone-surrogate 文本的 UnicodeEncodeError）绝不能
+        # 穿透进识别主链路（与 dev_telemetry.safe_add_event 同纪律）
         if self._sink is not None:
-            self._sink.add_event(kind, text)
+            try:
+                self._sink.add_event(kind, text)
+            except Exception:  # noqa: BLE001 - 展示镜像不拖垮主链路
+                logging.getLogger(__name__).debug(
+                    "voice_log event=sink_failed kind=%s", kind, exc_info=True)
 
     def snapshot(self) -> list[VoiceLogEntry]:
         """时间正序的全部条目（页面侧自行倒序渲染）。"""
@@ -58,7 +66,11 @@ class VoiceLog:
     def clear(self) -> None:
         self._entries.clear()
         if self._sink is not None:
-            self._sink.clear_events()
+            try:
+                self._sink.clear_events()
+            except Exception:  # noqa: BLE001 - 同 log：镜像失败不外泄
+                logging.getLogger(__name__).debug(
+                    "voice_log event=sink_clear_failed", exc_info=True)
 
 
 #: 进程级单例（模块 import 即用；测试可 clear 复位）

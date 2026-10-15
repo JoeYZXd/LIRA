@@ -73,9 +73,9 @@ class _ModelObserve:
     - 发射异常一律吞并 + debug 留痕：观察永不影响主返回路径。
     """
 
-    def __init__(self, telemetry, *, turn, path: str) -> None:
+    def __init__(self, telemetry, *, turn_id, path: str) -> None:
         self._tel = telemetry
-        self._turn = turn
+        self._turn = turn_id
         self._path = path
         self._text = ""  # 累计用户可见文本（快照语义，非增量）
         self._first_seen = False
@@ -87,8 +87,8 @@ class _ModelObserve:
 
     def request(self, chars: int) -> None:
         """实际发起：结构化摘要，不含 prompt 内容（内容已在 utterance 事件）。"""
-        turn = f" turn={self._turn}" if self._turn is not None else ""
-        self._emit("llm_request", f"path={self._path} chars={chars}{turn}")
+        turn_id = f" turn={self._turn}" if self._turn is not None else ""
+        self._emit("llm_request", f"path={self._path} chars={chars}{turn_id}")
 
     def delta(self, content: str) -> None:
         """用户可见内容增量（system/隐藏推理不进本通道）。
@@ -193,7 +193,7 @@ class LlmClient:
                    on_wait_feedback=_DEFAULT_FEEDBACK,
                    timeout_seconds: float | None = None,
                    voice_log: bool = True, on_reply_chunk=None, memory_member_id=None,
-                   turn=None) -> str:
+                   turn_id=None) -> str:
         """发起一次流式对话并回收完整文本。
 
         Args:
@@ -203,7 +203,7 @@ class LlmClient:
             voice_log: False 时本调用不写任何 VOICE_LOG 条目（交互中提示、
                 回复预览、失败提示全部抑制）——文字聊天不进语音展示面，
                 且回复内容绝不外泄到 dev 控制台（home-console U2）。
-            turn: 本调用绑定的轮次 token（U3/KTD3，由引擎经路由层逐调用显式
+            turn_id: 本调用绑定的轮次 token（U3/KTD3，由引擎经路由层逐调用显式
                 传入）。全部 llm_* 观察事件在发射时使用该值，迟到回复不会
                 归错轮；None（如阅读白话钩子）= 事件不带轮次关联。
 
@@ -243,7 +243,7 @@ class LlmClient:
         # 模型显示观察器（U3/KTD7）：与 TTS 句级回调（on_reply_chunk）完全
         # 分离的只读旁路；voice_log=False（首页文字聊天）零观察事件。
         use_search = self._web_search_enabled and system != PLAIN_SPEAK_SYSTEM_PROMPT
-        observe = _ModelObserve(self.telemetry if voice_log else None, turn=turn,
+        observe = _ModelObserve(self.telemetry if voice_log else None, turn_id=turn_id,
                                 path="search" if use_search else "stream")
         observe.request(len(prompt))
         started = time.monotonic()
@@ -414,13 +414,13 @@ def make_remote_handler(client: LlmClient) -> Callable[[str], Awaitable[str | No
     异常不外抛——降级语义归路由层，播报归状态机。
     """
 
-    async def handler(text: str, *, context: ContextSnapshot | None = None, on_wait_feedback=None, on_reply_chunk=None, turn=None) -> str | None:
+    async def handler(text: str, *, context: ContextSnapshot | None = None, on_wait_feedback=None, on_reply_chunk=None, turn_id=None) -> str | None:
         if not client.is_available():
             return None
         try:
             return await client.chat(text, system=VOICE_ASSISTANT_SYSTEM_PROMPT,
                                      context=context, on_wait_feedback=on_wait_feedback, on_reply_chunk=on_reply_chunk,
-                                     turn=turn,
+                                     turn_id=turn_id,
                                      **({"memory_member_id": client.voice_member_provider()} if getattr(client,"memory",None) is not None else {}))
         except PrivacyBlocked:
             # 隐私后果播报（R12）由状态机/装配层负责，路由层只见降级

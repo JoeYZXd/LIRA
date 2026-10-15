@@ -1122,6 +1122,12 @@ class TestVoiceCandidatesEndpoints:
         url = f"/dev/api/voice-candidates/{v1.candidate_id}/confirm"
         assert client.post(url, json={}).status_code == 400
         assert client.post(url, json={"member_id": "x"}).status_code == 400
+        # 路径参数非整数 → 400（手动 int 解析承诺的兑现点，U8 评审钉住）
+        assert client.post("/dev/api/voice-candidates/abc/confirm",
+                           json={"member_id": baba}).status_code == 400
+        # 畸形 JSON body → 400 {"error"}（原裸 request.json() 为 500 纯文本）
+        assert client.post(url, content=b"{not json",
+                           headers={"Content-Type": "application/json"}).status_code == 400
         assert client.post("/dev/api/voice-candidates/999/confirm",
                            json={"member_id": baba}).status_code == 404
         # 状态不符：新候选没有挂请求

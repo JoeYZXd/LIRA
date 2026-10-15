@@ -61,6 +61,7 @@ from lira.dev_telemetry import safe_add_event
 __all__ = [
     "VoiceCandidates", "Verdict", "CandidateError", "CandidateNotFound",
     "CandidateConflict", "ASSOCIATION_PENDING", "CLIP_THRESHOLD",
+    "top1_with_margin",
 ]
 
 #: 去重标识全局滚动上限（KTD5 数据关系：最多保留最近 100 个标识）
@@ -83,10 +84,18 @@ BOUND_REACHED = "bound_reached"
 INCONSISTENT = "inconsistent"
 ASSOCIATION_PENDING = "association_pending"
 
-#: 候选状态：可继续积累证据 / 可被命名晋升的"活跃"集合
-ACTIVE_STATUSES = ("accumulating", "ready", "awaiting_console")
-#: 候选状态：可被自然命名晋升（awaiting_console 已挂同名请求，不再走新名路径）
-NAMEABLE_STATUSES = ("accumulating", "ready")
+# 候选状态单一出处（U8 评审：原先散布 SQL 字面量 ~14 处，与 ACTIVE_STATUSES
+# 可静默分叉——所有 IN 子句与状态比较皆由此组合）
+STATUS_ACCUMULATING = "accumulating"
+STATUS_READY = "ready"
+STATUS_AWAITING_CONSOLE = "awaiting_console"
+STATUS_STALE = "stale"
+STATUS_EXPIRED = "expired"
+STATUS_PROMOTED = "promoted"
+#: 可继续积累证据 / 可被命名晋升的"活跃"集合
+ACTIVE_STATUSES = (STATUS_ACCUMULATING, STATUS_READY, STATUS_AWAITING_CONSOLE)
+#: 可被自然命名晋升（awaiting_console 已挂同名请求，不再走新名路径）
+NAMEABLE_STATUSES = (STATUS_ACCUMULATING, STATUS_READY)
 
 
 class CandidateError(Exception):
@@ -101,7 +110,7 @@ class CandidateConflict(CandidateError):
     """状态不符或成员已有声纹——拒绝且不覆盖（409 语义，AE4）。"""
 
 
-def _top_or_ambiguous(scored, threshold, margin):
+def top1_with_margin(scored, threshold, margin):
     """「top-1 达标 + 对次高边际」统一判定（U8 审查收口，原先 4 处手写、
     靠注释互称同则——含 SpeakerIdentity.match）。
 
@@ -193,8 +202,9 @@ class VoiceCandidates:
         for column in ("pending_name TEXT", "proposed_member_id INTEGER", "member_id INTEGER"):
             try:
                 self.db.execute(f"ALTER TABLE voice_candidates ADD COLUMN {column}")
-            except sqlite3.OperationalError:
-                pass  # 列已存在（幂等重开）
+            except sqlite3.OperationalError as exc:
+                if "duplicate column" not in str(exc).lower():
+                    raise  # 非重复列的 OperationalError 不吞（U8 评审：过宽 except）
         self._invalidate_foreign()
 
     # ---------- 生命周期 ----------
@@ -204,12 +214,14 @@ class VoiceCandidates:
 
         不删除、不混算：旧证据保留供排查，进度从零重新积累。
         """
+        placeholders = ",".join("?" * len(ACTIVE_STATUSES))
         with self.db:
             self.db.execute(
-                "UPDATE voice_candidates SET status='stale', updated_at=? "
-                "WHERE status IN ('accumulating','ready','awaiting_console') "
+                f"UPDATE voice_candidates SET status={STATUS_STALE!r}, updated_at=? "
+                f"WHERE status IN ({placeholders}) "
                 "AND (model_fingerprint != ? OR strategy_version != ?)",
-                (self._now(), self.fingerprint, self.params.strategy_version))
+                (self._now(), *ACTIVE_STATUSES, self.fingerprint,
+                 self.params.strategy_version))
 
     def _expire_candidates(self, now: float) -> None:
         """惰性过期：accumulating 候选超过 ttl 无新证据 → expired。
@@ -220,13 +232,13 @@ class VoiceCandidates:
         cutoff = now - self.params.candidate_ttl_days * 86400.0
         due = self.db.execute(
             "SELECT 1 FROM voice_candidates "
-            "WHERE status='accumulating' AND updated_at < ? LIMIT 1", (cutoff,)).fetchone()
+            f"WHERE status={STATUS_ACCUMULATING!r} AND updated_at < ? LIMIT 1", (cutoff,)).fetchone()
         if due is None:
             return
         with self.db:
             self.db.execute(
-                "UPDATE voice_candidates SET status='expired' "
-                "WHERE status='accumulating' AND updated_at < ?", (cutoff,))
+                f"UPDATE voice_candidates SET status={STATUS_EXPIRED!r} "
+                f"WHERE status={STATUS_ACCUMULATING!r} AND updated_at < ?", (cutoff,))
 
     # ---------- 观察入口 ----------
 
@@ -317,7 +329,7 @@ class VoiceCandidates:
                 worst = self._min_pairwise_cos(candidate_id)
                 if worst is not None and worst >= self.params.consistency_threshold:
                     self.db.execute(
-                        "UPDATE voice_candidates SET consistency_passed=1, status='ready' "
+                        f"UPDATE voice_candidates SET consistency_passed=1, status={STATUS_READY!r} "
                         "WHERE candidate_id=?", (candidate_id,))
                     passed = True
         return self._verdict(ACCEPTED, candidate_id=candidate_id,
@@ -381,7 +393,7 @@ class VoiceCandidates:
     def lookup(self, vector) -> int | None:
         """当前声音对应的活跃候选 id（命名上下文绑定用）；**只读不变更**。
 
-        与 _assign 同则（经 _top_or_ambiguous 收口），但绝不建候选、置 stale
+        与 _assign 同则（经 top1_with_margin 收口），但绝不建候选、置 stale
         或写任何行——歧义（边际不足）与陌生声音都返回 None，命名上下文
         宁缺毋错绑。每轮 resolve 都会调用，故不发遥测事件。
         """
@@ -396,7 +408,7 @@ class VoiceCandidates:
             if aggregate.shape != vector.shape:
                 continue  # 维度不符（防御）：跳过，lookup 不做任何置失效写
             scored.append((float(np.dot(vector, aggregate)), int(row[0])))
-        hit, _ambiguous = _top_or_ambiguous(scored, self.params.assign_threshold,
+        hit, _ambiguous = top1_with_margin(scored, self.params.assign_threshold,
                                             self.params.match_margin)
         return hit
 
@@ -448,7 +460,7 @@ class VoiceCandidates:
             raise CandidateNotFound(f"成员不存在: {member_id}")
         with self.db:
             self.db.execute(
-                "UPDATE voice_candidates SET status='awaiting_console', "
+                f"UPDATE voice_candidates SET status={STATUS_AWAITING_CONSOLE!r}, "
                 "proposed_member_id=?, pending_name=NULL, updated_at=? "
                 "WHERE candidate_id=?", (int(member_id), now, candidate_id))
         return self._verdict(ASSOCIATION_PENDING, candidate_id=candidate_id,
@@ -490,7 +502,7 @@ class VoiceCandidates:
             self.db.execute("INSERT INTO voice_profiles(member_id, vector) VALUES (?,?)",
                             (member_id, row["aggregate_vector"]))
             self.db.execute(
-                "UPDATE voice_candidates SET status='promoted', member_id=?, "
+                f"UPDATE voice_candidates SET status={STATUS_PROMOTED!r}, member_id=?, "
                 "pending_name=NULL, proposed_member_id=NULL, updated_at=? "
                 "WHERE candidate_id=?", (member_id, now, candidate_id))
         self._verdict(ACCEPTED, candidate_id=candidate_id,
@@ -529,7 +541,7 @@ class VoiceCandidates:
             self.db.execute("INSERT INTO voice_profiles(member_id, vector) VALUES (?,?)",
                             (member_id, row["aggregate_vector"]))
             self.db.execute(
-                "UPDATE voice_candidates SET status='promoted', member_id=?, "
+                f"UPDATE voice_candidates SET status={STATUS_PROMOTED!r}, member_id=?, "
                 "pending_name=NULL, proposed_member_id=NULL, updated_at=? "
                 "WHERE candidate_id=?", (int(member_id), now, candidate_id))
         self._verdict(ACCEPTED, candidate_id=candidate_id,
@@ -547,7 +559,7 @@ class VoiceCandidates:
             return 0
 
     def _match_established(self, vector):
-        """已建立成员判定（与 SpeakerIdentity.match 同则，经 _top_or_ambiguous
+        """已建立成员判定（与 SpeakerIdentity.match 同则，经 top1_with_margin
         收口——"同则"由共用实现保证而非注释）。
 
         最高 cos >= match_threshold 且对次高边际 >= match_margin →
@@ -560,7 +572,7 @@ class VoiceCandidates:
             if member_vector.shape != vector.shape:
                 continue
             scores.append((float(np.dot(vector, member_vector)), int(member)))
-        hit, ambiguous = _top_or_ambiguous(scores, self.params.match_threshold,
+        hit, ambiguous = top1_with_margin(scores, self.params.match_threshold,
                                            self.params.match_margin)
         if hit is None:
             return (None, True) if ambiguous else None
@@ -585,7 +597,7 @@ class VoiceCandidates:
         return len(self._active_rows())
 
     def _assign(self, vector, now: float):
-        """候选指派：现任活跃候选按 cos 降序（经 _top_or_ambiguous 收口）——
+        """候选指派：现任活跃候选按 cos 降序（经 top1_with_margin 收口）——
         最高达标且边际足 → 归入；最高达标但边际不足 → 歧义拒绝；
         无达标 → 新建候选（未满上限时）。
 
@@ -597,11 +609,11 @@ class VoiceCandidates:
             if aggregate.shape != vector.shape:
                 # 指纹未反映的维度变化（防御）：候选立即失效，绝不与本段混算
                 with self.db:
-                    self.db.execute("UPDATE voice_candidates SET status='stale' "
+                    self.db.execute(f"UPDATE voice_candidates SET status={STATUS_STALE!r} "
                                     "WHERE candidate_id=?", (row[0],))
                 continue
             scored.append((float(np.dot(vector, aggregate)), row))
-        hit, ambiguous = _top_or_ambiguous(scored, self.params.assign_threshold,
+        hit, ambiguous = top1_with_margin(scored, self.params.assign_threshold,
                                            self.params.match_margin)
         if ambiguous:
             return Verdict(AMBIGUOUS, reason="声音归属不明确，本段不计入任何候选")
@@ -614,8 +626,9 @@ class VoiceCandidates:
             cursor = self.db.execute(
                 "INSERT INTO voice_candidates(aggregate_vector,model_fingerprint,"
                 "segment_count,total_seconds,consistency_passed,strategy_version,"
-                "status,created_at,updated_at) VALUES (?, ?, 0, 0, 0, ?, 'accumulating', ?, ?)",
-                (vector.tobytes(), self.fingerprint, self.params.strategy_version, now, now))
+                "status,created_at,updated_at) VALUES (?, ?, 0, 0, 0, ?, ?, ?, ?)",
+                (vector.tobytes(), self.fingerprint, self.params.strategy_version,
+                 STATUS_ACCUMULATING, now, now))
         return cursor.lastrowid, vector.tobytes(), 0, 0.0
 
     def _min_pairwise_cos(self, candidate_id):
@@ -645,11 +658,17 @@ class VoiceCandidates:
             ratio = min(ratio, PROGRESS_CAP)
         return round(ratio, 4)
 
-    def _verdict(self, outcome: str, *, candidate_id: int | None = None,
-                 progress: float | None = None, reason: str = "") -> Verdict:
-        """构造 Verdict；事件面（kind 前缀 voice_）经 safe_add_event 统一守卫。"""
-        verdict = Verdict(outcome, candidate_id=candidate_id,
-                          progress=progress, reason=reason)
+    def _emit(self, outcome: str, *, candidate_id: int | None = None,
+              reason: str = "") -> None:
+        """纯事件发射（U8 评审：promote/confirm 成功路径丢弃 Verdict 返回值，
+        语义是发事件而非构造结果——单独立名避免读似死代码）。"""
         text = f"{outcome} candidate={candidate_id} {reason}".strip()
         safe_add_event(self._event_sink, "voice_candidate", text)
+
+    def _verdict(self, outcome: str, *, candidate_id: int | None = None,
+                 progress: float | None = None, reason: str = "") -> Verdict:
+        """构造 Verdict 并发射 voice_candidate 事件（判定链拒绝/接受面）。"""
+        verdict = Verdict(outcome, candidate_id=candidate_id,
+                          progress=progress, reason=reason)
+        self._emit(outcome, candidate_id=candidate_id, reason=reason)
         return verdict

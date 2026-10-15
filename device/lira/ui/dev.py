@@ -21,7 +21,8 @@ templates/dev_login.html、templates/dev.html；CSS/JS 为本地静态资源
 观察快照（dev-console 改版 U4，KTD4）：/dev/api/observe 聚合音频包络环、
 文本事件环与状态面，游标增量 + reset 恢复，单次响应限事件条数；
 /dev/api/settings 提供设置能力元信息（真实当前值/可写性/生效方式/约束），
-写路径全部沿用既有端点，本模块不新增任何写端点。
+写路径全部沿用既有端点（唯一例外是下方 U7 声纹确认的领域操作 POST——
+不存在通用参数写入面）。
 
 声纹候选（dev-console 改版 U7，KTD6）：/dev/api/voice-candidates 出候选/
 已建立成员快照；同名关联确认是唯一的领域操作 POST（会话 + 隐私双闸，
@@ -33,8 +34,8 @@ from __future__ import annotations
 import asyncio
 import logging
 import secrets
+import sqlite3
 import time
-from dataclasses import dataclass
 import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -76,12 +77,18 @@ _SALT = "lira-dev-session"
 _MAX_FAILED = 5
 _LOCK_SECONDS = 300.0
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+#: 设置约束字面量单一出处（U8 评审：settings 元信息与写端点校验曾各抄一份，
+#: 单边改动即契约漂移）。写端点校验与 _settings_items 皆引用此处。
+_LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
+_CAMERA_ROTATIONS = (0, 90, 180, 270)
 #: observe 单次响应的事件条数上限（剩余经 next_cursor 下次续读；
 #: 250ms 轮询节奏下每次 100 条足够追平增量，KTD4）
 _OBSERVE_EVENT_PAGE = 100
 
-#: 录音内存缓冲（零落盘；进程内，覆盖复用）
-clip_state: dict[str, bytes | None] = {"wav": None, "ts": 0.0}
+#: 录音内存缓冲（零落盘；进程内，覆盖复用）。值语义：仅 "wav" 键承载
+#: bytes | None（"ts" 存 float 时间戳——U8 评审：原注解与实际不符）
+clip_state: dict[str, bytes | float | None] = {"wav": None, "ts": 0.0}
 
 
 class DevHandle:
@@ -202,7 +209,7 @@ def _serializer(store: ApplianceStore):
     return URLSafeTimedSerializer(_session_secret(store), salt=_SALT)
 
 
-@dataclass
+@dataclasses.dataclass
 class _RateLimiter:
     """口令验证失败全局计数（内存；重启清零）。"""
 
@@ -331,8 +338,14 @@ def _audio_frame_json(frame: "AudioFrame") -> dict:
 
 
 def _event_json(event: "TelemetryEvent") -> dict:
-    """TelemetryEvent → JSON dict（utterance/turn/owner 缺省保留 null）。"""
-    return dataclasses.asdict(event)
+    """TelemetryEvent → JSON dict（utterance/turn/owner 缺省保留 null）。
+
+    text_bytes 是环淘汰的内部簿记（U8 评审：asdict 会把内部字段自动变成
+    API 面）——显式摘除，公开载荷只含计划声明的事件 schema。
+    """
+    payload = dataclasses.asdict(event)
+    payload.pop("text_bytes", None)
+    return payload
 
 
 def _parse_cursor(raw: str | None) -> int | None:
@@ -349,6 +362,17 @@ def _parse_cursor(raw: str | None) -> int | None:
     except ValueError:
         return None
     return value if value >= 0 else None
+
+
+async def _json_body(request: Request) -> dict | None:
+    """POST JSON body 解析（U8 评审收口，原六处裸 await request.json()）：
+    非法 JSON / 非 dict（标量、数组）→ None，调用方统一回 400——绝不 500
+    纯文本（鉴权后的自纠错契约与端点其余 400/404/409 形态一致）。"""
+    try:
+        body = await request.json()
+    except Exception:  # noqa: BLE001 - JSONDecodeError/空 body/编码错误同路
+        return None
+    return body if isinstance(body, dict) else None
 
 
 def _writable_item(key: str, label: str, value, constraint: dict,
@@ -385,7 +409,7 @@ def _settings_items(runtime) -> list[dict]:
              "max": DeviceSettings.SPEED_RANGE[1]}, "/speed"),
         _writable_item(
             "loglevel", "日志级别", _loglevel_name(),
-            {"type": "choices", "values": ["DEBUG", "INFO", "WARNING", "ERROR"]},
+            {"type": "choices", "values": list(_LOG_LEVELS)},
             "/dev/api/loglevel"),
     ]
     # 相机项随装配出现（与 /status 相机回读同一存在性判断）
@@ -393,7 +417,7 @@ def _settings_items(runtime) -> list[dict]:
     if camera is not None:
         items.append(_writable_item(
             "camera_rotation", "相机方向", camera.rotation,
-            {"type": "choices", "values": [0, 90, 180, 270]},
+            {"type": "choices", "values": list(_CAMERA_ROTATIONS)},
             "/dev/api/camera/orientation"))
         items.append(_writable_item(
             "camera_hflip", "相机水平翻转", bool(getattr(camera, "hflip", False)),
@@ -475,7 +499,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             return JSONResponse(
                 {"error": f"失败次数过多，请 {int(locked)} 秒后再试。"}, status_code=429
             )
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
         if handle.vault.verify(str(body.get("passphrase", ""))):
             limiter.reset()
             logger.info("dev event=login ok=true")
@@ -535,9 +561,11 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         denied = _require_session(request, api=True)
         if denied is not None:
             return denied
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
         level = str(body.get("level", "")).upper()
-        if level not in {"DEBUG", "INFO", "WARNING", "ERROR"}:
+        if level not in _LOG_LEVELS:
             return JSONResponse({"error": "级别须为 DEBUG/INFO/WARNING/ERROR"}, status_code=400)
         logging.getLogger("lira").setLevel(getattr(logging, level))
         logger.info("dev event=loglevel level=%s", level)
@@ -692,7 +720,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             candidate_id_int = int(candidate_id)
         except ValueError:
             return JSONResponse({"error": "candidate_id 须为整数"}, status_code=400)
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
         member_id = body.get("member_id")
         if not isinstance(member_id, int) or isinstance(member_id, bool):
             return JSONResponse({"error": "member_id 须为整数"}, status_code=400)
@@ -702,6 +732,12 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             return JSONResponse({"error": str(exc)}, status_code=404)
         except CandidateConflict as exc:
             return JSONResponse({"error": str(exc)}, status_code=409)
+        except sqlite3.Error as exc:
+            # 意外存储异常（磁盘满等）：事务已由 with self.db 回滚，无数据
+            # 风险——返回 JSON 500 而非裸文本 traceback（U8 评审）
+            logger.warning("dev event=voice_candidate_confirm_failed kind=%s",
+                           type(exc).__name__)
+            return JSONResponse({"error": "确认事务失败，请稍后重试"}, status_code=500)
         # 日志纪律：只记 id 与幂等布尔，不记成员名/称呼
         logger.info("dev event=voice_candidate_confirm candidate=%d member=%d already=%s",
                     candidate_id_int, result["member_id"], result.get("already", False))
@@ -715,7 +751,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         denied = _require_session(request, api=True)
         if denied is not None:
             return denied
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
         text = str(body.get("text", "")).strip()
         if not text:
             return JSONResponse({"error": "缺少播报文本"}, status_code=400)
@@ -920,7 +958,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         camera = getattr(handle.runtime, "camera", None)
         if camera is None or not hasattr(camera, "rotation"):
             return JSONResponse({"error": "相机不支持方向设置"}, status_code=501)
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
         rotation = body.get("rotation")
         rotate_by = body.get("rotate_by")
         hflip = body.get("hflip")
@@ -932,7 +972,7 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
                 )
             rotation = (getattr(camera, "rotation", 0) + rotate_by) % 360
         if rotation is not None:
-            if rotation not in (0, 90, 180, 270):
+            if rotation not in _CAMERA_ROTATIONS:
                 return JSONResponse({"error": "rotation 须为 0/90/180/270"}, status_code=400)
             camera.rotation = rotation
             handle.store.set_meta("camera_rotation", str(rotation))
@@ -962,7 +1002,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         denied = _require_session(request, api=True)
         if denied is not None:
             return denied
-        body = await request.json()
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
         text = str(body.get("text", "")).strip()
         if not body.get("confirm"):
             return JSONResponse(

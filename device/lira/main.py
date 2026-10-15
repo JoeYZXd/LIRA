@@ -722,33 +722,34 @@ class DeviceRuntime:
             self.personal_memory=PersonalMemory(cfg.db_path,llm._client,cfg.llm.model,
                 lambda:self.privacy.is_on,self._network_ok)
             llm.memory=self.personal_memory
-            llm.voice_member_provider=lambda:self.voice_member_id
-            llm.voice_context_provider=self.voice_identity_context
-            model_path=cfg.db_path.parent.parent / 'models' / 'lira-speaker.onnx'
+            llm.voice_member_provider = lambda: self.voice_member_id
+            llm.voice_context_provider = self.voice_identity_context
+            model_path = cfg.db_path.parent.parent / 'models' / 'lira-speaker.onnx'
             if not model_path.is_file():
                 from lira.config import REPO_ROOT
-                model_path=REPO_ROOT / 'models' / 'lira-speaker.onnx'
-            self.speaker_identity=SpeakerIdentity(self.personal_memory,model_path)
-            # U8 复用审查：匹配阈值/边际单一出处收归 SpeakerConfig——原先
-            # SpeakerIdentity 硬编码 0.80/0.10 与 config 各一份，改配置会
-            # 静默只影响候选侧判定
-            self.speaker_identity.threshold=cfg.speaker.match_threshold
-            self.speaker_identity.margin=cfg.speaker.match_margin
+                model_path = REPO_ROOT / 'models' / 'lira-speaker.onnx'
+            # U8 复用审查：匹配阈值/边际单一出处收归 SpeakerConfig（构造参数
+            # 注入，类内默认仅测试便利）
+            self.speaker_identity = SpeakerIdentity(
+                self.personal_memory, model_path,
+                threshold=cfg.speaker.match_threshold,
+                margin=cfg.speaker.match_margin)
             # U6/KTD6：候选积累存储与 PersonalMemory 同一 SQLite 连接——U7 的
             # 同名确认晋升必须与 members/voice_profiles 同事务；观察事件经
             # dev 遥测事件面（kind=voice_candidate）留痕，隐私时遥测自会拒收
             from lira.speaker_candidates import VoiceCandidates
-            self.speaker_candidates=VoiceCandidates(self.personal_memory.db,
+            self.speaker_candidates = VoiceCandidates(
+                self.personal_memory.db,
                 fingerprint=self.speaker_identity.model_fingerprint,
                 profiles_provider=self.personal_memory.profiles,
                 params=cfg.speaker,
-                privacy=lambda:self.privacy.is_on,
+                privacy=lambda: self.privacy.is_on,
                 event_sink=self.telemetry.add_event)
             # U7 装配顺序（memory→identity→candidates 后回填引用）：候选存储
             # 是登记/关联的唯一出口——memory 持引用（dev API 快照取用），
             # identity 回填（resolve 出口经 lookup/set/promote 操作候选）
-            self.personal_memory.candidates=self.speaker_candidates
-            self.speaker_identity.candidates=self.speaker_candidates
+            self.personal_memory.candidates = self.speaker_candidates
+            self.speaker_identity.candidates = self.speaker_candidates
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
         # 模型就绪快照（status 面消费；启动期定型——语音栈/OCR 引擎装配即定）
         self._models_status = {
@@ -810,8 +811,13 @@ class DeviceRuntime:
         # U6：候选证据观察——提取后复检已过（AE5 第一道），observe 内部还有
         # 隐私第二道防线与 established/质量/去重判定；返回值本单元不驱动行为，
         # U7 磁贴与确认流程才消费。空样本（如命令通道兜底）与提取失败不观察。
+        # 守卫（U8 评审）：候选存储异常（磁盘满/畸形输入）绝不吞掉整句语音
+        # ——积累是旁路，主对话必须照常投递。
         if self.speaker_candidates is not None and vector is not None and samples is not None and len(samples):
-            self.speaker_candidates.observe(vector,samples)
+            try:
+                self.speaker_candidates.observe(vector,samples)
+            except Exception:
+                logging.warning("identity event=candidate_observe_failed", exc_info=True)
         previous_pending=getattr(self.speaker_identity,'pending',None)
         member,notice,replay=self.speaker_identity.resolve(text,vector)
         if member!=self.voice_member_id or (member is None and previous_pending is not getattr(self.speaker_identity,'pending',None)):
@@ -854,9 +860,9 @@ class DeviceRuntime:
                 identity.pending=None
                 # U7 误绑防线（切隐私）：命名上下文作废时同步清掉候选上的
                 # 暂存称呼——迟到回执/后续声音不得再拿这个名字去晋升
-                cid=pending.get('cid') if pending else None
-                if cid is not None and self.speaker_candidates is not None:
-                    self.speaker_candidates.clear_pending_name(cid)
+                candidate_id=pending.get('candidate_id') if pending else None
+                if candidate_id is not None and self.speaker_candidates is not None:
+                    self.speaker_candidates.clear_pending_name(candidate_id)
 
     def voice_identity_context(self):
         pending=self.speaker_identity.pending if self.speaker_identity is not None else None

@@ -600,6 +600,11 @@ curl -s -o /dev/null -w "%{http_code}" http://<board-ip>:<ui-port>/dev   # 401/3
 判定：服务 active、日志无 traceback、`/status` 200、`/dev` 非连接拒绝；
 浏览器打开 `/dev` 走完登录 → 磁贴全渲染 → 实时区曲线随语音出现包络。
 
+注（U8 审计）：`/status` 的 `models` 字段是**启动期快照**（装配定型，
+250ms observe 轮询免每拍 8 次文件系统 stat）——运行中补放模型文件不会
+反映，重启后生效。另：示例里的 `grep -v ERROR_LEVEL_EXPECTED` 是占位
+过滤器，按需替换成期望中的良性错误关键词。
+
 ### 4.3 校准交接清单（需家庭成员在场，未完成前不得宣称就绪）
 
 板端校准是交付门槛（KTD5/Verification Contract）。以下每项记录到

@@ -45,7 +45,7 @@ async function doLogin() {
 
 /* ---------- 控制台页：共享状态与工具 ---------- */
 
-let recording = false, previewOn = false, previewTimer = null, fetching = false;
+let recording = false, recBusy = false, previewOn = false, previewTimer = null, fetching = false;
 let recTimer = null, recLeft = 0, flipped = false, authRedirecting = false;
 /* 运行参数允许范围（/dev/api/status 的 volume_range / speed_range 回读） */
 const ranges = { volume: null, speed: null };
@@ -259,6 +259,17 @@ async function loadVoiceCandidates() {
 
 async function confirmAssociation(candidateId, memberId) {
   if (memberId === null || memberId === undefined) { return; }
+  // 在途防护（U8 前端竞态评审 FR-7）：确认进行中禁用按钮，双击不双 POST
+  const btn = document.querySelector('#tile-voice-candidates .vc-card .vc-await button');
+  if (btn) { btn.disabled = true; }
+  try {
+    await confirmAssociationInner(candidateId, memberId);
+  } finally {
+    if (btn) { btn.disabled = false; }
+  }
+}
+
+async function confirmAssociationInner(candidateId, memberId) {
   const r = await api('/dev/api/voice-candidates/' + candidateId + '/confirm',
     {method: 'POST', body: JSON.stringify({member_id: memberId})});
   if (r.status === 200) {
@@ -282,9 +293,11 @@ async function ttsSpeak() {
 
 async function recordToggle() {
   const btn = document.getElementById('rec-btn');
+  if (recBusy) { return; } // 在途防护（U8 FR-5）：双击不双 POST
+  recBusy = true;
   if (!recording) {
     const r = await api('/dev/api/record/start', {method: 'POST', body: '{}'});
-    if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
+    if (r.status !== 200) { recBusy = false; return out('rec-out', r.body.error || r.status, 'err'); }
     recording = true;
     btn.textContent = '结束录音';
     recLeft = 0;
@@ -294,6 +307,7 @@ async function recordToggle() {
     clearInterval(recTimer);
     const r = await api('/dev/api/record/stop', {method: 'POST', body: '{}'});
     recording = false;
+    recBusy = false;
     btn.textContent = '开始录音';
     if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
     if (r.body.discarded) return out('rec-out', '已按隐私联锁丢弃本次录音', 'err');
@@ -326,9 +340,14 @@ async function orientBy(delta) {
 }
 
 async function flip() {
-  // 水平翻转（U1 补实现）：同一方向端点，hflip 取反
-  const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify({hflip: !flipped})});
-  if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
+  // 水平翻转（U1 补实现）：同一方向端点，hflip 为绝对 set——先本地翻转再
+  // 发送（U8 FR-6：读 stale 值发绝对量会让双击第二次把翻转翻回去），失败回滚
+  flipped = !flipped;
+  const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify({hflip: flipped})});
+  if (r.status !== 200) {
+    flipped = !flipped;
+    return out('orient-out', r.body.error || r.status, 'err');
+  }
   await applyOrientation(r);
 }
 
@@ -343,17 +362,28 @@ async function visionTest() {
 }
 
 /* 预览取帧（提升为顶层：预览轮询与方向变更后的刷新共用） */
+let previewGen = 0, previewUrl = null;
+
 async function fetchFrame() {
+  // 代数令牌（U8 前端竞态评审 FR-2）：await 后校验代数——停止预览/方向
+  // 变更后到达的旧响应不得复活已关闭的预览为冻结帧
+  const gen = ++previewGen;
   let r;
   try {
     r = await fetch('/dev/api/vision/frame?ts=' + Date.now());
   } catch (e) {
-    return stopPreview('无法连接设备服务，预览已停止', 'err');
+    if (gen === previewGen) { stopPreview('无法连接设备服务，预览已停止', 'err'); }
+    return;
   }
+  if (gen !== previewGen) { return; } // 旧代响应：丢弃
   if (r.status === 200) {
     const blob = await r.blob();
+    if (gen !== previewGen) { return; }
     const img = document.getElementById('preview-img');
-    img.src = URL.createObjectURL(blob); img.style.display = 'block';
+    // blob URL 用一收一（U8 FR-3）：长挂预览不再无限积累
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); }
+    previewUrl = URL.createObjectURL(blob);
+    img.src = previewUrl; img.style.display = 'block';
     out('preview-out', '预览中…');
   } else {
     stopPreview('取帧失败已停止: ' + r.status, 'err');
@@ -362,9 +392,11 @@ async function fetchFrame() {
 
 function stopPreview(msg, cls) {
   previewOn = false;
+  previewGen += 1; // 在途旧响应全部作废
   clearInterval(previewTimer);
   document.getElementById('preview-btn').textContent = '开启实时预览（~0.5fps）';
   document.getElementById('preview-img').style.display = 'none';
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
   if (msg) { out('preview-out', msg, cls); }
 }
 
@@ -424,7 +456,8 @@ const unlinkedLlm = [];        // 无 turn_id 的 llm_* 事件（未关联轮次
 const logBuffers = { voice: [], model: [], sys: [] }; // 日志区三 tab 数据源
 let logTab = 'voice';
 /* 日志脏标记按 tab 分账（U8 效率审查：全局标记会让未变化的 tab 全量重建） */
-const logDirty = { voice: false, model: false };
+const logDirty = { voice: false, model: false, sys: false };
+let turnDirty = false;
 let lastKindSig = '';
 let lastAudioAt = 0;           // 最近一次见到新音频帧的本地墙钟（ms）
 
@@ -474,7 +507,18 @@ async function observePull() {
   }
   if (r.status === 200) {
     observe.failCount = 0;
-    applyObserve(r.body);
+    // U8 前端竞态评审 FR-1：形状异常的 200（如代理返回 HTML，api() 降级为
+    // {raw:…}）绝不能永久杀死节拍链——走与网络失败相同的退避路径，状态行可见
+    try {
+      applyObserve(r.body);
+    } catch (e) {
+      const delay = OBSERVE_BACKOFF_MS[Math.min(observe.failCount, OBSERVE_BACKOFF_MS.length - 1)];
+      observe.failCount += 1;
+      updateCurveMeta({text: '响应异常（' + Math.round(delay / 1000) + ' 秒后重试）', cls: 'err'});
+      if (!observe.liveOpen || document.hidden || observe.stopped) { return; }
+      observeSchedule(delay);
+      return;
+    }
     if (!observe.liveOpen || document.hidden || observe.stopped) { return; } // 态已变：不续排
     // 事件满页（==服务端回显页长）可能还有续页：立即续拉（仍受单飞约束；
     // 页长以响应 events.page 为准——U8 化简审查：不再与服务端各自硬编码）
@@ -538,6 +582,7 @@ function initObserveVisibility() {
   document.addEventListener('visibilitychange', function () {
     if (document.hidden) {
       clearTimeout(observe.timer); // 停节拍；在途请求自然完成、结果照常并入
+      if (previewOn) { stopPreview(); } // 预览轮询同样不受隐形页持续打相机（U8 FR-4）
     } else if (observe.liveOpen && !observe.stopped) {
       observeRebaseline(); // 恢复可见：重新首拉建基线
     }
@@ -556,6 +601,7 @@ function clearLocalBuffers() {
   observe.idlePolls = 0;
   lastAudioAt = 0;
   logDirty.voice = logDirty.model = true;
+  turnDirty = true;
   lastKindSig = '';
 }
 
@@ -583,8 +629,13 @@ function applyObserve(body) {
   }
   updateCurveMeta();
   // reset 后即使快照为空也必须重渲染（旧轮卡不得残留）
-  if (didReset || body.events.items.length) {
+  // 轮卡与日志同样按需重绘（U8 性能评审：对话中 events 每拍非空，
+  // 无脏标记时 4Hz 全量重建 20 张轮卡）
+  if (didReset || turnDirty) {
     renderTurns();
+    turnDirty = false;
+  }
+  if (didReset || body.events.items.length) {
     renderLog(didReset);
   }
 }
@@ -604,10 +655,12 @@ function ingestEvent(ev) {
   }
   if (ev.turn_id !== null && ev.turn_id !== undefined) {
     applyEventToTurn(ev);
+    turnDirty = true;
   } else if (isModelKind(ev.kind)) {
     // 无轮次关联的模型事件（如阅读白话）：归"未关联轮次"，不丢弃
     unlinkedLlm.push(ev);
     if (unlinkedLlm.length > 20) { unlinkedLlm.shift(); }
+    turnDirty = true;
   }
   const bucket = isModelKind(ev.kind) ? logBuffers.model : logBuffers.voice;
   bucket.push(ev);

@@ -87,6 +87,10 @@ cd device && .venv/bin/python -m pytest       # 单元测试
 cd backend && python3 -m pytest               # 后台测试（U8 起）
 ```
 
+浏览器测试层（dev-console 改版 U5，须单独进程跑）：装
+`pip install -e '.[browser]'` 后执行 `pytest tests/browser`——pytest-playwright
+与 pytest-asyncio 同进程冲突，默认全量 pytest 不收集该目录。
+
 ## 端到端验收（U9：AE1–AE7，模拟环境）
 
 `device/tests/e2e/` 在 x86 开发机上跑通全部验收样例：整机以全 mock HAL 装配

@@ -377,6 +377,7 @@ class TestObserveEventPageCap:
         assert len(events["items"]) == 100, "单响应限流"
         assert events["items"][-1]["seq"] == 100
         assert events["next_cursor"] == 100, "只推进到最后返回那条"
+        assert events["page"] == 100, "页长回显——客户端续页判断的契约字段（U8 评审钉住）"
         collected = [e["seq"] for e in events["items"]]
 
         cursor = events["next_cursor"]

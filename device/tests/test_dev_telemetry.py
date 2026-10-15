@@ -561,6 +561,28 @@ class TestObservationNeverTouchesMic:
 # ---------- 9 VOICE_LOG 镜像 ----------
 
 
+class TestSafeAddEvent:
+    """safe_add_event 故障容忍（U8 评审：观察旁路收口后吞异常是唯一防线，
+    必须有测试——异常桩不拖垮调用方主链路）。"""
+
+    async def test_none_telemetry_is_noop(self):
+        from lira.dev_telemetry import safe_add_event
+
+        safe_add_event(None, "wake", "未装配静默")  # 不抛即过
+
+    async def test_raising_telemetry_is_swallowed_with_debug_log(self, caplog):
+        from lira.dev_telemetry import safe_add_event
+
+        class _Raising:
+            def add_event(self, kind, text, **fields):
+                raise RuntimeError("遥测存储爆炸")
+
+        with caplog.at_level("DEBUG", logger="lira.dev_telemetry"):
+            safe_add_event(_Raising(), "wake", "异常被吞")
+            safe_add_event(_Raising().add_event, "wake", "绑定可调用形态同样守卫")
+        assert any("safe_add_event_failed" in r.message for r in caplog.records)
+
+
 class TestVoiceLogMirror:
     async def test_voice_log_with_sink_mirrors_into_telemetry(self):
         tel = DevTelemetry()
@@ -582,6 +604,26 @@ class TestVoiceLogMirror:
         ring.clear()
         ring.log("asr", "y")
         assert [e.text for e in ring.snapshot()] == ["y"]
+
+    async def test_raising_sink_does_not_break_logging(self):
+        """U8 评审（reliability）：镜像守卫——sink 异常绝不能穿透进
+        asr_partial 热路径（原裸调用可沿 feed → 进程退出）。"""
+        ring = VoiceLog()
+
+        class _RaisingSink:
+            def add_event(self, kind, text):
+                raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "lone surrogate")
+
+            def clear_events(self):
+                raise RuntimeError("clear 爆炸")
+
+        ring.register_sink(_RaisingSink())
+        ring.log("asr_partial", "热路径镜像（lone surrogate 场景）")
+        # 本环数据面不受 sink 异常影响：log/clear 的本地语义原样
+        assert [e.text for e in ring.snapshot()] == ["热路径镜像（lone surrogate 场景）"]
+        ring.clear()
+        assert ring.snapshot() == []
+        ring.register_sink(None)
 
     async def test_runtime_wires_voice_log_sink(self, tmp_path):
         from test_main_loop import make_rig

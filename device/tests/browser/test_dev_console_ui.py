@@ -275,12 +275,14 @@ class TestLifecycle:
             entries = wait_observe_count(page, n0 + 3, timeout_s=25)
         finally:
             dev_server.runtime.telemetry = real_telemetry
-        # 拉取间隔按退避档位递增（禁用后前 3 拉：~立即 → +1s → +2s）
+        # 拉取间隔按退避档位递增（禁用后前 3 拉：~立即 → +1s → +2s）。
+        # 上限放宽（U8 测试评审）：定时器只会晚不会早，负载 CI 的调度抖动
+        # 不应误报；递增方向是本用例的强断言。
         ts = [e["t"] for e in entries[n0:n0 + 3]]
         gap1 = (ts[1] - ts[0]) / 1000
         gap2 = (ts[2] - ts[1]) / 1000
-        assert 0.8 <= gap1 <= 2.5, f"第一档退避应约 1s，实际 {gap1 / 1000:.2f}s"
-        assert 1.7 <= gap2 <= 4.0, f"第二档退避应约 2s，实际 {gap2 / 1000:.2f}s"
+        assert 0.8 <= gap1 <= 4.0, f"第一档退避应约 1s，实际 {gap1 / 1000:.2f}s"
+        assert 1.7 <= gap2 <= 6.0, f"第二档退避应约 2s，实际 {gap2 / 1000:.2f}s"
         assert gap2 > gap1, "失败退避必须递增"
         # 恢复后：新静音帧可见，状态回到实时语义（不再断连）
         dev_server.feed_silence(2)

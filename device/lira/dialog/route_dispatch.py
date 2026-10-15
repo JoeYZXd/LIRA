@@ -238,10 +238,15 @@ class RouteDispatch:
         # 结构化遥测旁路（U2，KTD2）：隐私门之后的共享输入只读观察——与下方
         # 每秒 VOICE_LOG 统计同位，置于所有 early-return 之前，包络才反映真实
         # 设备输入。未装配（getattr None）或无观察者时遥测侧自会跳过计算。
+        # 守卫（U8 评审）：旁路异常绝不进主音频链路（本方法无上层 try）。
         telemetry = getattr(rt, "telemetry", None)
         if telemetry is not None:
-            telemetry.on_audio(samples, generation=self._generation,
-                               route=route, tts_occupied=occupied)
+            try:
+                telemetry.on_audio(samples, generation=self._generation,
+                                   route=route, tts_occupied=occupied)
+            except Exception:
+                logging.debug("dispatch event=telemetry_audio_failed",
+                              exc_info=True)
         self._audio_samples += samples.size
         self._audio_energy += float(np.sum(samples * samples))
         if samples.size:

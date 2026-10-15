@@ -459,7 +459,7 @@ class TestModelObservation:
         client = make_client(fake)
         tel = DevTelemetry()
         client.telemetry = tel
-        assert await client.chat("打个招呼", turn=3) == "你好，世界"
+        assert await client.chat("打个招呼", turn_id=3) == "你好，世界"
         assert [e.kind for e in _events(tel)] == [
             "llm_request", "llm_first_delta", "llm_done"]
         req = _events(tel, "llm_request")[0]
@@ -491,7 +491,7 @@ class TestModelObservation:
         client = make_client(fake)
         tel = DevTelemetry()
         client.telemetry = tel
-        assert await client.chat("首页文字聊天", voice_log=False, turn=9) == "回复"
+        assert await client.chat("首页文字聊天", voice_log=False, turn_id=9) == "回复"
         assert _events(tel) == []
 
     async def test_privacy_blocked_call_has_no_events(self):
@@ -555,9 +555,9 @@ class TestModelObservation:
         tel = DevTelemetry()
         client.telemetry = tel
 
-        late = asyncio.create_task(client.chat("第一轮", turn=1))
+        late = asyncio.create_task(client.chat("第一轮", turn_id=1))
         await entered.wait()
-        assert await client.chat("第二轮", turn=2) == "新"  # 第二轮先完成
+        assert await client.chat("第二轮", turn_id=2) == "新"  # 第二轮先完成
         release.set()
         assert await late == "迟"
         assert [(e.turn_id, e.text) for e in _events(tel, "llm_first_delta")] == [
@@ -598,7 +598,7 @@ class TestModelObservation:
         client = LlmClient(make_llm_cfg(), openai_client=sdk)
         tel = DevTelemetry()
         client.telemetry = tel
-        task = asyncio.create_task(client.chat("问题", turn=6))
+        task = asyncio.create_task(client.chat("问题", turn_id=6))
         await entered.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
@@ -615,7 +615,7 @@ class TestModelObservation:
         client = make_client(fake)
         client.telemetry = tel
         with pytest.raises(LlmError):
-            await client.chat("绝密内容", turn=4)
+            await client.chat("绝密内容", turn_id=4)
         fails = _events(tel, "llm_fail")
         assert [e.text for e in fails] == ["http_500"]
         assert all(e.turn_id == 4 for e in fails)

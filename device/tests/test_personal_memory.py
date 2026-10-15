@@ -78,8 +78,10 @@ async def test_short_name_waits_for_later_matching_ordinary_speech(tmp_path):
     member,notice,_=s.resolve('爸爸',None)
     assert member is None and not m.profiles()
     assert {c['candidate_id']:c for c in store.snapshot()['candidates']}[cid]['pending_name']=='爸爸'
-    member,_,_=s.resolve('明天是不是也会下雨',one)
-    assert member is not None
+    member,notice,replay=s.resolve('明天是不是也会下雨',one)
+    # 锚定 _settle_pending 成功话术契约（U8 评审：合并重构后短名分支的
+    # notice/replay 曾被 '_' 丢弃——回归将无报警）
+    assert member is not None and notice is None and replay is None
     await m.close()
 
 async def test_existing_text_member_requires_confirmation_and_never_replaces_voice(tmp_path):
@@ -281,7 +283,9 @@ async def test_model_fingerprint_is_stable_and_dimension_aware(tmp_path):
     # U6/KTD5：候选表用指纹区分模型代次——路径+输出维度，跨重启稳定
     m=memory(tmp_path)
     s=SpeakerIdentity(m,None,extractor=object())
-    assert s.model_fingerprint==s.model_fingerprint
+    # 跨实例稳定（U8 评审：原自比较恒真，未验证"两次独立构造同指纹"）
+    again=SpeakerIdentity(m,None,extractor=object())
+    assert s.model_fingerprint==again.model_fingerprint
     assert s.model_fingerprint.endswith(':0')  # 提取器无 dim 属性回退 0
     dimmed=SpeakerIdentity(m,None,extractor=SimpleNamespace(dim=192))
     assert dimmed.model_fingerprint.endswith(':192')

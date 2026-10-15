@@ -1,5 +1,9 @@
 """对话状态机（U3）：LIRA 全部交互的汇点，纯逻辑、无 I/O（计划 U3 Approach）。
 
+编号说明（U8 审计）：本文件注释中的 U3/R11/R21 等编号有两个出处——头部
+结构注释引自 2026-10-05 voice-continuity 旧计划；遥测/轮次注释（"U3/KTD3"
+等）出自 2026-10-15 dev-console 新计划。同名不同源，回溯时先看上下文。
+
 状态图（计划 High-Level Technical Design）::
 
     [*] → STANDBY ⇄ LISTENING → PROCESSING → SPEAKING → FOLLOWUP
@@ -739,7 +743,7 @@ class DialogEngine:
                 streamed.append(completion)
         try:
             result = await self._router.route(
-                text, context=context, turn=turn_id,
+                text, context=context, turn_id=turn_id,
                 on_wait_feedback=lambda message=None: self.speak_progress(owner, message or "我想一下啊。"), on_reply_chunk=reply_chunk)
         except asyncio.CancelledError:
             return

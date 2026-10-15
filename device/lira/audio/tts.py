@@ -230,7 +230,13 @@ class TtsEngine:
                 await source.aclose()
         source = pcm()
         request.playing = True
-        request.network = asyncio.create_task(self._player.play_stream(source))
+        token = current_trace.set(request.trace)
+        answer_token = current_answer.set(request.answer)
+        try:
+            request.network = asyncio.create_task(self._player.play_stream(source))
+        finally:
+            current_trace.reset(token)
+            current_answer.reset(answer_token)
         try:
             await request.network
             if count and baseline is not None and self._player.output_frames == baseline:

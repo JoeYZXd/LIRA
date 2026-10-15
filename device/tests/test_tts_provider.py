@@ -186,3 +186,115 @@ async def test_fallback_uses_safe_local_segmentation_for_tiny_deltas(tmp_path):
     assert all(len(chunk) > 1 for chunk in calls)
     assert 'English' in ' '.join(calls)
     await engine.close()
+
+async def test_queued_online_answer_uses_its_own_trace(tmp_path):
+    from lira.audio.voice_metrics import VoiceMetrics, current_answer, current_trace, mark
+
+    class MeasuredMock(MockAudioIO):
+        async def play_stream(self, source):
+            trace, answer = current_trace.get(), current_answer.get()
+            async def measured():
+                async for pcm in source:
+                    yield pcm
+                    mark(trace, 'output_consumed', frames=len(pcm) // 2, answer=int(answer))
+            await super().play_stream(measured())
+
+    player = MeasuredMock(tmp_path / 'unused', hold_playback=True)
+    engine = playback_engine(player)
+    metrics = VoiceMetrics(enabled=True)
+    progress = metrics.trace(turn_id=1, owner='progress')
+    answer = metrics.trace(turn_id=2, owner='answer')
+    class Online:
+        async def stream(self, text, **kwargs):
+            async for delta in text:
+                yield b'\x01\x00'
+    engine._online = Online()
+    engine._online_allowed = lambda: True
+    trace_token = current_trace.set(progress)
+    answer_token = current_answer.set(False)
+    try:
+        cue = engine.speak('正在查询。', owner='progress')
+        await asyncio.wait_for(player.playback_started.wait(), 1)
+        current_trace.set(answer)
+        current_answer.set(True)
+        session = engine.start_session(owner='answer')
+        await session.feed('答案。')
+        session.finish_input()
+    finally:
+        current_trace.reset(trace_token)
+        current_answer.reset(answer_token)
+    player.hold_playback = False
+    player.playback_released.set()
+    try:
+        await asyncio.wait_for(cue.wait(), 1)
+        await asyncio.wait_for(session.done.wait(), 1)
+        assert session.done.status == 'success'
+        consumed = [row for row in metrics.snapshot() if row['event'] == 'output_consumed']
+        assert [(row['turn_id'], row['owner'], row['answer']) for row in consumed] == [
+            (1, 'progress', 0), (2, 'answer', 1)]
+    finally:
+        await engine.close()
+
+
+async def test_online_queued_pcm_failure_before_consumption_falls_back_once():
+    class PrebufferPlayer:
+        """Producer may queue PCM before the device consumes any frames."""
+        def __init__(self):
+            self.output_frames = 0
+            self.queued = []
+            self.played = []
+            self.stopped = False
+            self.queued_online = asyncio.Event()
+            self.fail_online = asyncio.Event()
+
+        async def play_stream(self, source):
+            if not self.stopped:
+                async for pcm in source:
+                    self.queued.append(pcm)
+                    self.queued_online.set()
+                raise AssertionError('online provider must fail')
+            assert not self.queued
+            async for pcm in source:
+                self.played.append(pcm)
+                self.output_frames += len(pcm) // 2
+
+        async def stop(self):
+            assert self.output_frames == 0 or self.stopped
+            self.queued.clear()
+            self.stopped = True
+
+        async def close(self):
+            await self.stop()
+
+    player = PrebufferPlayer()
+    calls = []
+    def generate(text, speed):
+        assert player.stopped and not player.queued
+        calls.append(text)
+        return np.ones(8, dtype=np.float32)
+    engine = playback_engine(player, generate)
+    class Failing:
+        async def stream(self, text, **kwargs):
+            async for delta in text:
+                yield b'\x01\x00' * 4
+                await player.fail_online.wait()
+                raise RuntimeError('network failed after queuing PCM')
+    engine._online = Failing()
+    engine._online_allowed = lambda: True
+    session = engine.start_session()
+    await session.feed('完整答案。')
+    session.finish_input()
+    await asyncio.wait_for(player.queued_online.wait(), 1)
+    assert player.queued and player.output_frames == 0
+    assert calls == []
+    player.fail_online.set()
+    try:
+        await asyncio.wait_for(session.done.wait(), 1)
+        assert session.done.status == 'success'
+        assert calls == ['完整答案。']
+        assert player.queued == []
+        assert len(player.played) == 1
+        assert player.output_frames == 8
+        assert not engine.accepts_text_deltas
+    finally:
+        await engine.close()

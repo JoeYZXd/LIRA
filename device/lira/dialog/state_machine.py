@@ -735,26 +735,44 @@ class DialogEngine:
         self._disarm()
         self._route_task = asyncio.current_task()
         streamed = []
+        session = None
         def reply_chunk(chunk):
+            nonlocal session
             if self.is_current(owner):
+                start = getattr(self._cb, "start_answer", None)
+                if start is not None:
+                    if session is None:
+                        token = current_answer.set(True)
+                        try:
+                            session = start(owner=owner)
+                        finally:
+                            current_answer.reset(token)
+                    if session is not None:
+                        return self._cb.feed_answer(session, chunk, owner=owner)
                 completion = self._speak(chunk, answer=True)
                 if completion is None:
                     completion = asyncio.Event()
                     completion.set()
                 streamed.append(completion)
+        reply_chunk.accepts_text_deltas = bool(getattr(self._cb, "accepts_text_deltas", False))
+        def cancel_stream():
+            if session is not None:
+                session.cancel()
+            if session is not None or streamed:
+                cancel = getattr(self._cb, "cancel_audio", None)
+                if cancel is not None:
+                    cancel(owner)
         try:
             result = await self._router.route(
                 text, context=context, turn_id=turn_id,
                 on_wait_feedback=lambda message=None: self.speak_progress(owner, message or "我想一下啊。"), on_reply_chunk=reply_chunk)
         except asyncio.CancelledError:
+            cancel_stream()
             return
         except Exception:
+            cancel_stream()
             logging.exception("dialog event=understanding_failed")
             if self.is_current(owner):
-                if streamed:
-                    cancel = getattr(self._cb, "cancel_audio", None)
-                    if cancel is not None:
-                        cancel(owner)
                 self._speak(pb.UNDERSTANDING_FAILED)
                 self._begin_listening(replay=False)
                 self._arm(self.LISTEN_WINDOW_SECONDS)
@@ -763,19 +781,21 @@ class DialogEngine:
             if self.is_current(owner):
                 self._route_task = None
         if not self.is_current(owner):
+            cancel_stream()
             return
         # 实际路由结果（U3）：过期 owner 的迟到结果不落事件（不污染新轮次）
         self._emit_event("route", result.tier.value, turn_id=turn_id)
         if result.tier is RouterTier.LOCAL_RULE and result.intent is not None:
+            cancel_stream()
             self._dispatch(result.intent)
         elif result.reply:
-            self._speak_answer(result.reply, owner=owner, user_text=text, streamed=streamed)
+            if session is not None:
+                session.finish_input()
+            self._speak_answer(result.reply, owner=owner, user_text=text, streamed=streamed,
+                               session=session)
         else:
+            cancel_stream()
             # 规则与 LLM 均无结果 → R24 识别失败引导
-            if streamed:
-                cancel = getattr(self._cb, "cancel_audio", None)
-                if cancel is not None:
-                    cancel(owner)
             self._recognition_failure(text)
 
     def _start_reading_clarification(self) -> None:
@@ -1155,14 +1175,14 @@ class DialogEngine:
         task.add_done_callback(self._completion_tasks.discard)
 
     def _speak_answer(self, text: str, *, owner: OperationOwner, user_text: str,
-                      record: bool = True, streamed=None) -> None:
+                      record: bool = True, streamed=None, session=None) -> None:
         self._transition(State.SPEAKING)
         self._disarm()
         # 本语句绑定的轮次/语句关联在进入播报时捕获（U3）：身份拦截路径
         # （note_utterance 置 _turn_open=None）只按 utterance/owner 追溯
         answer_turn = self._turn_open
         answer_utterance = self._utterance_id
-        completion = streamed[-1] if streamed else self._speak(text, answer=True)
+        completion = session.done if session is not None else (streamed[-1] if streamed else self._speak(text, answer=True))
         def finished():
             if not self.is_current(owner) or self.state is not State.SPEAKING:
                 return

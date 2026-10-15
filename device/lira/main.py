@@ -446,6 +446,20 @@ class DeviceCallbacks:
         # 源（隐私开关公告、sync 快照公告）不带标记 → 勿扰中一律静音
         if self._dnd_muted() and not exempt:
             return None
+        self._observe_speech(text, owner)
+        tts = self._rt.tts
+        if tts is None:
+            # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
+            logging.info("播报降级 event=spoken_no_tts chars=%d", len(text))
+            return
+        return tts.speak(
+            text,
+            speed=self._rt.settings.tts_speed,
+            volume=self._rt.settings.volume,
+            owner=owner,
+        )
+
+    def _observe_speech(self, text, owner):
         # 最近播报环形记录（内存，不落盘；dev 回放/状态区展示面）
         self._rt.recent_speaks.append(text)
         # 语音交互日志（内存展示区，可含话术片段；logging 行纪律不变）
@@ -460,17 +474,30 @@ class DeviceCallbacks:
         # 关联（镜像事件不带 owner）；守卫统一 safe_add_event，不影响出声
         safe_add_event(getattr(self._rt, "telemetry", None), "speak", speak_line,
                        operation_owner=owner_text(owner))
-        tts = self._rt.tts
-        if tts is None:
-            # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
-            logging.info("播报降级 event=spoken_no_tts chars=%d", len(text))
-            return
-        return tts.speak(
-            text,
-            speed=self._rt.settings.tts_speed,
-            volume=self._rt.settings.volume,
-            owner=owner,
-        )
+
+    @property
+    def accepts_text_deltas(self):
+        return bool(getattr(self._rt.tts, "accepts_text_deltas", False))
+
+    def start_answer(self, *, owner):
+        if (not self._rt.engine.is_current(owner) or self._dnd_muted()
+                or self._rt.privacy.is_on or self._rt.tts is None):
+            return None
+        trace = current_trace.get()
+        if trace is not None:
+            current_trace.set(trace.bind(turn_id=getattr(self._rt.engine, "_turn_open", None),
+                                         owner=owner_text(owner)))
+        return self._rt.tts.start_session(speed=self._rt.settings.tts_speed,
+                                          volume=self._rt.settings.volume, owner=owner)
+
+    async def feed_answer(self, session, text, *, owner):
+        if (not self._rt.engine.is_current(owner) or self._dnd_muted()
+                or self._rt.privacy.is_on):
+            session.cancel()
+            self.cancel_audio(owner)
+            raise asyncio.CancelledError
+        self._observe_speech(text, owner)
+        await session.feed(text)
 
     def chime(self, *, owner=None):
         if self._dnd_muted():

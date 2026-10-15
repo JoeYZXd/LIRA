@@ -160,3 +160,70 @@ async def test_retry_checks_privacy_again():
     with pytest.raises(PrivacyBlocked):
         await retry_remote(operation,privacy)
     assert len(calls)==1
+
+
+# ---------- U3/KTD7 观察旁路（on_delta） ----------
+
+
+class ChunkStream:
+    """流式最终回复替身（test_stream_answer.Stream 同构）。"""
+    closed=False
+    def __init__(self, chunks):
+        self._chunks=list(chunks)
+    def __aiter__(self):
+        return self
+    async def __anext__(self):
+        if not self._chunks:
+            raise StopAsyncIteration
+        return SimpleNamespace(choices=[SimpleNamespace(
+            delta=SimpleNamespace(content=self._chunks.pop(0)))])
+    async def close(self):
+        self.closed=True
+
+
+class StreamFake(Fake):
+    """Fake 基础上支持 stream=True 的最终回复（voice 路径 stream_answer）。"""
+    def __init__(self, messages, stream_chunks):
+        super().__init__(messages)
+        self._stream_chunks=list(stream_chunks)
+    async def create(self, **kwargs):
+        self.requests.append(kwargs)
+        if kwargs.get('stream'):
+            return ChunkStream(self._stream_chunks)
+        return SimpleNamespace(choices=[SimpleNamespace(message=next(self.messages))])
+
+
+async def test_voice_search_final_stream_reports_deltas():
+    """最终流式播报阶段：每个非空内容增量恰好观察一次，分句不受影响。"""
+    sdk=StreamFake([Message(calls=[call()]), Message('不进观察通道')],
+                   ['明天','有雨，','带伞。'])
+    sentences,deltas=[],[]
+    answer=await run_search_agent(sdk,'kimi-k2.6',
+        [{'role':'user','content':'上海明天天气怎么样？'}], lambda: None,
+        voice=True, on_sentence=sentences.append, on_delta=deltas.append,
+        on_progress=lambda m: None)
+    assert answer=='明天有雨，带伞。'
+    assert deltas==['明天','有雨，','带伞。']
+    assert ''.join(sentences)==answer          # 分句次数与内容零变化
+
+
+async def test_planning_hidden_reasoning_never_enters_delta_channel():
+    """planning/工具循环的隐藏内容（ANSWER 标记、检索过程）不进观察通道：
+    on_delta 只收最终 stream_answer 的用户可见增量。"""
+    sdk=StreamFake([Message('ANSWER')], ['直接','回答。'])
+    deltas=[]
+    answer=await run_search_agent(sdk,'kimi-k2.6',[], lambda: None,
+        voice=True, on_sentence=lambda s: None, on_delta=deltas.append)
+    assert answer=='直接回答。'
+    assert deltas==['直接','回答。']
+    assert all('ANSWER' not in d for d in deltas)
+
+
+async def test_on_delta_defaults_to_none_and_changes_nothing():
+    sdk=StreamFake([Message('你好')], ['不用流式'])
+    sentences=[]
+    answer=await run_search_agent(sdk,'kimi-k2.6',[], lambda: None,
+        voice=True, on_sentence=sentences.append)
+    assert answer=='不用流式'
+    assert sentences==['不用流式']   # 不传 on_delta 时 stream_answer 行为照旧
+    assert not sdk.searches

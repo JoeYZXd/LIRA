@@ -1391,3 +1391,191 @@ class TestReviewFixes(TestDndEscapeHatch):
         await sm.on_asr_text("声音大点")
         await sm.on_asr_text("再说一遍")
         assert rec.spoken[-1] == pb.HELP_TEXT, "重报真实回答而非「好的」"
+
+
+# ---------- U3/KTD3：utterance→turn→operation 同轮观测 ----------
+
+
+def _tel_events(tel, kind=None):
+    items = tel.events_since(0)[0]
+    return [e for e in items if kind is None or e.kind == kind]
+
+
+class TestTurnTelemetry:
+    """遥测旁路事件：轮次分配、实际路由、播报结束与静默忽略边界。
+
+    断言走 DevTelemetry 公开 add_event/events_since 面（KTD3：事件带
+    turn_id/utterance_id/operation_owner 关联字段，U5 前端按它渲染）。
+    """
+
+    async def _listening_engine(self, router_kwargs=None):
+        from lira.dev_telemetry import DevTelemetry
+        rec = Recorder()
+        sm = build_engine(rec, **(router_kwargs or {}))
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        await enter_state(sm, rec, State.LISTENING)
+        base = len(_tel_events(tel, "turn"))  # 唤醒本身不产生轮次
+        assert base == 0
+        return sm, rec, tel
+
+    async def test_local_appliance_has_turn_route_and_no_model_events(self):
+        """AE3：本地家电指令——turn+route(LOCAL_RULE) 事件齐全，远程 handler
+        全程未被触碰（无模型等待/回复事件）。"""
+        sm, rec, tel = await self._listening_engine(
+            {"remote_llm": self._recording_remote()[0], "remote_available": lambda: True})
+        await sm.on_asr_text("打开台灯", utterance_id=7)
+        assert rec.ir == [("台灯", "打开")]
+        kinds = [e.kind for e in _tel_events(tel)]
+        assert kinds == ["turn", "route"]
+        turn = _tel_events(tel, "turn")[0]
+        assert turn.text == "打开台灯"
+        assert turn.turn_id == 1 and turn.utterance_id == 7
+        assert turn.operation_owner == "1.1"  # wake 会话 owner（epoch.operation）
+        route = _tel_events(tel, "route")[0]
+        assert route.text == "local_rule" and route.turn_id == turn.turn_id
+
+    @staticmethod
+    def _recording_remote():
+        calls = []
+
+        async def remote(text, **kwargs):
+            calls.append(text)
+            return "模型回复"
+
+        return remote, calls
+
+    async def test_remote_reply_route_event_and_owner_progression(self):
+        """普通模型路径：route 事件记 remote_llm；turn 关联接受时的 owner。"""
+        remote, calls = self._recording_remote()
+        sm, rec, tel = await self._listening_engine(
+            {"remote_llm": remote, "remote_available": lambda: True})
+        await sm.on_asr_text("复杂问题")
+        assert calls == ["复杂问题"]
+        assert _tel_events(tel, "route")[0].text == "remote_llm"
+        assert [e.text for e in _tel_events(tel, "turn")] == ["复杂问题"]
+
+    async def test_standby_and_reading_whitelist_miss_emit_no_turn(self):
+        """静默忽略不分配轮次：STANDBY 未唤醒文本、READING 白名单外文本
+        均无 turn 事件；白名单命中才分配。"""
+        from lira.dev_telemetry import DevTelemetry
+        rec = Recorder()
+        sm = build_engine(rec)
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        await sm.on_asr_text("打开电视")  # STANDBY：未唤醒，忽略
+        assert _tel_events(tel, "turn") == []
+        await enter_state(sm, rec, State.READING)
+        baseline = _tel_events(tel, "turn")  # 进入 READING 的设置语句已计一轮
+        assert [e.text for e in baseline] == ["帮我读一下这个"]
+        await sm.on_asr_text("把空调调到26度")  # 白名单外：朗读内容不进意图通道
+        assert _tel_events(tel, "turn") == baseline  # 未新增轮次
+        await sm.on_asr_text("暂停")  # 白名单命中：接受并分配轮次
+        assert [e.text for e in _tel_events(tel, "turn")] == [
+            "帮我读一下这个", "暂停"]
+        assert len(_tel_events(tel, "route")) == 1  # 播放控制不重新路由
+
+    async def test_cancel_word_is_accepted_turn_without_route(self):
+        from lira.dev_telemetry import DevTelemetry
+        rec = Recorder()
+        sm = build_engine(rec)
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("取消")
+        assert sm.state is State.STANDBY
+        assert [e.kind for e in _tel_events(tel)] == ["turn"]
+
+    async def test_speak_done_binds_turn_and_owner(self):
+        rec = Recorder()
+        sm = build_engine(rec)
+        from lira.dev_telemetry import DevTelemetry
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")  # HELP → _speak_answer → 同步完成
+        turn = _tel_events(tel, "turn")[0]
+        done = _tel_events(tel, "speak_done")[0]
+        assert done.turn_id == turn.turn_id
+        assert done.utterance_id == turn.utterance_id
+        assert done.operation_owner is not None
+        assert done.text  # 回答预览非空
+
+    async def test_playback_failure_emits_speak_interrupt(self):
+        from types import SimpleNamespace
+        from lira.dev_telemetry import DevTelemetry
+
+        class FailingSpeak(Recorder):
+            def speak(self, text):
+                self.spoken.append(text)
+                return SimpleNamespace(status="failed", is_set=lambda: True)
+
+        rec = FailingSpeak()
+        sm = build_engine(rec)
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么")
+        turn = _tel_events(tel, "turn")[0]
+        interrupt = _tel_events(tel, "speak_interrupt")[0]
+        assert interrupt.turn_id == turn.turn_id  # 归因到本轮，不漂移
+
+    async def test_identity_intercept_correlates_utterance_without_turn(self):
+        """身份拦截路径（main.handle_voice_input）：不分配 turn，播报结束事件
+        只按 utterance/owner 追溯——且不误挂上一语句的轮次。"""
+        rec = Recorder()
+        sm = build_engine(rec)
+        from lira.dev_telemetry import DevTelemetry
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        await enter_state(sm, rec, State.LISTENING)
+        await sm.on_asr_text("你能做什么", utterance_id=3)  # 正常轮
+        turn1 = _tel_events(tel, "turn")[0].turn_id
+        # 下一语句被身份拦截消费（同构 main.py 调用序）
+        sm.note_utterance(9)
+        sm._speak_answer("好，以前的聊天记忆已经清掉了。", owner=sm.owner,
+                         user_text="忘记我的记忆", record=False)
+        done = _tel_events(tel, "speak_done")[-1]
+        assert done.utterance_id == 9
+        assert done.turn_id is None  # 不挂到上一轮（turn1）
+        assert _tel_events(tel, "turn")[0].turn_id == turn1  # 未新增轮次
+
+    async def test_old_owner_speak_done_never_pollutes_next_turn(self):
+        """连续两轮：旧 owner 的播报在新会话接管后完成，不落结束事件、
+        不污染第二轮（第二轮 speak_done 只归因自己的 turn）。"""
+        from types import SimpleNamespace
+        from lira.dev_telemetry import DevTelemetry
+
+        class SlowSpeak(Recorder):
+            def __init__(self):
+                super().__init__()
+                self.gate = asyncio.Event()
+
+            def speak(self, text):
+                self.spoken.append(text)
+                self.gate = asyncio.Event()
+                return SimpleNamespace(status="success", is_set=self.gate.is_set,
+                                       wait=self.gate.wait)
+
+        rec = SlowSpeak()
+        sm = build_engine(rec)
+        tel = DevTelemetry()
+        sm.telemetry = tel
+        sm.tick(T0)
+        await sm.on_wake()
+        await sm.on_asr_text("你能做什么")  # 第一轮：播报挂起（completion 未定）
+        assert sm.state is State.SPEAKING
+        assert _tel_events(tel, "speak_done") == []
+        turn1 = _tel_events(tel, "turn")[0].turn_id
+        await sm.on_wake()  # 新会话接管：旧 owner 失效，完成等待被取消
+        rec.gate.set()  # 旧播报此刻才完成
+        await asyncio.sleep(0.01)
+        assert _tel_events(tel, "speak_done") == []  # 旧 owner 不落结束事件
+        await sm.on_asr_text("你能做什么")  # 第二轮
+        turn2 = _tel_events(tel, "turn")[-1].turn_id
+        assert turn2 != turn1
+        rec.gate.set()  # 第二轮播报完成
+        await asyncio.sleep(0.01)
+        dones = _tel_events(tel, "speak_done")
+        assert [e.turn_id for e in dones] == [turn2]
+        assert [e.turn_id for e in _tel_events(tel, "turn")] == [turn1, turn2]

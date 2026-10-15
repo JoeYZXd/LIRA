@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 from collections import deque
+import logging
 import numpy as np
 
 from lira.audio.activity import SpeechActivity
+from lira.dialog.callbacks import invoke_callback
 from lira.dialog.intents import COMMAND_KWS_WORDS
 from lira.dialog.state_machine import AudioRoute, State
 from lira.voice_log import VOICE_LOG
@@ -54,6 +56,9 @@ class RouteDispatch:
         self._audio_clipped = 0
         self._asr_gate_reason = None
         self._identity_audio = deque(maxlen=100)
+        #: utterance 单调计数（U3/KTD3）：每次真实投递分配；跨代次不复位，
+        #: 与 turn 的映射由引擎在接受语句处建立
+        self._utterance_id = 0
 
     @property
     def generation(self):
@@ -170,10 +175,28 @@ class RouteDispatch:
                 VOICE_LOG.log("asr", "ASR 句末结果为空，未投递指令")
                 self._event("on_empty_endpoint")
 
-    def _deliver(self, text, *, wake_prefixed=None, voice_samples=None):
+    def _next_utterance_id(self) -> int:
+        self._utterance_id += 1
+        return self._utterance_id
+
+    def _emit_event(self, kind: str, text: str, **fields) -> None:
+        """遥测旁路发射（U3）：未装配即 no-op；异常只留痕不进主链路。"""
+        telemetry = getattr(self._streams, "telemetry", None)
+        if telemetry is None:
+            return
+        try:
+            telemetry.add_event(kind, text, **fields)
+        except Exception:
+            logging.debug("dispatch event=telemetry_emit_failed kind=%s", kind,
+                          exc_info=True)
+
+    def _deliver(self, text, *, wake_prefixed=None, voice_samples=None, source="asr"):
         """投递一句话文本。wake_prefixed=None（ASR 通道）时消费一次唤醒前缀
         标记——唤醒命中后的首条投递视为带前缀（「小丽拉立即去休息」）；
         KWS 通道（播放白名单/命令）显式传 False（命中词与唤醒无关，不得误耗标记）。
+
+        source：投递来源标签（U3 utterance 事件文案前缀；ASR 句末不加前缀，
+        命令/播放通道与既有 VOICE_LOG 文案同款区分度）。
         """
         generation = self._generation
         from_asr = wake_prefixed is None
@@ -183,18 +206,27 @@ class RouteDispatch:
             wake_prefixed = (self._wake_prefix_pending
                              and self._next_sample < self._wake_prefix_until)
             self._wake_prefix_pending = False
+        # U3/KTD3：真实投递即分配 utterance；事件在代次门通过后落盘——
+        # 过期代次的投递被丢弃，天然无 turn（新轮次不接受旧事件）
+        utterance_id = self._next_utterance_id()
+        utterance_text = text if source == "asr" else f"{source}：{text}"
         async def deliver():
             if generation != self._generation:
                 return
+            self._emit_event("utterance", utterance_text,
+                             capture_generation=generation,
+                             utterance_id=utterance_id)
             engine = self._streams.engine
             handler=getattr(self._streams,"handle_voice_input",None)
             if from_asr and handler is not None and getattr(self._streams,"speaker_identity",None) is not None:
-                await handler(text,voice_samples if voice_samples is not None else np.empty(0,np.float32),generation,wake_prefixed)
+                await handler(text,voice_samples if voice_samples is not None else np.empty(0,np.float32),generation,wake_prefixed,utterance_id)
                 return
             if hasattr(engine, "listening_generation"):
-                # U2 起引擎签名带 wake_prefixed（与 listening_generation 门同批判定）
-                await engine.on_asr_text(text, generation=generation,
-                                         wake_prefixed=wake_prefixed)
+                # U2 起引擎签名带 wake_prefixed（与 listening_generation 门同批判定）；
+                # utterance_id 经 invoke_callback 按签名过滤（无此参的旧替身不受影响）
+                await invoke_callback(engine.on_asr_text, text, generation=generation,
+                                      wake_prefixed=wake_prefixed,
+                                      utterance_id=utterance_id)
             else:
                 await engine.on_asr_text(text)
         self._spawn(deliver())
@@ -305,7 +337,7 @@ class RouteDispatch:
                     word = next((w for w in COMMAND_KWS_WORDS if w in cmd_hit), None)
                     if word is not None:
                         VOICE_LOG.log("command", f"命令通道命中：{word}")
-                        self._deliver(word, wake_prefixed=False)
+                        self._deliver(word, wake_prefixed=False, source="命令通道")
         if route is AudioRoute.LISTEN and not self._wake_pending:
             reason = ("播报占用" if occupied else "播报结束后的回声吞弃窗"
                       if start < self._discard_until else "当前状态不接收 ASR"
@@ -326,4 +358,4 @@ class RouteDispatch:
             if hit:
                 word = hit.split("@")[-1].strip()
                 VOICE_LOG.log("playback", f"播放控制语音：{word}")
-                self._deliver(word, wake_prefixed=False)
+                self._deliver(word, wake_prefixed=False, source="播放控制")

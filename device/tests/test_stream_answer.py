@@ -55,3 +55,37 @@ async def test_streamed_reply_is_not_spoken_again_by_dialog():
     await engine.on_asr_text('天气怎么样')
     assert recorder.spoken.count('今天最高二十度。')==1
     assert '今天最高二十度。出门记得带伞。' not in recorder.spoken
+
+async def test_on_delta_observes_every_chunk_without_changing_sentences():
+    """U3/KTD7：on_delta 是纯旁路——观察到全部非空增量，分句（on_sentence）
+    次数与内容与不加观测时完全一致。"""
+    CHUNKS = ['哦，','查到了。','今天最高二十度，最低十二度。','出门记得带伞。']
+
+    def make_sdk():
+        class Stream:
+            closed=False
+            def __aiter__(self):
+                return self.iterate()
+            async def iterate(self):
+                for text in CHUNKS:
+                    yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text))])
+                assert seen
+            async def close(self):
+                self.closed=True
+        seen=[]
+        async def create(**kwargs):
+            return Stream()
+        sdk=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        return sdk,seen
+
+    sdk_a,seen_plain=make_sdk()
+    text_plain=await stream_answer(sdk_a,{},lambda:None,seen_plain.append)
+
+    sdk_b,seen_obs=make_sdk()
+    deltas=[]
+    text_obs=await stream_answer(sdk_b,{},lambda:None,seen_obs.append,deltas.append)
+
+    assert seen_obs==seen_plain                      # 分句零变化
+    assert text_plain==text_obs
+    assert deltas==CHUNKS                            # 每个非空增量恰好观察一次
+    assert ''.join(deltas)==text_obs

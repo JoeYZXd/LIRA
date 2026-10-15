@@ -49,7 +49,7 @@ from lira.dialog.intents import COMMANDS_KEYWORDS_FILE, PLAYBACK_WHITELIST_KEYWO
 from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
-from lira.dev_telemetry import DevTelemetry
+from lira.dev_telemetry import DevTelemetry, owner_text
 from lira.hal.base import HalError
 from lira.llm.breaker import BreakerState
 from lira.hal.mock import (
@@ -449,7 +449,18 @@ class DeviceCallbacks:
         self._rt.recent_speaks.append(text)
         # 语音交互日志（内存展示区，可含话术片段；logging 行纪律不变）
         preview = text if len(text) <= 40 else text[:40] + "…"
-        VOICE_LOG.log("speak", f"语音输出中（{len(text)} 字）：{preview}")
+        speak_line = f"语音输出中（{len(text)} 字）：{preview}"
+        VOICE_LOG.log("speak", speak_line)
+        # 播报开始观察事件（U3/KTD3）：与 VOICE_LOG 预览同位同文案，补 owner
+        # 关联（镜像事件不带 owner）；发射异常不影响出声主链路
+        telemetry = getattr(self._rt, "telemetry", None)
+        if telemetry is not None:
+            try:
+                telemetry.add_event("speak", speak_line,
+                                    operation_owner=owner_text(owner))
+            except Exception:
+                logging.debug("main event=telemetry_emit_failed kind=speak",
+                              exc_info=True)
         tts = self._rt.tts
         if tts is None:
             # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
@@ -724,8 +735,13 @@ class DeviceRuntime:
         # RouteDispatch.feed 经 getattr(streams, "telemetry") 取用，先于装配。
         self.telemetry = DevTelemetry()
         VOICE_LOG.register_sink(self.telemetry)
+        # 模型显示观察器装配（U3/KTD7）：仿 llm.memory= 惯例运行时注入；
+        # llm 可能为注入替身——setattr 不限类型（鸭子类型，无属性即新增）
+        llm.telemetry = self.telemetry
 
         self.engine = self._build_engine(llm)
+        # 轮次/播报观察事件装配（U3/KTD3）：engine 同款鸭子类型注入
+        self.engine.telemetry = self.telemetry
         self.engine.tick(self._clock())
         self.pipeline = ReadingPipeline(
             hal["camera"],
@@ -765,10 +781,10 @@ class DeviceRuntime:
             wake_allowed=lambda: not self.privacy.is_on,
         )
 
-    async def handle_voice_input(self,text,samples,generation,wake_prefixed):
+    async def handle_voice_input(self,text,samples,generation,wake_prefixed,utterance_id=None):
         from lira.dialog.state_machine import State
         if self.speaker_identity is None or self.engine.state not in (State.LISTENING,State.FOLLOWUP):
-            return await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed)
+            return await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed,utterance_id=utterance_id)
         vector=await asyncio.to_thread(self.speaker_identity.embedding,samples)
         if self.privacy.is_on or generation!=self.dispatcher.generation or self.engine.state not in (State.LISTENING,State.FOLLOWUP):return
         previous_pending=getattr(self.speaker_identity,'pending',None)
@@ -779,15 +795,20 @@ class DeviceRuntime:
         if member is None and notice in ('我们好像还没认识过，你希望我怎么称呼你呀？','你希望我怎么称呼你呀？'):
             # Answer the real request now. Naming is an optional conversational follow-up.
             if self.speaker_identity.pending is not None:self.speaker_identity.pending['text']=None
-            await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed)
+            await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed,utterance_id=utterance_id)
             return
         if member is not None and text.strip() in ('忘记我的记忆','清除我的记忆','删除我的记忆'):
+            # 身份拦截路径不经 on_asr_text 分发、不分配 turn（U3）：只关联
+            # utterance，使本语句的播报结束事件可按 utterance/owner 追溯
+            self.engine.note_utterance(utterance_id)
             self.personal_memory.forget(member)
             self.engine._history.clear()
             self.engine._speak_answer('好，以前的聊天记忆已经清掉了。',owner=self.engine._owner,user_text=text,record=False)
             return
         if notice:
             # This is conversational speech through the ordinary owner/cancel path.
+            # 同上：utterance 级关联（不分配 turn）
+            self.engine.note_utterance(utterance_id)
             owner=self.engine._owner
             self.engine._speak_answer(notice,owner=self.engine._owner,user_text=text,record=False)
             if replay:
@@ -797,7 +818,7 @@ class DeviceRuntime:
                 if not self.engine.is_current(owner) or self.privacy.is_on:return
                 await self.engine.on_asr_text(replay,wake_prefixed=False)
             return
-        await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed)
+        await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed,utterance_id=utterance_id)
 
     def clear_voice_identity(self, enabled):
         if enabled:

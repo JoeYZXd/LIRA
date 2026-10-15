@@ -437,3 +437,223 @@ class TestRemoteHandlerAdapter:
         assert await handler("复杂问题") is None  # 异常不外抛，路由层只见 None
         assert client.breaker.state is BreakerState.CLOSED  # 1 次失败未达阈值 3
         assert await handler("复杂问题") == "好的"
+
+
+# ---------- 模型显示观察器（U3/KTD7） ----------
+
+
+def _events(tel, kind=None):
+    items = tel.events_since(0)[0]
+    return [e for e in items if kind is None or e.kind == kind]
+
+
+def _delta(text: str):
+    from types import SimpleNamespace
+    return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=text))])
+
+
+class TestModelObservation:
+    async def test_stream_path_emits_request_first_delta_done(self):
+        from lira.dev_telemetry import DevTelemetry
+        fake = FakeRemote(ok_response("你好", "，", "世界"))
+        client = make_client(fake)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        assert await client.chat("打个招呼", turn=3) == "你好，世界"
+        assert [e.kind for e in _events(tel)] == [
+            "llm_request", "llm_first_delta", "llm_done"]
+        req = _events(tel, "llm_request")[0]
+        assert "path=stream" in req.text and "chars=" in req.text
+        assert "打个招呼" not in req.text  # 请求内容不重复进事件
+        assert _events(tel, "llm_first_delta")[0].text == "你好"
+        assert _events(tel, "llm_done")[0].text == "你好，世界"
+        assert all(e.turn_id == 3 for e in _events(tel))  # 事件绑定调用轮次
+
+    async def test_turn_is_none_when_call_has_no_turn_token(self):
+        from lira.dev_telemetry import DevTelemetry
+        fake = FakeRemote(ok_response("好的"))
+        client = make_client(fake)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        await client.chat("阅读白话")  # 无 turn（如 polisher 路径）
+        assert all(e.turn_id is None for e in _events(tel))
+
+    async def test_default_no_telemetry_is_zero_overhead(self):
+        fake = FakeRemote(ok_response("好"))
+        client = make_client(fake)
+        assert client.telemetry is None  # 未装配 = 零事件零开销
+        assert await client.chat("测试") == "好"
+
+    async def test_text_chat_voice_log_false_emits_no_events(self):
+        """KTD7：voice_log=False（首页文字聊天）零观察事件——复用既有旗标。"""
+        from lira.dev_telemetry import DevTelemetry
+        fake = FakeRemote(ok_response("回复"))
+        client = make_client(fake)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        assert await client.chat("首页文字聊天", voice_log=False, turn=9) == "回复"
+        assert _events(tel) == []
+
+    async def test_privacy_blocked_call_has_no_events(self):
+        from lira.dev_telemetry import DevTelemetry
+        fake = FakeRemote(ok_response("不应到达"))
+        client = make_client(fake, privacy=lambda: True)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        with pytest.raises(PrivacyBlocked):
+            await client.chat("读一下")
+        assert _events(tel) == []  # 入口拦截在观察之前：无请求事件
+
+    async def test_late_completion_keeps_its_own_turn(self):
+        """迟到隔离（AE3）：第一轮挂起期间第二轮完成，事件按调用绑定归因。"""
+        import asyncio
+        from types import SimpleNamespace
+        from lira.dev_telemetry import DevTelemetry
+
+        entered = asyncio.Event()
+        release = asyncio.Event()
+
+        class GatedStream:
+            closed = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not entered.is_set():
+                    entered.set()
+                    return _delta("迟")
+                if not release.is_set():
+                    await release.wait()  # 第一轮迟到：卡在第二增量
+                raise StopAsyncIteration
+
+            async def close(self):
+                self.closed = True
+
+        class FastStream:
+            closed = False
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                if not hasattr(self, "_done"):
+                    self._done = True
+                    return _delta("新")
+                raise StopAsyncIteration
+
+            async def close(self):
+                self.closed = True
+
+        streams = [GatedStream(), FastStream()]
+
+        async def create(**kwargs):
+            return streams.pop(0)
+
+        sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        client = LlmClient(make_llm_cfg(), openai_client=sdk)
+        tel = DevTelemetry()
+        client.telemetry = tel
+
+        late = asyncio.create_task(client.chat("第一轮", turn=1))
+        await entered.wait()
+        assert await client.chat("第二轮", turn=2) == "新"  # 第二轮先完成
+        release.set()
+        assert await late == "迟"
+        assert [(e.turn_id, e.text) for e in _events(tel, "llm_first_delta")] == [
+            (1, "迟"), (2, "新")]
+        assert [(e.turn_id, e.text) for e in _events(tel, "llm_done")] == [
+            (2, "新"), (1, "迟")]
+        assert [e.turn_id for e in _events(tel, "llm_request")] == [1, 2]
+
+    @pytest.mark.parametrize("phase", ["first_token", "iteration"])
+    async def test_cancel_emits_event_and_stream_still_closed(self, phase):
+        from types import SimpleNamespace
+        from lira.dev_telemetry import DevTelemetry
+        entered = asyncio.Event()
+
+        class Stream:
+            closed = False
+            calls = 0
+
+            def __aiter__(self):
+                return self
+
+            async def __anext__(self):
+                self.calls += 1
+                if phase == "iteration" and self.calls == 1:
+                    return SimpleNamespace(choices=[])
+                entered.set()
+                await asyncio.Event().wait()
+
+            async def close(self):
+                self.closed = True
+
+        stream = Stream()
+
+        async def create(**kwargs):
+            return stream
+
+        sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+        client = LlmClient(make_llm_cfg(), openai_client=sdk)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        task = asyncio.create_task(client.chat("问题", turn=6))
+        await entered.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert stream.closed  # 取消仍关闭 SDK 流（既有取消语义不变）
+        cancels = _events(tel, "llm_cancel")
+        assert len(cancels) == 1 and cancels[0].turn_id == 6
+        assert _events(tel, "llm_request")  # 发起事件已落
+
+    async def test_fail_events_carry_category_only(self):
+        from lira.dev_telemetry import DevTelemetry
+        tel = DevTelemetry()
+        fake = FakeRemote(server_error)
+        client = make_client(fake)
+        client.telemetry = tel
+        with pytest.raises(LlmError):
+            await client.chat("绝密内容", turn=4)
+        fails = _events(tel, "llm_fail")
+        assert [e.text for e in fails] == ["http_500"]
+        assert all(e.turn_id == 4 for e in fails)
+        assert "绝密内容" not in fails[0].text  # 只记错误类别，不含内容
+
+        tel2 = DevTelemetry()
+        client2 = make_client(FakeRemote(connect_error))
+        client2.telemetry = tel2
+        with pytest.raises(LlmError):
+            await client2.chat("x")
+        assert [e.text for e in _events(tel2, "llm_fail")] == ["connection"]
+
+    async def test_text_snapshots_are_cumulative_and_bounded(self):
+        """llm_text 携带累计快照（非增量），节奏有界；llm_done 与返回一致。"""
+        from lira.dev_telemetry import DevTelemetry
+        chunks = ["字" * 150] * 5
+        fake = FakeRemote(ok_response(*chunks))
+        client = make_client(fake)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        text = await client.chat("长回复")
+        assert text == "字" * 750
+        snapshots = [e.text for e in _events(tel, "llm_text")]
+        assert snapshots
+        prev = ""
+        for snap in snapshots:  # 累计快照：互为前缀且单调变长，可幂等追赶
+            assert snap.startswith(prev) and len(snap) > len(prev)
+            prev = snap
+        assert snapshots[-1] == text  # 末次快照即完整回复
+        assert _events(tel, "llm_done")[0].text == text
+
+    async def test_oversized_reply_truncated_with_note(self):
+        from lira.dev_telemetry import DevTelemetry
+        fake = FakeRemote(ok_response(*["x" * 1000] * 6))
+        client = make_client(fake)
+        tel = DevTelemetry()
+        client.telemetry = tel
+        assert await client.chat("超长回复") == "x" * 6000
+        done = _events(tel, "llm_done")[0].text
+        assert done.startswith("x" * 4000)
+        assert "截断" in done and "6000" in done  # 截断并注明总长

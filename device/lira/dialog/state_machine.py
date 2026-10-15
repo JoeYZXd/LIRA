@@ -49,6 +49,7 @@ from lira.dialog.intents import (
 )
 from lira.dialog.context import StatusFacts
 from lira.dialog.router import Router, RouterTier
+from lira.dev_telemetry import owner_text
 from lira.voice_log import VOICE_LOG
 
 __all__ = ["State", "AudioRoute", "DialogCallbacks", "DialogEngine", "OperationOwner"]
@@ -248,6 +249,15 @@ class DialogEngine:
         self._confirmed_ir: tuple[OperationOwner, str, str] | None = None
         self._effect_tasks: set[asyncio.Task] = set()
         self._last_completion = None
+        #: 结构化遥测（U3/KTD3）：运行时装配 `engine.telemetry = ...`（鸭子类型，
+        #: 仿 llm.memory= 惯例）；默认 None = 零事件零开销，纯旁路。
+        self.telemetry = None
+        #: 轮次与语句关联：turn 单调计数（语句被接受处分配，见 _accept_turn）；
+        #: utterance_id 由投递方随文本携带；_turn_open 是"当前语句绑定的轮次"
+        #: （_speak_answer 结束事件按此归因，身份拦截路径为 None）
+        self._turn_id = 0
+        self._utterance_id: int | None = None
+        self._turn_open: int | None = None
         self._transition(State.STANDBY, initial=True)
 
     # ---------- 事件入口 ----------
@@ -398,15 +408,19 @@ class DialogEngine:
         self._enter_standby()
 
     async def on_asr_text(self, text: str, *, generation: int | None = None,
-                          wake_prefixed: bool = False) -> None:
+                          wake_prefixed: bool = False,
+                          utterance_id: int | None = None) -> None:
         """ASR 一句话文本（编排器在 endpoint 命中后调用）。按状态分发。
 
         wake_prefixed：投递前是否命中过唤醒词（route_dispatch 前缀标记）。
         U4 真关机分支仅在前缀投递时提交（origin R4）；其余分支忽略该标记。
+        utterance_id：投递方随文本携带的语句标识（U3/KTD3）——仅在被接受的
+        语句落 turn 事件时关联，被代次门拒绝或静默忽略的文本不产生轮次。
         """
         t = text.strip()
         if not t:
             return
+        self._utterance_id = utterance_id
         if not self._input_current(generation):
             if self.dnd and self.state is State.STANDBY:
                 # 聆听再武装点（R9 可达性）：隐私恢复/麦克风重连等 clear 路径会推
@@ -418,6 +432,7 @@ class DialogEngine:
         # R10 逃生舱应答优先（仅在勿扰中被置位、_enter_standby 清空——
         # 先于一切全局意图， escape 期间的应答不被词表劫持）
         if self._dnd_escape is not None:
+            self._accept_turn(t)
             self._handle_escape_answer(t)
             return
         # R1/R6 态前统一退出分支：取消词 + 结束聊天 + 统一退出∪喊停词集
@@ -429,6 +444,7 @@ class DialogEngine:
         if self.state is not State.STANDBY and (
             is_cancel(t) or t == "结束聊天" or is_exit_or_stop(t)
         ):
+            self._accept_turn(t)
             if self.state is State.READING:
                 if t == "结束聊天":
                     self._cb.playback_pause()
@@ -440,29 +456,34 @@ class DialogEngine:
         # 进入零提示音；询问/自查应答统一经 _answer_gated（勿扰走豁免通道）。
         verdict = match_dnd_phrase(t)
         if verdict == "enter":
+            self._accept_turn(t)
             self._enter_dnd()
             return
         if verdict == "query":
+            self._accept_turn(t)
             self._answer_gated(pb.DND_STATUS_ON if self.dnd else pb.DND_STATUS_OFF,
                                user_text=t)
             return
         if verdict == "exit" and self.dnd:
+            self._accept_turn(t)
             self.dnd = False
             self._enter_standby()  # 回正常待机（路由回 WAKE）
             self._speak(pb.DND_EXIT_ACK)
             return
         # R17：状态自查——勿扰内外皆可问（裁定 9：A2 电话排障依赖路径）。
         if is_status_query(t):
+            self._accept_turn(t)
             self._answer_gated(pb.status_report_text(self._get_status_facts()), user_text=t)
             return
         self._speech_active = self._awaiting_endpoint = False
         # R4：真关机仅唤醒前缀投递提交（裸说「立即去休息」按普通指令处理，
         # 落识别失败引导）；前缀标记由 route_dispatch 随投递携带
         if wake_prefixed and is_shutdown_phrase(t):
+            self._accept_turn(t)
             self._shutdown()
             return
         # R8/R10：勿扰中普通文本 → 计数（逃生舱）且忽略不出声
-        # （勿扰短语/关机已在上方处理）
+        # （勿扰短语/关机已在上方处理；静默忽略不分配轮次）
         if self.dnd:
             self._note_dnd_command(t)
             return
@@ -478,6 +499,9 @@ class DialogEngine:
             State.EXECUTING: self._on_asr_ignored,
             State.CAPTURING: self._on_asr_capturing,
         }[self.state]
+        # 轮次分配（U3/KTD3）在各 handler 的接受分支内完成：静默忽略分支
+        # （STANDBY/PROCESSING/SPEAKING/EXECUTING 忽略、READING 白名单外、
+        # CAPTURING 非取消）不经过 _accept_turn，无关文本不产生新轮
         await handler(t)
 
     async def on_capture_done(self, success: bool, *, owner: object = None) -> None:
@@ -509,6 +533,42 @@ class DialogEngine:
         """朗读自然结束（全部块读完，R22）→ 回待机。"""
         if self.state is State.READING and (owner is None or self.is_current(owner)):
             self._enter_standby()
+
+    # ---------- 遥测旁路（U3/KTD3：utterance→turn→operation 映射） ----------
+
+    def _emit_event(self, kind: str, text: str, **fields) -> None:
+        """遥测事件发射：未装配 telemetry 即 no-op；异常吞并只留 debug 痕——
+        观察是纯旁路，绝不影响对话主链路。"""
+        if self.telemetry is None:
+            return
+        try:
+            self.telemetry.add_event(kind, text, **fields)
+        except Exception:
+            logging.debug("dialog event=telemetry_emit_failed kind=%s", kind,
+                          exc_info=True)
+
+    def _accept_turn(self, text: str) -> int:
+        """语句被接受处分配轮次并落 turn 事件（KTD3）。
+
+        被输入代次门拒绝或被静默忽略的文本不经过此点——迟到文本不产生新轮。
+        一次 turn 可关联多个 operation（owner 只是事件上下文，绝不当 turn_id）；
+        返回值供同语句的 route 事件归因（handler 内局部捕获，不读全局态）。
+        """
+        self._turn_id += 1
+        self._turn_open = self._turn_id
+        owner = self._owner
+        self._emit_event("turn", text, turn_id=self._turn_id,
+                         utterance_id=self._utterance_id,
+                         operation_owner=owner_text(owner))
+        return self._turn_id
+
+    def note_utterance(self, utterance_id: int | None) -> None:
+        """身份拦截路径（main.handle_voice_input）的语句关联：该路径不经
+        on_asr_text 分发、不分配 turn（KTD3 允许只关联 utterance）——记下
+        当前 utterance 并清掉上一语句的轮次绑定，使该路径的播报结束事件
+        只按 utterance/owner 追溯，不误挂旧轮。"""
+        self._utterance_id = utterance_id
+        self._turn_open = None
 
     # ---------- ASR 分发 ----------
 
@@ -630,6 +690,9 @@ class DialogEngine:
         self._finish_command()
 
     async def _on_asr_listening(self, text: str) -> None:
+        # 语句被接受（U3/KTD3）：先分配轮次——本 handler 的全部分支都消费该
+        # 语句（重报/音量/取消/澄清/路由），此后 route 事件按此归因
+        turn_id = self._accept_turn(text)
         # R15：追问窗内「再说一遍」→ 原文重报上一条成功回答（不重新生成、
         # 不重复入史；引导话术不入史故重报对象恒为最近成功回答）。窗内不限次数，
         # 每次重报后重开追问窗。无历史成功回答 → 按普通指令路由。
@@ -682,7 +745,8 @@ class DialogEngine:
                 streamed.append(completion)
         try:
             result = await self._router.route(
-                text, context=context, on_wait_feedback=lambda message=None: self.speak_progress(owner, message or "我想一下啊。"), on_reply_chunk=reply_chunk)
+                text, context=context, turn=turn_id,
+                on_wait_feedback=lambda message=None: self.speak_progress(owner, message or "我想一下啊。"), on_reply_chunk=reply_chunk)
         except asyncio.CancelledError:
             return
         except Exception:
@@ -701,6 +765,8 @@ class DialogEngine:
                 self._route_task = None
         if not self.is_current(owner):
             return
+        # 实际路由结果（U3）：过期 owner 的迟到结果不落事件（不污染新轮次）
+        self._emit_event("route", result.tier.value, turn_id=turn_id)
         if result.tier is RouterTier.LOCAL_RULE and result.intent is not None:
             self._dispatch(result.intent)
         elif result.reply:
@@ -745,15 +811,19 @@ class DialogEngine:
         verdict = ("confirm" if answer in ("是", "是的", "对", "好", "好的", "读吧", "确认") else
                    "reject" if answer in ("不", "不是", "不要", "不对", "不用", "不是的") else None)
         if verdict == "confirm":
+            self._accept_turn(text)
             self._new_operation()
             self._dispatch(Intent(kind=IntentKind.READ, text="读这本书"))
         elif verdict == "reject":
+            self._accept_turn(text)
             self._new_operation()
             self._begin_listening(replay=False)
             self._arm(self.LISTEN_WINDOW_SECONDS)
         elif match_local(text, self._router.appliances) is not None:
+            # 家电指令转交聆听路径处理（turn 由 _on_asr_listening 分配，不双计）
             await self._on_asr_listening(text)
         else:
+            self._accept_turn(text)
             self._start_reading_clarification()
 
     async def _on_asr_confirming(self, text: str) -> None:
@@ -761,6 +831,8 @@ class DialogEngine:
         if self._pending.owner != self._owner:
             self._enter_standby()
             return
+        # 确认问答的每个应答都被消费（确认/拒绝/复述/取消），此处置分配轮次
+        self._accept_turn(text)
         if is_cancel(text):
             self._speak(pb.CONFIRM_CANCELLED)
             self._finish_command()
@@ -787,8 +859,10 @@ class DialogEngine:
                 self._finish_command()
 
     async def _on_asr_reading(self, text: str) -> None:
-        """READING 态：仅白名单精确命中进播放通道；其余一律忽略（R11/R21）。"""
+        """READING 态：仅白名单精确命中进播放通道；其余一律忽略（R11/R21，
+        静默忽略不分配轮次）。"""
         if is_cancel(text):
+            self._accept_turn(text)
             self._cb.playback_stop()
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()
@@ -796,6 +870,7 @@ class DialogEngine:
         if not is_playback_command(text):
             logging.debug("READING 态忽略白名单外文本（朗读内容不进意图通道）")
             return
+        self._accept_turn(text)
         self._playback_control(text)
         if text == "停止":
             self._enter_standby()
@@ -803,6 +878,7 @@ class DialogEngine:
     async def _on_asr_capturing(self, text: str) -> None:
         """拍摄中：仅响应全局取消（R20），其余忽略（拍摄引导由 U4 播报）。"""
         if is_cancel(text):
+            self._accept_turn(text)
             self._speak(pb.SESSION_CANCELLED)
             self._finish_command()
             return
@@ -1079,12 +1155,23 @@ class DialogEngine:
                       record: bool = True, streamed=None) -> None:
         self._transition(State.SPEAKING)
         self._disarm()
+        # 本语句绑定的轮次/语句关联在进入播报时捕获（U3）：身份拦截路径
+        # （note_utterance 置 _turn_open=None）只按 utterance/owner 追溯
+        answer_turn = self._turn_open
+        answer_utterance = self._utterance_id
         completion = streamed[-1] if streamed else self._speak(text)
         def finished():
             if not self.is_current(owner) or self.state is not State.SPEAKING:
                 return
-            if (completion is None or getattr(completion, "status", "success") == "success") and all(
-                    getattr(item, "status", "success") == "success" for item in (streamed or [])):
+            success = ((completion is None or getattr(completion, "status", "success") == "success")
+                       and all(getattr(item, "status", "success") == "success"
+                               for item in (streamed or [])))
+            # 播报结束事件（U3）：复用既有成功/失败判定分叉，不新增生命周期跟踪
+            self._emit_event("speak_done" if success else "speak_interrupt",
+                             text if len(text) <= 40 else text[:40] + "…",
+                             turn_id=answer_turn, utterance_id=answer_utterance,
+                             operation_owner=owner_text(owner))
+            if success:
                 if record:
                     self._history.record_completed(user_text, text)
                     remember=getattr(self._cb,"remember_turn",None)

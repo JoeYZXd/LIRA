@@ -67,8 +67,12 @@ async def retry_remote(operation, check_privacy):
             await asyncio.sleep(0.5)
 
 
-async def stream_answer(sdk, kwargs, check_privacy, on_sentence):
-    """Only final content is spoken; a partial stream is never retried or replayed."""
+async def stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta=None):
+    """Only final content is spoken; a partial stream is never retried or replayed.
+
+    on_delta（可选，U3/KTD7）：逐非空内容增量的只读观察旁路——纯回调，
+    不参与分句（on_sentence 逻辑原样），分句次数与不加观测时一致。
+    """
     kwargs = dict(kwargs, stream=True, tool_choice="none")
     started = time.monotonic()
     stream = await retry_remote(lambda: sdk.chat.completions.create(**kwargs), check_privacy)
@@ -82,6 +86,8 @@ async def stream_answer(sdk, kwargs, check_privacy, on_sentence):
             content = chunk.choices[0].delta.content
             if not content:
                 continue
+            if on_delta is not None:
+                on_delta(content)
             if first:
                 logging.info("llm event=first_token elapsed=%.3f", time.monotonic()-started)
                 first = False
@@ -109,7 +115,7 @@ async def stream_answer(sdk, kwargs, check_privacy, on_sentence):
         await stream.close()
 
 
-async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, on_progress=None, on_sentence=None):
+async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, on_progress=None, on_sentence=None, on_delta=None):
     now = datetime.now(ZoneInfo("Asia/Shanghai")).strftime("%Y-%m-%d %H:%M")
     messages = [{"role": "system", "content": POLICY + f" 当前北京时间：{now}。" +
                  ("这是语音回答。" if voice else "这是文字回答。")}, *messages]
@@ -138,7 +144,7 @@ async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, 
         if voice and on_sentence is not None and searches:
             if not sources:
                 return "这次没查到可靠的最新资料，暂时没法确认，你可以稍后再问我。"
-            return AgentReply(await stream_answer(sdk, kwargs, check_privacy, on_sentence),weather and bool(sources))
+            return AgentReply(await stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta),weather and bool(sources))
         planning_kwargs = kwargs
         if voice and on_sentence is not None:
             planning_kwargs = dict(kwargs, max_tokens=256, messages=protocol_messages([
@@ -152,7 +158,7 @@ async def run_search_agent(sdk, model, messages, check_privacy, *, voice: bool, 
             if searches and not sources:
                 return "这次联网搜索未获得可核实的资料，暂时无法确认实时信息，请稍后重试。"
             if voice and on_sentence is not None:
-                return AgentReply(await stream_answer(sdk, kwargs, check_privacy, on_sentence),weather and bool(sources))
+                return AgentReply(await stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta),weather and bool(sources))
             answer = message.content or "这次没有获得完整回答，请稍后重试。"
             if sources and not voice:
                 answer += "\n\n查询来源：\n" + "\n".join(

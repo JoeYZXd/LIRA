@@ -1087,3 +1087,69 @@ class TestChatAssembly:
                 rig.source.push_eof()
                 await asyncio.wait_for(task, timeout=5.0)
         assert any("chat_init_failed" in rec.message for rec in caplog.records)
+
+
+# ---------- U3/KTD3：同轮观测全链路（dispatcher→engine→callbacks→遥测） ----------
+
+
+class TestTurnObservationChain:
+    """生产装配下的同轮观测：utterance→turn→route→speak→speak_done 关联链，
+    且本地家电指令零模型事件（AE3）。"""
+
+    async def test_local_appliance_chain_observed_without_llm_events(self, tmp_path):
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        task = asyncio.ensure_future(rt.run())  # ir_service 在 run() 进入 HAL 后装配
+        try:
+            await asyncio.sleep(0.05)
+            tel = rt.telemetry
+            await rt.engine.on_wake()
+            delivery_generation = rt.dispatcher.generation  # 投递时的采集代次
+            rt.asr_stream.text = lambda: "打开台灯"
+            rt.asr_stream.is_endpoint = lambda: True
+            # 单次喂入（假 ASR 流 text/endpoint 恒定，多块会重复投递同一句）
+            rt._gate.feed(np.zeros(4000, dtype=np.float32))
+            await settle(rt)
+            assert rig.ir.sent_codes == ["CODE_LAMP_ON"]
+            events = tel.events_since(0)[0]
+            by_kind: dict[str, list] = {}
+            for e in events:
+                by_kind.setdefault(e.kind, []).append(e)
+            utterances = by_kind.get("utterance", [])
+            turns = by_kind.get("turn", [])
+            routes = by_kind.get("route", [])
+            speaks = by_kind.get("speak", [])
+            dones = by_kind.get("speak_done", [])
+            assert [e.text for e in utterances] == ["打开台灯"]
+            assert [e.text for e in turns] == ["打开台灯"]
+            assert [e.text for e in routes] == ["local_rule"]
+            assert speaks
+            # 关联链：utterance→turn→route 同轮串联（U5 渲染依据）。本地规则轮
+            # 的收尾走既有状态迁移镜像（speak_done 按设计只挂 _speak_answer
+            # 既有成功/失败判定处，模型回答轮才有）。
+            assert dones == []
+            assert rt.engine.state.value == "standby"
+            assert turns[0].utterance_id == utterances[0].utterance_id
+            assert routes[0].turn_id == turns[0].turn_id
+            assert utterances[0].capture_generation == delivery_generation
+            assert any(s.operation_owner for s in speaks)  # speak 带 owner 关联
+            # 本地指令全程无模型事件（无 llm_request/first_delta/done/fail/cancel）
+            assert not [e for e in events if e.kind.startswith("llm_")]
+        finally:
+            rig.source.push_eof()
+            await asyncio.wait_for(task, timeout=5.0)
+
+    async def test_command_channel_utterance_is_prefixed_and_correlated(self, tmp_path):
+        """命令 KWS 通道投递：utterance 事件带来源前缀，turn 正常关联。"""
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        rt.command_stream.hits.append("闭嘴")  # COMMAND_KWS_WORDS 声学子集
+        rt._gate.feed(np.zeros(1600, dtype=np.float32))
+        await settle(rt)
+        events = rt.telemetry.events_since(0)[0]
+        utterances = [e for e in events if e.kind == "utterance"]
+        assert [e.text for e in utterances] == ["命令通道：闭嘴"]
+        turns = [e for e in events if e.kind == "turn"]
+        assert [e.text for e in turns] == ["闭嘴"]
+        assert turns[0].utterance_id == utterances[0].utterance_id

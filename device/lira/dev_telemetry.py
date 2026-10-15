@@ -38,7 +38,7 @@ import numpy as np
 
 from lira.audio._paths import SAMPLE_RATE
 
-__all__ = ["AudioFrame", "TelemetryEvent", "DevTelemetry"]
+__all__ = ["AudioFrame", "TelemetryEvent", "DevTelemetry", "owner_text"]
 
 #: 每桶样本数：100ms @ 16kHz。桶边界按样本数划分，与输入 chunk 大小解耦。
 _BUCKET_SAMPLES = SAMPLE_RATE // 10
@@ -49,6 +49,21 @@ _MAX_TEXT_EVENTS = 500
 _MAX_TEXT_BYTES = 512 * 1024
 #: 削波判阈（与 RouteDispatch 每秒统计同阈：|x| >= 0.999 记削波）。
 _CLIP_THRESHOLD = 0.999
+
+
+def owner_text(owner: object) -> str | None:
+    """OperationOwner → "epoch.operation_id" 事件字符串（U3/KTD3 关联字段）。
+
+    None → None（无归属）；异形 owner 安全降级 str()——鸭子类型，事件面
+    不因装配层传入对象形态差异而失败。
+    """
+    if owner is None:
+        return None
+    epoch = getattr(owner, "epoch", None)
+    operation_id = getattr(owner, "operation_id", None)
+    if epoch is None or operation_id is None:
+        return str(owner)
+    return f"{epoch}.{operation_id}"
 
 
 @dataclass

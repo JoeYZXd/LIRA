@@ -128,7 +128,8 @@ async def test_runtime_invites_once_after_answer_and_requires_explicit_consent(t
     assert '小张' in DeviceRuntime.voice_identity_context(rt)
     await m.close()
 
-async def test_runtime_invitation_explicit_consent_enters_without_extra_model_call(tmp_path):
+@pytest.mark.parametrize('consent', ['愿意注册', '愿意录入声纹', '我愿意录入我的声纹。', '好的，我同意录入声纹', '请帮我录入声纹'])
+async def test_runtime_invitation_explicit_consent_enters_without_extra_model_call(tmp_path, consent):
     from lira.main import DeviceRuntime
     from lira.dialog import DialogEngine,Router
     from test_state_machine import Recorder
@@ -141,10 +142,36 @@ async def test_runtime_invitation_explicit_consent_enters_without_extra_model_ca
         voice_enrollment=e,voice_member_id=None,personal_memory=m,engine=engine,privacy=SimpleNamespace(is_on=False),
         dispatcher=SimpleNamespace(generation=0))
     await engine.on_wake()
-    for text in ('你好','愿意注册'):
+    for text in ('你好',consent):
         rt.dispatcher.generation=engine.listening_generation
         await DeviceRuntime.handle_voice_input(rt,text,audio(),rt.dispatcher.generation,False)
     assert e.active and e.phase=='details' and not m.profiles()
+    assert '姓名' in record.spoken[-1]
+    await m.close()
+
+@pytest.mark.parametrize('text', ['不愿意录入声纹', '我不想录入声纹', '愿意录入声纹吗', '怎么录入声纹', '好的', '如果我愿意录入声纹呢'])
+def test_registration_entry_does_not_infer_consent(text):
+    assert not VoiceEnrollment.wants_to_start(text, invited=True)
+
+@pytest.mark.parametrize('text', ['愿意录入声纹', '我愿意录入我的声纹。', '请帮我录入声纹', '我要注册声纹', '认识一下我'])
+def test_explicit_voice_request_does_not_depend_on_invitation_state(text):
+    assert VoiceEnrollment.wants_to_start(text)
+
+async def test_registration_prompts_guide_missing_name_address_and_sample_progress(tmp_path):
+    m,e=setup(tmp_path)
+    results=iter([{'name':'张三','address':None}, {'name':None,'address':'张叔'}])
+    async def create(**kwargs):
+        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(next(results))))])
+    m.sdk.chat.completions.create=create
+    prompt,_=await e.handle('我叫张三',audio(),V,current=lambda:True)
+    assert '称呼' in prompt and e.phase=='details'
+    prompt,_=await e.handle('叫我张叔',audio(),V,current=lambda:True)
+    assert '第1段' in prompt and e.phase=='samples'
+    for seed in (1,2):
+        prompt,_=await e.handle('今天的事情',audio(seed),V,current=lambda:True)
+        assert f'第{seed+1}段' in prompt
+    prompt,_=await e.handle('今天的计划',audio(3),V,current=lambda:True)
+    assert '张三' in prompt and '张叔' in prompt and '确认' in prompt and not m.profiles()
     await m.close()
 
 @pytest.mark.parametrize('payload',[{'name':'张三','address':5},{'name':'张三','address':'   '},[],{'name':'张三\n坏','address':'小张'}])

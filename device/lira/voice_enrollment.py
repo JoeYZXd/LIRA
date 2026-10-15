@@ -13,6 +13,20 @@ class VoiceEnrollment:
     CONFIRM = {'确认', '确认保存', '我确认保存', '我确认按这个姓名和称呼保存'}
     CANCEL = {'取消', '取消注册', '不保存', '退出注册', '停止', '退出', '别录了'}
 
+    @classmethod
+    def wants_to_start(cls, text, *, invited=False):
+        """Accept explicit voice enrollment requests; never infer consent from a question."""
+        clean=re.sub(r'[\s，,。.!！]', '', text)
+        if cls.ENTRY.fullmatch(clean):
+            return True
+        explicit=re.fullmatch(
+            r'(?:好的?|可以|行)?(?:我)?(?:愿意|同意|可以|想要?|要|准备)?'
+            r'(?:请)?(?:帮我|给我|为我)?(?:录入|登记|注册|采集)(?:我的)?声纹(?:吧|啊|呀)?', clean)
+        return bool(explicit) or (invited and clean in {
+            '愿意', '我愿意', '愿意注册', '我愿意注册', '同意注册',
+            '开始注册', '帮我注册', '同意录入', '愿意录入', '可以录入',
+        })
+
     def __init__(self, memory, params, *, request_options=None):
         self.memory, self.params = memory, params
         self.request_options = request_options or {}
@@ -109,7 +123,7 @@ class VoiceEnrollment:
                 self.cancel()
                 return '这个姓名已有成员。为避免关联错人，请在控制台确认关联，这次没有保存。', None
             self.phase='samples'
-            return '接下来只在这次注册中采集声音。请用平时的声音，说说你今天做了什么，至少说四秒。', None
+            return '姓名和称呼收到了，接下来录声音。第1段，请用平时的声音说说你今天做了什么，至少说四秒。', None
         v=self._vector(samples,vector)
         if v is None:
             return '这段声音太短、不清晰或与前面不同，请由同一个人再说一段完整的话。', None
@@ -134,6 +148,6 @@ class VoiceEnrollment:
         self.vectors.append(v)
         self.seconds += min(len(samples)/16000,30)
         if len(self.vectors)<self.params.target_segments or self.seconds<self.params.target_seconds:
-            return '再说一段不同的话吧，例如你喜欢的食物或今天的计划，至少说四秒。',None
+            return f'第{len(self.vectors)+1}段，请换个话题，说说你喜欢的食物或今天的计划，至少说四秒。',None
         self.phase='confirm'
-        return f'你的姓名是{self.name}，希望我称呼你为{self.address}。确认无误请说：我确认按这个姓名和称呼保存。',None
+        return f'声音采集完成。你的姓名是{self.name}，希望我称呼你为{self.address}。确认无误请说：我确认按这个姓名和称呼保存。也可以说取消注册。',None

@@ -869,8 +869,7 @@ class DeviceRuntime:
         invitation=(getattr(self,'_voice_invitation_owner',None)==self.engine._owner and time.monotonic()-getattr(self,'_voice_invitation_time',0)<60)
         if not invitation and getattr(self,'_voice_invitation_owner',None) is not None:
             self._voice_invitation_owner=None
-        consent=text.strip().rstrip('。！!，, ') in ('愿意注册','我愿意注册','同意注册','开始注册','帮我注册','好，录入声纹')
-        if enrollment is not None and (enrollment.active or enrollment.ENTRY.fullmatch(text.strip()) or (invitation and consent)):
+        if enrollment is not None and (enrollment.active or enrollment.wants_to_start(text, invited=invitation)):
             self._voice_invitation_owner=None
             self._voice_invitation_context=False
             owner=self.engine._owner
@@ -879,7 +878,7 @@ class DeviceRuntime:
             self.engine._history.clear()
             if not enrollment.active:
                 enrollment.start(owner)
-                prompt='好的，开始声纹注册。请告诉我你的姓名，以及希望我平时怎么称呼你。'
+                prompt='好的，我们开始录入声纹。第一步，请告诉我你的姓名，以及希望我平时怎么称呼你。例如，我叫张三，请叫我张叔。'
             else:
                 self.engine._disarm()
                 self.engine._transition(State.PROCESSING)
@@ -932,7 +931,7 @@ class DeviceRuntime:
             self._voice_invitation_offered=True
             self._voice_invitation_owner=self.engine._owner
             self._voice_invitation_time=time.monotonic()
-            return '先完整回答用户当前请求；回答后自然补充一句：我们好像还没认识，你愿意注册声纹，告诉我姓名和希望的称呼吗？愿意的话请说“愿意注册”。用户未明确同意前，不收集或保存声纹，不声称已认识用户。'
+            return '先完整回答用户当前请求；回答后自然补充一句：我们好像还没认识，你愿意录入声纹吗？愿意的话请说“愿意录入声纹”，我会接着引导你。用户未明确同意前，不收集或保存声纹，不声称已认识用户。'
         if member is None or memory is None:return ''
         address=memory.preferred_address(member)
         if not address:return ''

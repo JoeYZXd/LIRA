@@ -293,6 +293,59 @@ class TestLifecycle:
 
 
 class TestOwnedEffects:
+    async def test_privacy_clears_sensitive_state_before_audio_stop_failure(
+        self, tmp_path, monkeypatch
+    ):
+        from types import SimpleNamespace
+        from lira.audio.tts import TtsEngine
+
+        # Exercise the real runtime subscription wiring and TTS privacy callback.
+        def configure_online(tts, config, *, allowed):
+            tts.online_allowed = allowed
+
+        async def fail_stop(tts, owner=None):
+            if owner is None and getattr(tts, "fail_privacy_stop", False):
+                raise RuntimeError("audio stop failed")
+            tts.cancel_owner(owner)
+
+        monkeypatch.setattr(FakeTts, "configure_online", configure_online, raising=False)
+        monkeypatch.setattr(FakeTts, "apply_privacy", TtsEngine.apply_privacy, raising=False)
+        monkeypatch.setattr(FakeTts, "stop", fail_stop)
+        rig = make_rig(tmp_path)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        rig.tts.fail_privacy_stop = True
+        owner = rt.engine.owner
+        generation = rt.dispatcher.generation
+        rt.voice_member_id = "stale-member"
+        rt.speaker_identity = SimpleNamespace(pending={"text": "stale-name"})
+        rt.telemetry.add_event("test", "sensitive text")
+        rt.voice_metrics.enabled = True
+        trace = rt.voice_metrics.trace(owner="stale-owner")
+        trace.mark("asr_submit")
+        assert rt.telemetry.events_since(0)[0]
+        assert rt.voice_metrics.snapshot()
+
+        with pytest.raises(RuntimeError, match="audio stop failed"):
+            await rt.privacy.set_enabled(True, source="test")
+
+        assert rt.privacy.is_on
+        assert not rig.tts.online_allowed()
+        assert rt.telemetry.events_since(0)[0] == []
+        assert rt.voice_metrics.snapshot() == []
+        rt.telemetry.add_event("test", "late sensitive text")
+        trace.mark("asr_submit")
+        assert rt.telemetry.events_since(0)[0] == []
+        assert rt.voice_metrics.snapshot() == []
+        assert rt.dispatcher.generation != generation
+        assert rt.engine.state.value == "standby"
+        assert not rt.engine.is_current(owner)
+        assert rt.voice_member_id is None
+        assert rt.speaker_identity.pending is None
+        await settle(rt)
+        assert owner in rig.tts.cancelled_owners
+        assert not any("麦克风" in text for text, _, _ in rig.tts.spoken)
+
     async def test_wake_only_preroll_endpoint_keeps_original_eight_second_deadline(self, tmp_path):
         rig = make_rig(tmp_path, clock=lambda: 1000.0)
         rt = rig.runtime

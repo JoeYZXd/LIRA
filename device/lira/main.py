@@ -714,7 +714,6 @@ class DeviceRuntime:
         self.tts = audio.tts
         if hasattr(self.tts, 'configure_online'):
             self.tts.configure_online(cfg.online_tts, allowed=lambda: not self.privacy.is_on)
-            self.privacy.subscribe(self.tts.apply_privacy)
         self.speaker = speaker or TtsBlockSpeaker(audio.tts)
         #: ASR 引擎引用（dev 控制台识别测试用；离线喂流自建独立流）
         self.asr = audio.asr
@@ -821,6 +820,10 @@ class DeviceRuntime:
         self.privacy.subscribe(self.dispatcher.apply_privacy)
         self.privacy.subscribe(self.engine.apply_privacy)
         self.privacy.subscribe(self.clear_voice_identity)
+        # Hardware stop can fail: clear sensitive state and invalidate owners first.
+        # Keep failures visible and prevent the announcer from claiming success.
+        if hasattr(self.tts, 'configure_online'):
+            self.privacy.subscribe(self.tts.apply_privacy)
         # 隐私后果播报最后注册（attach_announcer 纪律：最后注册 -> 最后播报）
         attach_announcer(self.privacy, self.callbacks.speak)
 

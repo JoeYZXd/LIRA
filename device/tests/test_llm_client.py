@@ -27,6 +27,63 @@ from lira.llm.prompts import is_complex_text, is_medical_text
 BASE_URL = "http://unit.test/v1"
 
 
+async def test_ordinary_speech_delivered_before_model_finishes():
+    from types import SimpleNamespace
+    spoken = asyncio.Event()
+    seen = []
+    class Stream:
+        closed = False
+        def __aiter__(self): return self.iterate()
+        async def iterate(self):
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content='这是足够长的一段回答，可以提前播报。'))])
+            await asyncio.wait_for(spoken.wait(), 1)
+            yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content='这是尾段。'))])
+        async def close(self): self.closed = True
+    stream = Stream()
+    # SDK streams are their own iterator and expose close.
+    iterator = stream.__aiter__()
+    class SDKStream:
+        def __aiter__(self): return self
+        async def __anext__(self): return await anext(iterator)
+        async def close(self):
+            stream.closed = True
+            await iterator.aclose()
+    async def create(**kwargs): return SDKStream()
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = LlmClient(make_llm_cfg(), openai_client=sdk)
+    async def speak(text):
+        seen.append(text)
+        spoken.set()
+    raw = await client.chat('问题', on_reply_chunk=speak)
+    assert ''.join(seen) == raw
+    assert stream.closed
+
+
+async def test_privacy_mid_stream_discards_pending_reply_and_closes():
+    from types import SimpleNamespace
+    private = False
+    seen = []
+    class Stream:
+        closed = False
+        count = 0
+        def __aiter__(self): return self
+        async def __anext__(self):
+            nonlocal private
+            self.count += 1
+            if self.count == 1:
+                return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content='还没有完整的句子'))])
+            private = True
+            return SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content='这段不应播出。'))])
+        async def close(self): self.closed = True
+    stream = Stream()
+    async def create(**kwargs): return stream
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    client = LlmClient(make_llm_cfg(), openai_client=sdk, privacy=lambda: private)
+    with pytest.raises(PrivacyBlocked):
+        await client.chat('问题', on_reply_chunk=seen.append)
+    assert seen == [] and stream.closed
+
+
 @pytest.mark.parametrize("phase", ["first_token", "iteration"])
 async def test_cancel_closes_acquired_stream(phase):
     from types import SimpleNamespace

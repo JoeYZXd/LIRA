@@ -4,13 +4,13 @@ from __future__ import annotations
 import json
 import asyncio
 import logging
-import re
 import time
 from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from openai import APIConnectionError, APIStatusError
+from lira.audio.text_stream import consume_text
 
 SEARCH_TOOL = {
     "type": "function",
@@ -76,41 +76,25 @@ async def stream_answer(sdk, kwargs, check_privacy, on_sentence, on_delta=None):
     kwargs = dict(kwargs, stream=True, tool_choice="none")
     started = time.monotonic()
     stream = await retry_remote(lambda: sdk.chat.completions.create(**kwargs), check_privacy)
-    parts, buffer = [], ""
     first = True
     try:
-        async for chunk in stream:
-            check_privacy()
-            if not chunk.choices:
-                continue
-            content = chunk.choices[0].delta.content
-            if not content:
-                continue
-            if on_delta is not None:
-                on_delta(content)
-            if first:
-                logging.info("llm event=first_token elapsed=%.3f", time.monotonic()-started)
-                first = False
-            parts.append(content)
-            buffer += content
-            while True:
-                matches = list(re.finditer(r"[。！？!?；;]|\.(?=\s|$)", buffer))
-                boundary = next((m.end() for m in matches if m.end() >= 12), None)
-                if boundary is None:
-                    # Bound long punctuation-free output at a word/clause boundary.
-                    if len(buffer) < 48:
-                        break
-                    head = buffer[:48]
-                    boundary = max(head.rfind(' '), head.rfind('，'), head.rfind(',')) + 1
-                    if boundary < 12:
-                        boundary = 48 if re.search(r'[\u3400-\u9fff]', head) else None
-                    if boundary is None:
-                        break
-                on_sentence(buffer[:boundary])
-                buffer = buffer[boundary:]
-        if buffer.strip():
-            on_sentence(buffer)
-        return ''.join(parts)
+        async def contents():
+            nonlocal first
+            async for chunk in stream:
+                check_privacy()
+                if not chunk.choices:
+                    continue
+                content = chunk.choices[0].delta.content
+                if not content:
+                    continue
+                if on_delta is not None:
+                    on_delta(content)
+                if first:
+                    logging.info("llm event=first_token elapsed=%.3f", time.monotonic()-started)
+                    first = False
+                yield content
+        return await consume_text(contents(), on_sentence, check_active=check_privacy,
+                                  incremental=getattr(on_sentence, 'accepts_text_deltas', False))
     finally:
         await stream.close()
 

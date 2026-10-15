@@ -42,6 +42,31 @@ async def test_cancel_closes_stream():
     with pytest.raises(asyncio.CancelledError): await task
     assert stream.closed
 
+
+async def test_async_sentence_backpressure_cancel_closes_stream():
+    entered = asyncio.Event()
+    pulled = []
+    class Stream:
+        closed = False
+        def __aiter__(self): return self.iterate()
+        async def iterate(self):
+            for _ in range(5):
+                pulled.append(1)
+                yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content='这一句话已经足够长，可以立即播报。'))])
+        async def close(self): self.closed = True
+    stream = Stream()
+    async def create(**kwargs): return stream
+    async def speak(text):
+        entered.set()
+        await asyncio.Event().wait()
+    sdk = SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+    task = asyncio.create_task(stream_answer(sdk, {}, lambda: None, speak))
+    await entered.wait()
+    assert pulled == [1]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError): await task
+    assert stream.closed
+
 async def test_streamed_reply_is_not_spoken_again_by_dialog():
     from test_state_machine import Recorder, T0
     from lira.dialog import DialogEngine,Router

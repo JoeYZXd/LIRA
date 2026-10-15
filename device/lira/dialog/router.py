@@ -92,4 +92,6 @@ class Router:
 
     @staticmethod
     async def _call_llm(handler, text, context, on_wait_feedback, on_reply_chunk=None, turn_id=None):
+        # Pass the original callback through: its returned awaitable carries
+        # speech backpressure and must be awaited by the LLM text consumer.
         return await invoke_callback(handler, text, context=context, on_wait_feedback=on_wait_feedback, on_reply_chunk=on_reply_chunk, turn_id=turn_id)

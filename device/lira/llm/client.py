@@ -261,7 +261,8 @@ class LlmClient:
                                                on_reply_chunk, observe)
             else:
                 text = await self._stream_chat(messages, on_wait_feedback=on_wait_feedback,
-                                               timeout_seconds=timeout_seconds, observe=observe)
+                                               timeout_seconds=timeout_seconds, observe=observe,
+                                               on_reply_chunk=on_reply_chunk)
         except asyncio.CancelledError:
             observe.cancel()
             raise
@@ -323,15 +324,20 @@ class LlmClient:
     async def _stream_chat(self, messages: list[dict[str, str]], *,
                            on_wait_feedback=_DEFAULT_FEEDBACK,
                            timeout_seconds: float | None = None,
-                           observe=None) -> str:
+                           observe=None, on_reply_chunk=None) -> str:
         """建流并回收全部增量；首 token 等待超窗时触发一次 R28 回调。
 
         observe（可选）：逐非空内容增量旁路上报（U3/KTD7），不影响回收。
         """
 
         stream = None
+        def check_privacy():
+            if self._privacy():
+                raise PrivacyBlocked("隐私模式开启，已拦截远程调用")
+
         async def _open_and_first_chunk() -> object:
             nonlocal stream
+            check_privacy()
             create_kwargs: dict = {
                 "model": self._model,
                 "messages": messages,  # type: ignore[arg-type]
@@ -354,16 +360,27 @@ class LlmClient:
             if not done:
                 self._fire_wait_feedback(on_wait_feedback)
             first_chunk = await task
-            parts: list[str] = []
-            if first_chunk is not None:
-                content = self._append_delta(parts, first_chunk)
-                if content and observe is not None:
-                    observe.delta(content)
-                async for chunk in stream:
-                    content = self._append_delta(parts, chunk)
-                    if content and observe is not None:
-                        observe.delta(content)
-            return "".join(parts)
+            from lira.audio.text_stream import consume_text
+
+            async def contents():
+                if first_chunk is None:
+                    return
+                chunk = first_chunk
+                while True:
+                    check_privacy()
+                    content = self._append_delta([], chunk)
+                    if content:
+                        if observe is not None:
+                            observe.delta(content)
+                        yield content
+                    try:
+                        chunk = await anext(stream)
+                    except StopAsyncIteration:
+                        break
+
+            return await consume_text(contents(), on_reply_chunk,
+                                      check_active=check_privacy,
+                                      incremental=getattr(on_reply_chunk, 'accepts_text_deltas', False))
         finally:
             if not task.done():
                 task.cancel()

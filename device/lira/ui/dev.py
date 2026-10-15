@@ -17,6 +17,11 @@
 templates/dev_login.html、templates/dev.html；CSS/JS 为本地静态资源
 （static/dev-console.*），无构建链、无 CDN。模板与静态目录自管实例、
 不从 ui.app 导入（避免 ui.app <-> ui.dev 循环导入）。
+
+观察快照（dev-console 改版 U4，KTD4）：/dev/api/observe 聚合音频包络环、
+文本事件环与状态面，游标增量 + reset 恢复，单次响应限事件条数；
+/dev/api/settings 提供设置能力元信息（真实当前值/可写性/生效方式/约束），
+写路径全部沿用既有端点，本模块不新增任何写端点。
 """
 
 from __future__ import annotations
@@ -27,6 +32,7 @@ import secrets
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -36,6 +42,9 @@ from fastapi.templating import Jinja2Templates
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PassphraseVault
 from lira.settings import DeviceSettings
+
+if TYPE_CHECKING:
+    from lira.dev_telemetry import AudioFrame, TelemetryEvent
 
 __all__ = [
     "DevHandle",
@@ -61,6 +70,9 @@ _SALT = "lira-dev-session"
 _MAX_FAILED = 5
 _LOCK_SECONDS = 300.0
 _MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+#: observe 单次响应的事件条数上限（剩余经 next_cursor 下次续读；
+#: 250ms 轮询节奏下每次 100 条足够追平增量，KTD4）
+_OBSERVE_EVENT_PAGE = 100
 
 #: 录音内存缓冲（零落盘；进程内，覆盖复用）
 clip_state: dict[str, bytes | None] = {"wav": None, "ts": 0.0}
@@ -270,6 +282,178 @@ def _classify_text(runtime, text: str) -> dict | None:
     return result
 
 
+# ---------- 观察快照 / 设置能力（U4 接口层：序列化与元信息在此，不进遥测层） ----------
+
+
+def _status_payload(handle: DevHandle) -> dict:
+    """/dev/api/status 与 /dev/api/observe 共用的状态载荷（两处同构）。
+
+    U1 真实设置回读语义不变：值一律取运行时真实状态；允许范围与
+    DeviceSettings 服务端校验同源（类常量），前端据此做客户端预检。
+    """
+    rt = handle.runtime
+    s = rt.status()
+    s["sync_detail"] = dict(rt.sync_status)
+    s["volume"] = rt.settings.volume
+    s["tts_speed"] = rt.settings.tts_speed
+    s["volume_range"] = list(DeviceSettings.VOLUME_RANGE)
+    s["speed_range"] = list(DeviceSettings.SPEED_RANGE)
+    # 生效级别映射名字（未显式设置时沿继承链取有效级别，恒有真实名字）
+    s["loglevel"] = logging.getLevelName(
+        logging.getLogger("lira").getEffectiveLevel()
+    )
+    # 相机实际方向；相机缺失（未装配/不支持）时省略字段
+    camera = getattr(rt, "camera", None)
+    if camera is not None and hasattr(camera, "rotation"):
+        s["camera_rotation"] = camera.rotation
+        s["camera_hflip"] = bool(getattr(camera, "hflip", False))
+    return s
+
+
+def _audio_frame_json(frame: "AudioFrame") -> dict:
+    """AudioFrame → JSON dict（None 保留 null，浮点保留原值，枚举串直传）。"""
+    return {
+        "seq": frame.seq,
+        "t_mono": frame.t_mono,
+        "ts": frame.ts,
+        "capture_generation": frame.capture_generation,
+        "route": frame.route,
+        "tts_occupied": frame.tts_occupied,
+        "kind": frame.kind,
+        "reason": frame.reason,
+        "min": frame.min,
+        "max": frame.max,
+        "rms": frame.rms,
+        "peak": frame.peak,
+        "clip_ratio": frame.clip_ratio,
+    }
+
+
+def _event_json(event: "TelemetryEvent") -> dict:
+    """TelemetryEvent → JSON dict（utterance/turn/owner 缺省保留 null）。"""
+    return {
+        "seq": event.seq,
+        "instance_id": event.instance_id,
+        "ts": event.ts,
+        "t_mono": event.t_mono,
+        "capture_generation": event.capture_generation,
+        "kind": event.kind,
+        "text": event.text,
+        "utterance_id": event.utterance_id,
+        "turn_id": event.turn_id,
+        "operation_owner": event.operation_owner,
+    }
+
+
+def _parse_cursor(raw: str | None) -> int | None:
+    """observe 的 query 游标解析：缺失/非法（非整数、负数）→ None。
+
+    None = 按首次拉取语义处理（整窗 + reset，客户端据此重建基线），
+    可恢复且绝不 500。query 只携带游标序号与实例 id（数值/十六进制串，
+    非口令/内容类文本），不违反"文本参数 POST body"纪律。
+    """
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _settings_items(runtime) -> list[dict]:
+    """设置能力元信息（U4/R11）：真实当前值 + 可写性 + 生效方式 + 取值约束。
+
+    只描述既有写路径（write_endpoint 指向既有 POST 端点），不新增写面；
+    只读项（模型就绪、同步会话）值取自 runtime.status()，仅展示元信息。
+    """
+    settings = runtime.settings
+    status = runtime.status()
+    items: list[dict] = [
+        {
+            "key": "volume",
+            "label": "音量",
+            "value": settings.volume,
+            "writable": True,
+            "effective": "immediate",
+            "constraint": {
+                "type": "range",
+                "min": DeviceSettings.VOLUME_RANGE[0],
+                "max": DeviceSettings.VOLUME_RANGE[1],
+            },
+            "write_endpoint": "/volume",
+        },
+        {
+            "key": "tts_speed",
+            "label": "语速",
+            "value": settings.tts_speed,
+            "writable": True,
+            "effective": "immediate",
+            "constraint": {
+                "type": "range",
+                "min": DeviceSettings.SPEED_RANGE[0],
+                "max": DeviceSettings.SPEED_RANGE[1],
+            },
+            "write_endpoint": "/speed",
+        },
+        {
+            "key": "loglevel",
+            "label": "日志级别",
+            "value": logging.getLevelName(
+                logging.getLogger("lira").getEffectiveLevel()
+            ),
+            "writable": True,
+            "effective": "immediate",
+            "constraint": {
+                "type": "choices",
+                "values": ["DEBUG", "INFO", "WARNING", "ERROR"],
+            },
+            "write_endpoint": "/dev/api/loglevel",
+        },
+    ]
+    # 相机项随装配出现（与 /status 相机回读同一存在性判断）
+    camera = getattr(runtime, "camera", None)
+    if camera is not None and hasattr(camera, "rotation"):
+        items.append({
+            "key": "camera_rotation",
+            "label": "相机方向",
+            "value": camera.rotation,
+            "writable": True,
+            "effective": "immediate",
+            "constraint": {"type": "choices", "values": [0, 90, 180, 270]},
+            "write_endpoint": "/dev/api/camera/orientation",
+        })
+        items.append({
+            "key": "camera_hflip",
+            "label": "相机水平翻转",
+            "value": bool(getattr(camera, "hflip", False)),
+            "writable": True,
+            "effective": "immediate",
+            "constraint": {"type": "bool"},
+            "write_endpoint": "/dev/api/camera/orientation",
+        })
+    # 只读项：仅能力元信息，constraint/write_endpoint 恒空
+    items.append({
+        "key": "models",
+        "label": "模型就绪状态",
+        "value": status.get("models", {}),
+        "writable": False,
+        "effective": "immediate",
+        "constraint": None,
+        "write_endpoint": None,
+    })
+    items.append({
+        "key": "sync_session",
+        "label": "同步会话",
+        "value": (status.get("sync") or {}).get("session"),
+        "writable": False,
+        "effective": "immediate",
+        "constraint": None,
+        "write_endpoint": None,
+    })
+    return items
+
+
 def mount_dev(app: FastAPI, handle: DevHandle) -> None:
     """向设备 UI 应用挂载 dev 路由（仅 dev_console.enabled 时由 create_app 调用）。"""
     limiter = _RateLimiter()
@@ -360,25 +544,7 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         denied = _require_session(request, api=True)
         if denied is not None:
             return denied
-        s = handle.runtime.status()
-        s["sync_detail"] = dict(handle.runtime.sync_status)
-        # U1 真实设置回读：旧页音量/语速从未回显（恒 undefined 的缺陷在此
-        # 补齐）。值一律取运行时真实状态；允许范围与 DeviceSettings 服务端
-        # 校验同源（类常量），前端据此做客户端预检。
-        s["volume"] = handle.runtime.settings.volume
-        s["tts_speed"] = handle.runtime.settings.tts_speed
-        s["volume_range"] = list(DeviceSettings.VOLUME_RANGE)
-        s["speed_range"] = list(DeviceSettings.SPEED_RANGE)
-        # 生效级别映射名字（未显式设置时沿继承链取有效级别，恒有真实名字）
-        s["loglevel"] = logging.getLevelName(
-            logging.getLogger("lira").getEffectiveLevel()
-        )
-        # 相机实际方向；相机缺失（未装配/不支持）时省略字段
-        camera = getattr(handle.runtime, "camera", None)
-        if camera is not None and hasattr(camera, "rotation"):
-            s["camera_rotation"] = camera.rotation
-            s["camera_hflip"] = bool(getattr(camera, "hflip", False))
-        return JSONResponse(s)
+        return JSONResponse(_status_payload(handle))
 
     @app.get("/dev/api/logs")
     async def dev_logs(request: Request):
@@ -425,6 +591,80 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         logging.getLogger("lira").setLevel(getattr(logging, level))
         logger.info("dev event=loglevel level=%s", level)
         return JSONResponse({"ok": True, "level": level})
+
+    # ---------- 观察快照与设置能力（dev-console 改版 U4，KTD4） ----------
+
+    @app.get("/dev/api/observe")
+    async def dev_observe(request: Request):
+        """聚合观察快照：音频包络环 + 文本事件环 + 状态面，一次往返。
+
+        边界次序固定：先会话（401）后隐私（403）——隐私开启时返回 403 且
+        不含任何 items（接口面第二道闸；遥测联锁此刻已清空两环，这里保证
+        缓冲不经旁路泄漏）。游标/reset 语义完全复用
+        DevTelemetry.audio_since/events_since（实例不匹配、游标越界、请求
+        区间已被淘汰或清空 → reset=True 并附整窗），接口层不重造判断。
+        """
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
+        telemetry = getattr(handle.runtime, "telemetry", None)
+        if telemetry is None:
+            return JSONResponse({"error": "遥测未装配"}, status_code=503)
+        params = request.query_params
+        audio_cursor = _parse_cursor(params.get("audio_cursor"))
+        event_cursor = _parse_cursor(params.get("event_cursor"))
+        instance = params.get("instance") or None
+
+        # 缺省游标 = 首次拉取：整窗 + reset=True（客户端据此整体建基线）
+        audio_items, audio_next, audio_reset = telemetry.audio_since(
+            0 if audio_cursor is None else audio_cursor, instance_id=instance)
+        if audio_cursor is None:
+            audio_reset = True
+        # 音频环上限即 100 帧（≈10 秒），整窗本就一次能取完，不额外截断
+        event_items, event_next, event_reset = telemetry.events_since(
+            0 if event_cursor is None else event_cursor, instance_id=instance)
+        if event_cursor is None:
+            event_reset = True
+        if len(event_items) > _OBSERVE_EVENT_PAGE:
+            # 单响应限流：next_cursor 只推进到本次最后一条，剩余续读
+            # （len(items)==上限时可能还有后续；reset 分页重建时同样以此为据）
+            event_items = event_items[:_OBSERVE_EVENT_PAGE]
+            event_next = event_items[-1].seq
+        # 日志纪律：只记数量与布尔，不记事件/音频内容
+        logger.info(
+            "dev event=observe n_audio=%d n_events=%d reset=%s",
+            len(audio_items), len(event_items), audio_reset or event_reset,
+        )
+        return JSONResponse({
+            "instance_id": telemetry.instance_id,
+            "audio": {
+                "items": [_audio_frame_json(f) for f in audio_items],
+                "next_cursor": audio_next,
+                "reset": audio_reset,
+            },
+            "events": {
+                "items": [_event_json(e) for e in event_items],
+                "next_cursor": event_next,
+                "reset": event_reset,
+            },
+            "status": _status_payload(handle),
+        })
+
+    @app.get("/dev/api/settings")
+    async def dev_settings(request: Request):
+        """设置能力元信息：真实当前值 + 可写性 + 生效方式 + 取值约束。
+
+        只描述能力，不承载写入——音量/语速/级别/相机的写入仍走既有 POST
+        端点（write_endpoint 即指向它们），不存在通用参数写接口，页面不能
+        经本接口绕过领域操作（R11/KTD6）。
+        """
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        return JSONResponse({"settings": _settings_items(handle.runtime)})
 
     # ---------- 语音链路测试（U3） ----------
 

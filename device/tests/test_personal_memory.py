@@ -136,14 +136,14 @@ async def test_ae4_handle_voice_input_keeps_voice_member_id_none():
         return '好的。'
     engine=DialogEngine(Router(remote_llm=answer,remote_available=lambda:True),record)
     await engine.on_wake()
-    identity=SimpleNamespace(pending=None,embedding=lambda samples:np.array([1.,0.]),
+    identity=SimpleNamespace(pending=None,embedding=lambda samples:np.array([1.,0.]),match=lambda v:None,
         resolve=lambda text,v:(None,'家里已有妈妈这个称呼。为避免认错人，这个关联需要在开发者控制台确认，确认前我不会读取这个身份的记忆。',None))
     runtime=SimpleNamespace(speaker_identity=identity,speaker_candidates=None,engine=engine,
         privacy=SimpleNamespace(is_on=False),
         dispatcher=SimpleNamespace(generation=engine.listening_generation),voice_member_id=None)
     await DeviceRuntime.handle_voice_input(runtime,'我是妈妈',np.ones(16000),runtime.dispatcher.generation,False)
     assert runtime.voice_member_id is None, '同名声称不得置位个人记忆取用门'
-    assert any('控制台' in x for x in record.spoken)
+    assert record.spoken[-1]=='好的。', '普通自我介绍不再触发隐式注册'
 
 async def test_new_name_confirmed_then_member_profile_stats_consistent(tmp_path):
     """自然新称呼确认后：profile/成员列表/统计同一事务一致；确认重试无重复成员。"""
@@ -214,7 +214,7 @@ async def test_misbind_privacy_flip_clears_staged_name(tmp_path):
     assert not m.profiles()
     await m.close()
 
-async def test_identity_notice_replays_original_question_after_notice():
+async def test_daily_input_does_not_replay_legacy_identity_question():
     from lira.main import DeviceRuntime
     from lira.dialog import DialogEngine,Router
     from test_state_machine import Recorder
@@ -223,13 +223,13 @@ async def test_identity_notice_replays_original_question_after_notice():
         asked.append(text);return '明天有雨。'
     engine=DialogEngine(Router(remote_llm=answer,remote_available=lambda:True),record)
     await engine.on_wake()
-    identity=SimpleNamespace(embedding=lambda samples:np.array([1.,0.]),
+    identity=SimpleNamespace(embedding=lambda samples:np.array([1.,0.]),match=lambda v:1,
         resolve=lambda text,v:(1,'好，以后叫你爸爸。','帮我查明天天气'))
     runtime=SimpleNamespace(speaker_identity=identity,speaker_candidates=None,engine=engine,
         privacy=SimpleNamespace(is_on=False),
         dispatcher=SimpleNamespace(generation=engine.listening_generation),voice_member_id=None)
     await DeviceRuntime.handle_voice_input(runtime,'我是爸爸',np.ones(16000),runtime.dispatcher.generation,False)
-    assert asked==['帮我查明天天气'] and runtime.voice_member_id==1
+    assert asked==['我是爸爸'] and runtime.voice_member_id==1
 
 async def test_erase_is_not_undone_by_inflight_summary(tmp_path):
     import asyncio
@@ -269,7 +269,7 @@ async def test_new_speaker_question_is_answered_without_blocking_for_name():
         asked.append(text);return '我是小鹿，可以陪你聊天、查资料。对了，我该怎么称呼你呀？'
     engine=DialogEngine(Router(remote_llm=answer,remote_available=lambda:True),record)
     await engine.on_wake()
-    identity=SimpleNamespace(pending={'text':'你是谁','asked':False},embedding=lambda samples:np.array([1.,0.]),
+    identity=SimpleNamespace(pending={'text':'你是谁','asked':False},embedding=lambda samples:np.array([1.,0.]),match=lambda v:None,
         resolve=lambda text,v:(None,'我们好像还没认识过，你希望我怎么称呼你呀？',None))
     runtime=SimpleNamespace(speaker_identity=identity,speaker_candidates=None,engine=engine,
         privacy=SimpleNamespace(is_on=False),
@@ -277,7 +277,7 @@ async def test_new_speaker_question_is_answered_without_blocking_for_name():
     await DeviceRuntime.handle_voice_input(runtime,'你是谁',np.ones(16000),runtime.dispatcher.generation,False)
     assert asked==['你是谁']
     assert not any(x.startswith('我们好像还没认识过') for x in record.spoken)
-    assert identity.pending['text'] is None
+    assert identity.pending['text']=='你是谁', '旧候选上下文不参与日常识别'
 
 async def test_model_fingerprint_is_stable_and_dimension_aware(tmp_path):
     # U6/KTD5：候选表用指纹区分模型代次——路径+输出维度，跨重启稳定

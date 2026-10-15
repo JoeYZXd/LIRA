@@ -1229,9 +1229,9 @@ class TestSpeakerCandidatesAssembly:
         assert candidates.privacy() is rt.privacy.is_on
         assert candidates.event_sink is not None, "观察事件面进 dev 遥测（U7 辅助数据源）"
 
-    async def test_handle_voice_input_observes_after_post_extraction_recheck(
+    async def test_handle_voice_input_does_not_passively_collect_after_extraction(
             self, tmp_path, monkeypatch):
-        """提取后复检通过 → observe 被调（向量与样本透传；resolve 之前）。"""
+        """提取后只识别已有成员，不再积累陌生声纹。"""
         from lira.main import DeviceRuntime
 
         rig, candidates = make_personal_rig(tmp_path, monkeypatch)
@@ -1240,10 +1240,7 @@ class TestSpeakerCandidatesAssembly:
         samples = np.full(16000, 0.2, dtype=np.float32)
         await DeviceRuntime.handle_voice_input(
             rt, "现在几点了", samples, rt.dispatcher.generation, False)
-        assert len(candidates.observed) == 1
-        vector, observed_samples = candidates.observed[0]
-        assert np.allclose(vector, np.array([1.0, 0.0], np.float32))
-        assert observed_samples.shape == samples.shape
+        assert candidates.observed == [], "日常交谈不再采集声纹候选"
 
     async def test_handle_voice_input_skips_observe_on_stale_generation(
             self, tmp_path, monkeypatch):

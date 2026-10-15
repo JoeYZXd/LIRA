@@ -1,4 +1,4 @@
-"""Local per-member memory and passive speaker enrollment; no raw audio files."""
+"""Local per-member memory and explicit voice registration; no raw audio files."""
 from __future__ import annotations
 import asyncio
 import hashlib
@@ -29,6 +29,9 @@ class PersonalMemory:
             CREATE TABLE IF NOT EXISTS voice_profiles (
                 member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
                 vector BLOB NOT NULL);
+            CREATE TABLE IF NOT EXISTS voice_preferences (
+                member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+                preferred_address TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS memory_turns (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
@@ -54,9 +57,10 @@ class PersonalMemory:
         return next((m for m in self.people.list_members() if m['name']==name), None)
 
     def enroll(self, name, vector, *, allow_existing=False):
-        """直接登记声纹（仅测试种子用！）。生产登记唯一出口是
-        VoiceCandidates 晋升/确认（KTD6/E6 政策——同名会话内不再登记，
-        allow_existing 的会话内登记路径已被 U7 撤销）。"""
+        """Legacy test seeding helper; live voice registration uses register_voice.
+
+        Existing-name association remains a separately confirmed console action.
+        """
         # A claimed existing name cannot replace or gain access to an existing identity.
         existing = self.find_member(name)
         if existing is not None and (not allow_existing or any(member==existing['id'] for member,_ in self.profiles())):
@@ -79,13 +83,39 @@ class PersonalMemory:
                 'daily_average':round(sum(r['n'] for r in recent)/observed,2),
                 'habit_evidence_sufficient':len(recent)>=3}
 
+    def register_voice(self, name, address, vector, *, match_threshold=0.8):
+        """Commit an explicitly confirmed new identity in one transaction."""
+        if not all(isinstance(s,str) and 1<=len(s.strip())<=32 and not any(ord(c)<32 for c in s) for s in (name,address)):
+            raise ValueError('invalid identity details')
+        name,address=name.strip(),address.strip()
+        v=np.asarray(vector,np.float32)
+        if self.privacy() or self.find_member(name) is not None:
+            raise ValueError('registration unavailable or name already exists')
+        norm=float(np.linalg.norm(v.astype(np.float64)))
+        if v.ndim!=1 or not v.size or not np.isfinite(v).all() or not np.isfinite(norm) or norm<1e-6:
+            raise ValueError('invalid voice profile')
+        v=v/norm
+        if any(profile.shape==v.shape and float(np.dot(v,profile))>=match_threshold for _,profile in self.profiles()):
+            raise ValueError('voice already registered')
+        with self.db:
+            if self.privacy():raise ValueError('privacy enabled')
+            member=self.people.create_member(name,commit=False)
+            self.db.execute('INSERT INTO voice_profiles VALUES (?,?)',
+                (member['id'],v.astype(np.float32).tobytes()))
+            self.db.execute('INSERT INTO voice_preferences VALUES (?,?)',(member['id'],address.strip()))
+        return member['id']
+
+    def preferred_address(self, member_id):
+        row=self.db.execute('SELECT preferred_address FROM voice_preferences WHERE member_id=?',(member_id,)).fetchone()
+        return row['preferred_address'] if row else None
+
     def recall(self, member_id):
         if member_id is None or self.privacy(): return ''
         member=self.people.get_member(member_id)
         if member is None: return ''
         row=self.db.execute('SELECT summary FROM personal_memories WHERE member_id=?',(member_id,)).fetchone()
         recent=self.db.execute('SELECT user,assistant FROM memory_turns WHERE member_id=? ORDER BY id DESC LIMIT 3',(member_id,)).fetchall()
-        return json.dumps({'member_name':member['name'], 'remembered':row['summary'] if row else '',
+        return json.dumps({'member_name':member['name'], 'preferred_address':self.preferred_address(member_id), 'remembered':row['summary'] if row else '',
             'recent_completed_turns':[{k:str(r[k])[:500] for k in ('user','assistant')} for r in reversed(recent)],
             'observed_stats':self.stats(member_id)},ensure_ascii=False)
 

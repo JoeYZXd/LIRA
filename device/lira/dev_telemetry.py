@@ -286,15 +286,22 @@ class DevTelemetry:
     # ---------- 隐私联锁（AE5） ----------
 
     def apply_privacy(self, enabled: bool) -> None:
-        """隐私开启即清空两环并拒收后续写入；关闭解除拒收。"""
+        """隐私开启即清空两环并拒收后续写入；关闭解除拒收。
+
+        U8 对抗评审 F3：清空后各消耗一个"墓碑" seq——被清历史的客户端
+        cursor+1 < 最旧现存 seq 必然成立，下一拍必收 reset（否则快开快关
+        (<1 拍)时 gap 帧的 seq 连续性会让客户端保留并继续绘制隐私前内容）。
+        """
         if enabled:
             self._privacy_on = True
             self._audio_frames.clear()
             self._events.clear()
             self._text_bytes = 0
             self._reset_acc()
+            self._audio_seq += 1  # 墓碑 seq（不落帧）：跳号使 cursor+1 < oldest
             self._append_gap("privacy_on", self._capture_generation,
                              self._last_route, self._last_occupied)
+            self._event_seq += 1  # 事件环墓碑：清空后 next_seq 越过旧 cursor
         else:
             self._privacy_on = False
 

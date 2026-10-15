@@ -501,7 +501,12 @@ async function observePull() {
   observe.inFlight = true;
   let r;
   try {
-    r = await api('/dev/api/observe' + (q.length ? '?' + q.join('&') : ''));
+    r = await api('/dev/api/observe' + (q.length ? '?' + q.join('&') : ''), {
+      // 拉取超时（U8 对抗评审残留风险）：服务端挂起时 inFlight 永真会让
+      // 轮询静默停摆——5s 超时走 AbortError → api() 的网络失败路径 → 退避
+      signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+        ? AbortSignal.timeout(5000) : undefined,
+    });
   } finally {
     observe.inFlight = false;
   }
@@ -674,7 +679,8 @@ function applyEventToTurn(ev) {
     card = {turnId: ev.turn_id, userText: null, route: null, reply: null,
             replyFromDone: false, requestMono: null, firstDeltaMono: null,
             turnMono: null, endMono: null, speakResult: null,
-            fail: null, cancelled: false, interrupted: false};
+            fail: null, cancelled: false, interrupted: false,
+            clientSeenAt: Date.now() / 1000};
     turnCards.set(ev.turn_id, card);
   }
   switch (ev.kind) {
@@ -830,7 +836,13 @@ function turnCardHtml(c) {
   else if (c.fail !== null) { reply = '<span class="err">模型失败：' + vlEscape(c.fail) + '</span>'; }
   else if (c.cancelled) { reply = '<span class="muted">已取消</span>'; }
   else { reply = '<span class="muted">（等待回复…）</span>'; }
-  const speak = c.speakResult ? vlEscape(c.speakResult) : '（等待播报结束）';
+  // 僵尸卡兜底（U8 对抗评审 F4）：被打断的播报不落终态事件——超过 60s
+  // 仍无 speak_done/interrupt 的卡如实标注，不永久假装"等待中"
+  const pendingForever = c.endMono === null &&
+    (Date.now() / 1000 - (c.clientSeenAt || 0)) > 60;
+  const speak = c.speakResult ? vlEscape(c.speakResult)
+    : (pendingForever ? '<span class="muted">（无结束回执——被新会话接管或被打断）</span>'
+                      : '（等待播报结束）');
   return '<div class="turn-card' + (c.interrupted ? ' is-interrupted' : '') +
     '" data-turn="' + c.turnId + '">' +
     '<div class="turn-line"><span class="turn-role">用户</span>' +
@@ -975,6 +987,9 @@ function setTileOpen(tile, open) {
   body.hidden = !open;
   if (tile.id === 'tile-voicelog') { observeLiveChange(open); }
   if (tile.id === 'tile-voice-candidates' && open) { loadVoiceCandidates(); }
+  // 视觉磁贴收起即停预览（U8 对抗评审 F6：0.45fps 相机拉取不随折叠停止
+  // 是僵尸拉取；隐藏页场景已由 visibilitychange 覆盖）
+  if (tile.id === 'tile-vision' && !open && previewOn) { stopPreview('预览已随磁贴收起停止'); }
 }
 
 function initTiles() {

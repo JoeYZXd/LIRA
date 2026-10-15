@@ -104,6 +104,27 @@ class TestPrivacyInterlock:
         assert len(gaps) == 1 and gaps[0].reason == "privacy_on"
         assert _envelopes(tel)
 
+    async def test_privacy_quick_toggle_forces_client_reset(self):
+        """U8 对抗评审 F3：快开快关（<1 拍）后，隐私前内容必须可被客户端
+        辨认为已清空——清空后的 seq 墓碑使 cursor+1 < oldest 恒成立。"""
+        tel = DevTelemetry()
+        tel.add_observer()
+        _feed(tel, _sine(0.5))
+        tel.add_event("asr", "隐私前的识别文本")
+        cursor_audio = tel.audio_since(0)[1]
+        cursor_events = tel.events_since(0)[1]
+        tel.apply_privacy(True)
+        tel.apply_privacy(False)  # 一个拍内快开快关：客户端不会撞 403
+        tel.add_observer()
+        _feed(tel, _sine(0.2))
+        tel.add_event("wake", "隐私关闭后的事件")
+        audio_items, _, audio_reset = tel.audio_since(cursor_audio)
+        event_items, _, event_reset = tel.events_since(cursor_events)
+        assert audio_reset and event_reset, "快开快关必须触发整体重建（防隐私前内容残留）"
+        # 整窗快照里只有清空后的内容：gap + 隐私关闭后的新事件/新包络
+        assert all(e.text != "隐私前的识别文本" for e in event_items)
+        assert [e.text for e in event_items] == ["隐私关闭后的事件"]
+
     async def test_privacy_off_resumes_accepting_writes(self):
         tel = DevTelemetry()
         tel.add_observer()

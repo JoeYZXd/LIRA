@@ -176,6 +176,14 @@ class DevHandle:
         finally:
             stream.stop()
             stream.close()
+        if not self._rec_stop.is_set():
+            # 自然到期自愈（U8 对抗评审 F5，pre-existing）：60s 上限到达时
+            # 复位录音态并归还麦克风——原实现只停采集，recording_active 悬挂
+            # （再 start 409）且主循环 mic_pause 不解除（设备失聪到手动 stop）。
+            # 手动 stop 路径不受影响（stop 事件已置位时由 stop_recording 收尾）。
+            self.recording_active = False
+            self._rec_result = (b"".join(chunks), loop.time() - started)
+            await self.runtime.mic_resume()
         seconds = loop.time() - started
         pcm = b"".join(chunks)
         buf = io.BytesIO()
@@ -723,6 +731,12 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         body = await _json_body(request)
         if body is None:
             return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
+        # U8 对抗评审 F2：await body 读取是让出点——隐私可在首闸之后、领域
+        # 事务之前翻转（confirm_association 无内部隐私检查），此处复检对齐
+        # observe 的双闸先例
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
         member_id = body.get("member_id")
         if not isinstance(member_id, int) or isinstance(member_id, bool):
             return JSONResponse({"error": "member_id 须为整数"}, status_code=400)

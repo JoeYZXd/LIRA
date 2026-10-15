@@ -260,11 +260,16 @@ class SpeakerIdentity:
         同一套逻辑）——误绑对账 → 同名转关联请求 → 新名晋升。
 
         误绑防线：纯文本阶段已把称呼暂存到某候选——当前声音命中的候选对不上
-        （含 lookup 歧义/无候选）就不晋升，宁缺毋错绑。返回 (member, notice,
-        original)；成功话术与 original 由调用方注入（两分支仅此有差异）。
+        就不晋升；暂存尝试过但此刻命中的候选为 None（含 lookup 歧义/无候选）
+        同样拒绝（U8 对抗评审 F1：None 曾被当豁免，名字可跨到相近声音的
+        候选上）。候选未装配（candidates=None）才是唯一豁免——无登记出口时
+        本就不晋升，无错绑对象。返回 (member, notice, original)；成功话术与
+        original 由调用方注入（两分支仅此有差异）。
         """
         mismatch=self.pending.get('candidate_id') not in (None,candidate_id)
-        if mismatch:
+        staged_without_hit=(self.pending.get('staged')
+                            and self.candidates is not None and candidate_id is None)
+        if mismatch or staged_without_hit:
             self.pending=None
             return None,'现在这个声音和刚才报名字的对不上，先不登记，以免认错人。',None
         existing=self._existing_member(name)
@@ -282,8 +287,12 @@ class SpeakerIdentity:
         return self.memory.find_member(name)
 
     def _stage_pending_name(self,name):
-        # 纯文本称呼暂存：用 pending 里的声音 lookup 候选才写（不凭空登记）
+        # 纯文本称呼暂存：用 pending 里的声音 lookup 候选才写（不凭空登记）。
+        # U8 对抗评审 F1：暂存"尝试过"本身必须留痕（staged 标记）——否则
+        # 无候选时静默不写，settle 的对账把缺失当豁免，名字可晋升到后来
+        # 相近声音（≥assign 阈值）建的候选上，跨说话人误绑身份。
         if self.candidates is None or self.pending is None:return
+        self.pending['staged']=True
         vector=self.pending.get('vector')
         candidate_id=self.candidates.lookup(vector) if vector is not None else None
         if candidate_id is not None and self.candidates.set_pending_name(candidate_id,name):

@@ -101,6 +101,9 @@ class FakeTts:
 class FakeLlm:
     """LlmClient 替身：远程恒不可用（路由走本地规则），白话钩子恒本地直读。"""
 
+    #: LIRA_PERSONAL_MEMORY=1 装配分支读 llm._client（PersonalMemory 的 SDK 引用）
+    _client = None
+
     def is_available(self) -> bool:
         return False
 
@@ -1087,6 +1090,149 @@ class TestChatAssembly:
                 rig.source.push_eof()
                 await asyncio.wait_for(task, timeout=5.0)
         assert any("chat_init_failed" in rec.message for rec in caplog.records)
+
+
+# ---------- U6/KTD5：声纹候选装配与观察接线（LIRA_PERSONAL_MEMORY=1 分支） ----------
+
+
+class FakePersonalMemory:
+    """PersonalMemory 替身：只提供装配面用到的属性（db / profiles）。"""
+
+    def __init__(self, db):
+        self.db = db
+
+    def profiles(self):
+        return []
+
+
+class FakeSpeakerIdentity:
+    """SpeakerIdentity 替身：固定向量 + 固定指纹（不触 sherpa）。"""
+
+    model_fingerprint = "test-fp:2"
+
+    def __init__(self):
+        self.pending = None
+
+    def embedding(self, samples):
+        return np.array([1.0, 0.0], np.float32)
+
+    def match(self, vector):
+        return None
+
+    def resolve(self, text, vector):
+        return None, None, None
+
+
+class RecordingCandidates:
+    """VoiceCandidates 替身：记录构造参数与 observe 调用（判定逻辑自有测试）。"""
+
+    instances: list["RecordingCandidates"] = []
+
+    def __init__(self, db, *, fingerprint, profiles_provider, params, privacy,
+                 now=None, event_sink=None):
+        self.db = db
+        self.fingerprint = fingerprint
+        self.profiles_provider = profiles_provider
+        self.params = params
+        self.privacy = privacy
+        self.event_sink = event_sink
+        self.observed: list = []
+        RecordingCandidates.instances.append(self)
+
+    def observe(self, vector, samples):
+        self.observed.append((vector, samples))
+        return None
+
+
+def make_personal_rig(tmp_path, monkeypatch):
+    """LIRA_PERSONAL_MEMORY=1 装配台架：memory/identity/候选全部替身化。"""
+    import sqlite3
+
+    import lira.personal_memory as pm_mod
+    import lira.speaker_candidates as sc_mod
+
+    db = sqlite3.connect(":memory:")
+    monkeypatch.setattr(pm_mod, "PersonalMemory", lambda *a, **k: FakePersonalMemory(db))
+    monkeypatch.setattr(pm_mod, "SpeakerIdentity", lambda *a, **k: FakeSpeakerIdentity())
+    RecordingCandidates.instances = []
+    monkeypatch.setattr(sc_mod, "VoiceCandidates", RecordingCandidates)
+    monkeypatch.setenv("LIRA_PERSONAL_MEMORY", "1")
+    rig = make_rig(tmp_path)
+    return rig, RecordingCandidates.instances[-1]
+
+
+class TestSpeakerCandidatesAssembly:
+    async def test_personal_memory_env_wires_candidates_to_shared_connection(
+            self, tmp_path, monkeypatch):
+        """装配面（U7 消费入口）：候选与 PersonalMemory 同一连接、参数来自
+        cfg.speaker、指纹来自 SpeakerIdentity、隐私谓词与主循环同源。"""
+        rig, candidates = make_personal_rig(tmp_path, monkeypatch)
+        rt = rig.runtime
+        assert rt.speaker_candidates is candidates
+        assert candidates.db is rt.personal_memory.db, "必须同一 SQLite 连接（KTD6 晋升同事务）"
+        assert candidates.fingerprint == "test-fp:2"
+        assert candidates.params is rt._cfg.speaker
+        assert candidates.profiles_provider() == rt.personal_memory.profiles()
+        assert candidates.privacy() is rt.privacy.is_on
+        assert candidates.event_sink is not None, "观察事件面进 dev 遥测（U7 辅助数据源）"
+
+    async def test_handle_voice_input_observes_after_post_extraction_recheck(
+            self, tmp_path, monkeypatch):
+        """提取后复检通过 → observe 被调（向量与样本透传；resolve 之前）。"""
+        from lira.main import DeviceRuntime
+
+        rig, candidates = make_personal_rig(tmp_path, monkeypatch)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        samples = np.full(16000, 0.2, dtype=np.float32)
+        await DeviceRuntime.handle_voice_input(
+            rt, "现在几点了", samples, rt.dispatcher.generation, False)
+        assert len(candidates.observed) == 1
+        vector, observed_samples = candidates.observed[0]
+        assert np.allclose(vector, np.array([1.0, 0.0], np.float32))
+        assert observed_samples.shape == samples.shape
+
+    async def test_handle_voice_input_skips_observe_on_stale_generation(
+            self, tmp_path, monkeypatch):
+        """AE5：提取期间 generation 轮换（隐私开关两次）→ 晚到结果不提交。"""
+        from lira.main import DeviceRuntime
+
+        rig, candidates = make_personal_rig(tmp_path, monkeypatch)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        stale_generation = rt.dispatcher.generation
+        # 提取期间 generation 轮换：privacy on/off 各 bump 一次 dispatcher 代次
+        await rt.privacy.set_enabled(True, source="test")
+        await rt.privacy.set_enabled(False, source="test")
+        await rt.engine.on_wake()  # 回到聆听态，唯独 generation 已旧
+        await DeviceRuntime.handle_voice_input(
+            rt, "现在几点了", np.full(16000, 0.2, dtype=np.float32), stale_generation, False)
+        assert candidates.observed == [], "过期代次的提取结果不得进入候选积累"
+
+    async def test_handle_voice_input_skips_observe_without_samples(
+            self, tmp_path, monkeypatch):
+        """空样本（命令通道兜底 np.empty(0)）与提取失败（vector None）不观察。"""
+        from lira.main import DeviceRuntime
+
+        rig, candidates = make_personal_rig(tmp_path, monkeypatch)
+        rt = rig.runtime
+        await rt.engine.on_wake()
+        generation = rt.dispatcher.generation
+        await DeviceRuntime.handle_voice_input(rt, "现在几点了", np.empty(0, np.float32),
+                                               generation, False)
+        assert candidates.observed == []
+        rt.speaker_identity.embedding = lambda samples: None  # 提取失败：向量 None
+        await DeviceRuntime.handle_voice_input(rt, "现在几点了",
+                                               np.full(16000, 0.2, np.float32),
+                                               generation, False)
+        assert candidates.observed == []
+
+    async def test_feature_off_keeps_attribute_none(self, tmp_path, monkeypatch):
+        """默认（LIRA_PERSONAL_MEMORY!=1）：speaker_candidates=None，主链路零变化。"""
+        monkeypatch.delenv("LIRA_PERSONAL_MEMORY", raising=False)
+        rig = make_rig(tmp_path)
+        assert rig.runtime.speaker_candidates is None
+        assert rig.runtime.personal_memory is None
 
 
 # ---------- U3/KTD3：同轮观测全链路（dispatcher→engine→callbacks→遥测） ----------

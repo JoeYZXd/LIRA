@@ -515,3 +515,52 @@ dev_console:
 > **M0 实测附注**（2026-10-02）：镜像自带 zram0 swap（3.9G，RAM 介质，不磨损 eMMC——
 > 与"无 swap"纪律不冲突，该条防的是磁盘 swap 写穿介质；swappiness 实时性调优留 M7）。
 > `/var/log` 已挂 zram1（200M）——M7 评估 log2ram/journald volatile 是否冗余。
+
+---
+
+## 3. 声纹候选自动积累（开发者控制台改版 U6）
+
+> 面向部署/运维：候选积累随设备主循环自动进行，无需页面开启。数据只存本地
+> SQLite（`voice_candidates` / `voice_candidate_evidence` 两张新表，与既有
+> `members` / `voice_profiles` 相互独立），**不存原始音频**——只有归一化向量、
+> 段数/时长统计与去重哈希。
+
+### 3.1 门控与装配
+
+- 功能随 `LIRA_PERSONAL_MEMORY=1` 一起启用（与既有声纹识别同一开关）：
+  主循环在识别到有效语句后，把已完成提取的声纹向量交给候选存储；
+  未启用时该路径完全不存在（`speaker_candidates=None`），主链路零变化。
+- **已建立声纹的可靠匹配继续走现有身份识别**，不建候选、不受本功能影响。
+- 候选表确认前没有成员权限：候选不产生个人记忆读写（U7 才提供确认晋升）。
+
+### 3.2 候选积累参数（config.yaml `speaker` 段 / 环境变量覆盖）
+
+| 参数 | 默认值 | 环境变量 | 含义 |
+|------|--------|----------|------|
+| `target_segments` | 3 | `LIRA_SPEAKER_TARGET_SEGMENTS` | 就绪目标：独立合格语音段数 |
+| `target_seconds` | 10.0 | `LIRA_SPEAKER_TARGET_SECONDS` | 就绪目标：累计有效秒数 |
+| `min_segment_seconds` | 1.0 | `LIRA_SPEAKER_MIN_SEGMENT_SECONDS` | 单段最短时长（秒） |
+| `max_candidates` | 20 | `LIRA_SPEAKER_MAX_CANDIDATES` | 未绑定候选上限 |
+| `candidate_ttl_days` | 7.0 | `LIRA_SPEAKER_TTL_DAYS` | 无新证据的过期天数 |
+| `match_threshold` / `match_margin` | 0.80 / 0.10 | —（改 yaml） | 已建立成员匹配门槛/歧义边际 |
+| `assign_threshold` | 0.73 | —（改 yaml） | 候选指派门槛 |
+| `consistency_threshold` | 0.85 | —（改 yaml） | 段间一致性门 |
+| `min_rms` / `max_clip_ratio` | 0.01 / 0.05 | —（改 yaml） | 能量下限 / 削波比例上限 |
+| `strategy_version` | 1 | —（改 yaml） | 采集策略版本 |
+
+**声明**：以上均为**工程初值，不代表识别准确率**——板端质量阈值与样本目标
+的校准属于 U8 交付门槛；校准不合格不得对外宣称就绪 100% 或识别准确率。
+
+### 3.3 状态与生命周期
+
+- 进度 = min(段数/`target_segments`, 秒数/`target_seconds`)，重复片段、
+  过短、低能量、削波、歧义（与多个已知声音边际不足）不计入进度；
+  未过段间一致性门时进度封顶 99%，三项条件齐备才 `ready`（仍待身份确认）。
+- 候选状态机：`accumulating`（积累中）→ `ready`（采集就绪待确认）；
+  `stale`（模型指纹或 `strategy_version` 变化，旧证据不删除、不混算，
+  需重新积累）；`expired`（超过 ttl 无新证据）。重复片段靠样本哈希去重
+  （跨重启稳定），全局滚动保留最近 100 个标识。
+- **隐私联锁（AE5）**：隐私开启即停写——提取结果提交前经主循环复检
+  （代次/隐私/状态）与存储内第二道隐私检查；迟到结果不落库。
+- 升级前备份设备库（§1.5 冷拷贝方式同样适用）；回滚关闭新功能后新增表
+  保留不删，家庭历史不受影响。

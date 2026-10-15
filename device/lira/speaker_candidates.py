@@ -1,0 +1,404 @@
+"""多候选声纹积累存储（开发者控制台改版 U6，KTD5/KTD6）。
+
+职责与边界：
+  - 在与 LIRA 的日常交谈中，把有效语音段的声纹向量归入稳定候选并持久化，
+    使多个声音跨多轮、跨重启积累证据，进度具有稳定含义（R4/R5）；
+  - **同一 SQLite 连接**：构造入参为 sqlite3 连接（生产装配传
+    ``PersonalMemory.db``，即 ChatStore 连接）——U7 的同名确认晋升必须与
+    members/voice_profiles 同事务，分连接做不到。候选表与 members 相互独立：
+    不建外键、确认前没有 member_id 权限、不产生个人记忆权限（KTD6）；
+  - **绝不存原始音频**：只存归一化向量、段数/时长统计与 sha256 去重标识；
+  - 无锁/单循环纪律：与 PersonalMemory 相同，单进程 asyncio 单事件循环线程
+    内同步调用（observe 写量小，与 completed 同级），本类不做内部加锁；
+  - store 以向量为输入、与提取器无关——测试用固定向量证明行为（Execution note）。
+
+进度语义（KTD5，工程初值不代表识别准确率，U8 校准）：
+  - 有效段 = 通过时长/能量/削波质量门、未被去重命中、非歧义、非已建立成员、
+    且与所归候选聚合向量一致的段；
+  - 进度 = min(段数/目标段数, 秒数/目标秒数)，取较小值；未过段间一致性门
+    封顶 99%；计数、时长、两两一致性齐备才置 ready（进度 1.0，仍待身份确认）；
+  - 相似度是余弦分数，不是百分比，不与进度混同、不代表识别准确率。
+
+stale / expired / 去重滚动的语义选择：
+  - **stale**（置状态、不删除）：打开本类时，模型指纹或策略版本与现任不一致
+    的活跃候选一律置 stale——旧证据保留供排查，进度从零重新积累（KTD5：
+    策略/模型变化不能静默把旧证据变成新 100%）；observe 只指派现任指纹 +
+    现任策略版本的候选；
+  - **expired**（惰性置位）：observe/snapshot 开头把超过 ttl 无新证据的
+    accumulating 候选置 expired；ready 候选不过期（U7 确认流程负责收尾）；
+  - **去重标识全局滚动保留最近 100 条**：现存标识命中即 duplicate 拒绝
+    （sha256 对样本原始字节，跨重启稳定）；标识被淘汰后重复保护随之失效——
+    同片段按新片段重新判定（永久保留全部标识不可行；100 条按写入时间滚动，
+    正常使用中极少回绕）。候选自身的 segment_count/total_seconds 不回退。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import logging
+import sqlite3
+import time
+from dataclasses import dataclass
+from typing import Callable
+
+import numpy as np
+
+from lira.audio._paths import SAMPLE_RATE
+
+__all__ = ["VoiceCandidates", "Verdict"]
+
+#: 去重标识全局滚动上限（KTD5 数据关系：最多保留最近 100 个标识）
+MAX_DEDUP_KEYS = 100
+
+#: 削波判阈（与 dev_telemetry/RouteDispatch 同阈：|x| >= 0.999 记削波）
+CLIP_THRESHOLD = 0.999
+
+#: 进度封顶：未过段间一致性门时最多 99%（KTD5：条件齐备才 100%）
+PROGRESS_CAP = 0.99
+
+# Verdict.outcome 取值（拒绝原因可读、可计数，为 U7 磁贴与 U8 校准留事件面）
+ACCEPTED = "accepted"
+DUPLICATE = "duplicate"
+TOO_SHORT = "too_short"
+LOW_ENERGY = "low_energy"
+CLIPPED = "clipped"
+AMBIGUOUS = "ambiguous"
+ESTABLISHED = "established"
+PRIVACY = "privacy"
+STALE_FINGERPRINT = "stale_fingerprint"
+BOUND_REACHED = "bound_reached"
+INCONSISTENT = "inconsistent"
+
+
+@dataclass(frozen=True)
+class Verdict:
+    """单次观察的判定结果。
+
+    本单元（U6）不驱动对话行为；U7 磁贴与确认流程才消费。``progress`` 仅在
+    accepted 时给出（该候选更新后的采集完成度）。
+    """
+
+    outcome: str
+    candidate_id: int | None = None
+    progress: float | None = None
+    reason: str = ""
+
+    @property
+    def accepted(self) -> bool:
+        return self.outcome == ACCEPTED
+
+
+class VoiceCandidates:
+    """候选声纹存储（U6）：observe 记一段证据，snapshot 出 U7 磁贴数据面。"""
+
+    def __init__(
+        self,
+        db: sqlite3.Connection,
+        *,
+        fingerprint: str,
+        profiles_provider: Callable[[], list],
+        params,
+        privacy: Callable[[], bool],
+        now: Callable[[], float] | None = None,
+        event_sink: Callable[[str, str], None] | None = None,
+    ) -> None:
+        self.db = db
+        self.fingerprint = str(fingerprint)
+        self.params = params
+        self._profiles_provider = profiles_provider
+        self._privacy = privacy
+        self._now = time.time if now is None else now
+        self._event_sink = event_sink
+        # 幂等建表（KTD8）：新表不触碰既有 members/voice_profiles/memory_turns；
+        # 故意不建到 members 的外键——确认前候选没有 member_id 权限（KTD6）。
+        self.db.executescript('''
+            CREATE TABLE IF NOT EXISTS voice_candidates (
+                candidate_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                aggregate_vector BLOB NOT NULL,
+                model_fingerprint TEXT NOT NULL,
+                segment_count INTEGER NOT NULL DEFAULT 0,
+                total_seconds REAL NOT NULL DEFAULT 0,
+                consistency_passed INTEGER NOT NULL DEFAULT 0,
+                strategy_version INTEGER NOT NULL,
+                status TEXT NOT NULL,
+                created_at REAL NOT NULL,
+                updated_at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS voice_candidate_evidence (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                candidate_id INTEGER NOT NULL REFERENCES voice_candidates(candidate_id),
+                dedup_key TEXT NOT NULL,
+                duration REAL NOT NULL,
+                vector BLOB NOT NULL,
+                created_at REAL NOT NULL);
+        ''')
+        self._invalidate_foreign()
+
+    # ---------- 生命周期 ----------
+
+    def _invalidate_foreign(self) -> None:
+        """stale 语义（打开时）：指纹或策略版本与现任不符的活跃候选置 stale。
+
+        不删除、不混算：旧证据保留供排查，进度从零重新积累。
+        """
+        with self.db:
+            self.db.execute(
+                "UPDATE voice_candidates SET status='stale', updated_at=? "
+                "WHERE status IN ('accumulating','ready') "
+                "AND (model_fingerprint != ? OR strategy_version != ?)",
+                (self._now(), self.fingerprint, self.params.strategy_version))
+
+    def _expire_candidates(self, now: float) -> None:
+        """惰性过期：accumulating 候选超过 ttl 无新证据 → expired。"""
+        cutoff = now - self.params.candidate_ttl_days * 86400.0
+        with self.db:
+            self.db.execute(
+                "UPDATE voice_candidates SET status='expired' "
+                "WHERE status='accumulating' AND updated_at < ?", (cutoff,))
+
+    # ---------- 观察入口 ----------
+
+    def observe(self, vector, samples, *, now: float | None = None) -> Verdict:
+        """记录一段已完成提取的声纹证据（sync；主循环复检通过后才调用）。
+
+        判定顺序：隐私 -> 向量维度 -> 质量门（时长/能量/削波）-> 去重 ->
+        已建立成员 -> 候选指派 -> 段一致性 -> 接受与就绪复核。任何拒绝都
+        不产生写入（AE2：低质量、重复或歧义片段不增加进度）。
+        """
+        now = self._now() if now is None else now
+        self._expire_candidates(now)
+        # 迟到提交第二道防线（AE5）：主流程复检是第一道，这里再看一眼隐私。
+        if self._privacy():
+            return self._verdict(PRIVACY, reason="隐私开启，候选证据暂停写入")
+        vector = np.asarray(vector, np.float32)
+        norm = float(np.linalg.norm(vector))
+        vector = vector / norm if norm > 1e-6 else vector
+        dim = self._fingerprint_dim()
+        if dim and vector.shape != (dim,):
+            # 指纹应捕捉而未捕捉的模型变化：绝不与现任候选混算
+            return self._verdict(STALE_FINGERPRINT,
+                                 reason="向量维度与现任模型指纹不符，需要重新积累")
+
+        samples = np.ascontiguousarray(np.asarray(samples, np.float32))
+        duration = samples.size / SAMPLE_RATE
+        if duration < self.params.min_segment_seconds:
+            return self._verdict(TOO_SHORT,
+                                 reason=f"片段 {duration:.2f}s 短于最小 {self.params.min_segment_seconds:g}s")
+        rms = float(np.sqrt(np.mean(samples.astype(np.float64) ** 2)))
+        if rms < self.params.min_rms:
+            return self._verdict(LOW_ENERGY,
+                                 reason=f"能量 RMS {rms:.4f} 低于 {self.params.min_rms:g}")
+        clip_ratio = float(np.mean(np.abs(samples) >= CLIP_THRESHOLD))
+        if clip_ratio > self.params.max_clip_ratio:
+            return self._verdict(CLIPPED,
+                                 reason=f"削波比例 {clip_ratio:.2%} 超过 {self.params.max_clip_ratio:.0%}")
+
+        # 跨重启稳定的去重标识：样本原始字节 sha256（不用 utterance_id）
+        dedup_key = hashlib.sha256(samples.tobytes()).hexdigest()
+        if self.db.execute("SELECT 1 FROM voice_candidate_evidence WHERE dedup_key=? LIMIT 1",
+                           (dedup_key,)).fetchone():
+            return self._verdict(DUPLICATE, reason="重复片段不重复累计")
+
+        established = self._match_established(vector)
+        if established is not None:
+            member_id, ambiguous = established
+            if ambiguous:
+                return self._verdict(AMBIGUOUS, reason="声音归属不明确，本段不计入")
+            return self._verdict(ESTABLISHED, candidate_id=member_id,
+                                 reason="命中已建立声纹，走现有识别，不建候选")
+
+        target = self._assign(vector, now)
+        if isinstance(target, Verdict):
+            return target
+        candidate_id, aggregate_blob, segment_count, total_seconds = target
+        aggregate = np.frombuffer(aggregate_blob, np.float32)
+        if float(np.dot(vector, aggregate)) < self.params.consistency_threshold:
+            return self._verdict(INCONSISTENT, candidate_id=candidate_id,
+                                 reason="与该候选既有证据一致性不足，本段不计入")
+
+        merged = aggregate * segment_count + vector
+        merged_norm = float(np.linalg.norm(merged))
+        merged = merged / merged_norm if merged_norm > 1e-6 else vector
+        new_count = segment_count + 1
+        new_seconds = total_seconds + duration
+        with self.db:
+            self.db.execute(
+                "INSERT INTO voice_candidate_evidence"
+                "(candidate_id,dedup_key,duration,vector,created_at) VALUES (?,?,?,?,?)",
+                (candidate_id, dedup_key, duration, vector.tobytes(), now))
+            self.db.execute(
+                "UPDATE voice_candidates SET aggregate_vector=?, segment_count=?, "
+                "total_seconds=?, updated_at=? WHERE candidate_id=?",
+                (merged.astype(np.float32).tobytes(), new_count, new_seconds, now, candidate_id))
+            self.db.execute(
+                "DELETE FROM voice_candidate_evidence WHERE id NOT IN "
+                "(SELECT id FROM voice_candidate_evidence ORDER BY id DESC LIMIT ?)",
+                (MAX_DEDUP_KEYS,))
+            # 就绪复核（同事务，KTD5）：计数、时长与现存证据两两一致性齐备才 ready
+            worst = self._min_pairwise_cos(candidate_id)
+            passed = bool(self.db.execute(
+                "SELECT consistency_passed FROM voice_candidates WHERE candidate_id=?",
+                (candidate_id,)).fetchone()[0])
+            if (worst is not None and worst >= self.params.consistency_threshold
+                    and new_count >= self.params.target_segments
+                    and new_seconds >= self.params.target_seconds):
+                self.db.execute(
+                    "UPDATE voice_candidates SET consistency_passed=1, status='ready' "
+                    "WHERE candidate_id=?", (candidate_id,))
+                passed = True
+        return self._verdict(ACCEPTED, candidate_id=candidate_id,
+                             progress=self._progress(new_count, new_seconds, passed),
+                             reason=f"有效证据 {new_count} 段 / {new_seconds:.1f}s")
+
+    # ---------- 快照（U7 磁贴数据面） ----------
+
+    def snapshot(self, *, now: float | None = None) -> dict:
+        """候选与汇总快照。字段用 candidate（候选数不直接称为人数）。"""
+        now = self._now() if now is None else now
+        self._expire_candidates(now)
+        rows = self.db.execute(
+            "SELECT candidate_id,status,segment_count,total_seconds,"
+            "consistency_passed,updated_at FROM voice_candidates "
+            "ORDER BY candidate_id").fetchall()
+        candidates = []
+        for row in rows:
+            passed = bool(row[4])
+            candidates.append({
+                "candidate_id": int(row[0]),
+                "status": str(row[1]),
+                "progress": self._progress(int(row[2]), float(row[3]), passed),
+                "segment_count": int(row[2]),
+                "total_seconds": float(row[3]),
+                "targets": {"segments": self.params.target_segments,
+                            "seconds": self.params.target_seconds},
+                "consistency_passed": passed,
+                "updated_at": float(row[5]),
+            })
+        established = self._profiles_provider() or []
+        return {
+            "candidates": candidates,
+            "summary": {
+                "established_count": len(established),
+                "accumulating_count": sum(1 for c in candidates if c["status"] == "accumulating"),
+                "ready_count": sum(1 for c in candidates if c["status"] == "ready"),
+            },
+        }
+
+    # ---------- 判定辅助 ----------
+
+    def _fingerprint_dim(self) -> int:
+        """从指纹后缀解析维度（SpeakerIdentity.model_fingerprint 形如 ``<sha1>:<dim>``）。"""
+        _, _, dim = self.fingerprint.rpartition(":")
+        try:
+            return int(dim)
+        except ValueError:
+            return 0
+
+    def _match_established(self, vector):
+        """已建立成员判定（与 SpeakerIdentity.match 同则）。
+
+        最高 cos >= match_threshold 且对次高边际 >= match_margin →
+        (member_id, False)；最高达标但边际不足 → (None, True) 表示歧义；
+        无达标 → None。旧模型时代的 profile（维度不符）不参与混算。
+        """
+        scores = []
+        for member, member_vector in (self._profiles_provider() or []):
+            member_vector = np.asarray(member_vector, np.float32)
+            if member_vector.shape != vector.shape:
+                continue
+            scores.append((float(np.dot(vector, member_vector)), int(member)))
+        if not scores:
+            return None
+        scores.sort(reverse=True)
+        if scores[0][0] < self.params.match_threshold:
+            return None
+        if len(scores) > 1 and scores[0][0] - scores[1][0] < self.params.match_margin:
+            return None, True
+        return scores[0][1], False
+
+    def _active_rows(self):
+        """现任指纹 + 现任策略版本的活跃候选（observe 只在这些里指派）。"""
+        return self.db.execute(
+            "SELECT candidate_id,aggregate_vector,segment_count,total_seconds "
+            "FROM voice_candidates WHERE status IN ('accumulating','ready') "
+            "AND model_fingerprint=? AND strategy_version=? ORDER BY candidate_id",
+            (self.fingerprint, self.params.strategy_version)).fetchall()
+
+    def _count_active(self) -> int:
+        """现任指纹 + 现任策略版本的活跃候选数（max_candidates 名额口径）。"""
+        row = self.db.execute(
+            "SELECT COUNT(*) FROM voice_candidates WHERE status IN ('accumulating','ready') "
+            "AND model_fingerprint=? AND strategy_version=?",
+            (self.fingerprint, self.params.strategy_version)).fetchone()
+        return int(row[0])
+
+    def _assign(self, vector, now: float):
+        """候选指派：现任活跃候选按 cos 降序——最高达标且边际足 → 归入；
+        最高达标但边际不足 → 歧义拒绝；无达标 → 新建候选（未满上限时）。
+
+        返回 (candidate_id, aggregate_blob, segment_count, total_seconds) 或 Verdict。
+        """
+        scored = []
+        for row in self._active_rows():
+            aggregate = np.frombuffer(row[1], np.float32)
+            if aggregate.shape != vector.shape:
+                # 指纹未反映的维度变化（防御）：候选立即失效，绝不与本段混算
+                with self.db:
+                    self.db.execute("UPDATE voice_candidates SET status='stale' "
+                                    "WHERE candidate_id=?", (row[0],))
+                continue
+            scored.append((float(np.dot(vector, aggregate)), row))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if scored and scored[0][0] >= self.params.assign_threshold:
+            if len(scored) > 1 and scored[0][0] - scored[1][0] < self.params.match_margin:
+                return Verdict(AMBIGUOUS, reason="声音归属不明确，本段不计入任何候选")
+            return scored[0][1]
+        if self._count_active() >= self.params.max_candidates:
+            return Verdict(BOUND_REACHED,
+                           reason="未绑定候选已达上限，新声音暂不积累（等待确认或过期腾出名额）")
+        with self.db:
+            cursor = self.db.execute(
+                "INSERT INTO voice_candidates(aggregate_vector,model_fingerprint,"
+                "segment_count,total_seconds,consistency_passed,strategy_version,"
+                "status,created_at,updated_at) VALUES (?, ?, 0, 0, 0, ?, 'accumulating', ?, ?)",
+                (vector.tobytes(), self.fingerprint, self.params.strategy_version, now, now))
+        return cursor.lastrowid, vector.tobytes(), 0, 0.0
+
+    def _min_pairwise_cos(self, candidate_id):
+        """该候选现存证据两两余弦的最小值（就绪复核用）；证据不足返回 None。
+
+        去重标识滚动淘汰后现存证据可能少于累计段数——复核基于现存证据，
+        docstring「去重滚动」一节有说明。
+        """
+        vectors = [np.frombuffer(row[0], np.float32)
+                   for row in self.db.execute(
+                       "SELECT vector FROM voice_candidate_evidence WHERE candidate_id=?",
+                       (candidate_id,))]
+        if len(vectors) < self.params.target_segments:
+            return None
+        worst = 1.0
+        for i in range(len(vectors)):
+            for j in range(i + 1, len(vectors)):
+                worst = min(worst, float(np.dot(vectors[i], vectors[j])))
+        return worst
+
+    def _progress(self, count: int, seconds: float, consistency_passed: bool) -> float:
+        """采集完成度 = min(段数比, 时长比)；未过一致性门封顶 99%（KTD5）。"""
+        ratio = min(count / self.params.target_segments,
+                    seconds / self.params.target_seconds)
+        ratio = max(0.0, min(ratio, 1.0))
+        if not consistency_passed:
+            ratio = min(ratio, PROGRESS_CAP)
+        return round(ratio, 4)
+
+    def _verdict(self, outcome: str, *, candidate_id: int | None = None,
+                 progress: float | None = None, reason: str = "") -> Verdict:
+        """构造 Verdict；事件面（kind 前缀 voice_）进 dev 遥测，异常只留痕。"""
+        verdict = Verdict(outcome, candidate_id=candidate_id,
+                          progress=progress, reason=reason)
+        if self._event_sink is not None:
+            try:
+                text = f"{outcome} candidate={candidate_id} {reason}".strip()
+                self._event_sink("voice_candidate", text)
+            except Exception:  # noqa: BLE001 - 观察旁路不拖垮主链路
+                logging.debug("speaker_candidates event=sink_failed", exc_info=True)
+        return verdict

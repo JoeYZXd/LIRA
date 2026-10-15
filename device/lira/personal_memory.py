@@ -1,6 +1,7 @@
 """Local per-member memory and passive speaker enrollment; no raw audio files."""
 from __future__ import annotations
 import asyncio
+import hashlib
 import json
 import logging
 import re
@@ -145,6 +146,7 @@ class PersonalMemory:
 class SpeakerIdentity:
     def __init__(self, memory, model_path, *, extractor=None):
         self.memory=memory
+        self.model_path=model_path
         if extractor is None:
             import sherpa_onnx
             config=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(model_path),num_threads=1,provider='cpu')
@@ -153,6 +155,14 @@ class SpeakerIdentity:
         self.pending=None
         self.threshold=0.80
         self.margin=0.10
+
+    @property
+    def model_fingerprint(self):
+        # U6/KTD5：候选表用指纹区分模型代次（路径+输出维度；跨重启稳定，无随机成分）
+        dim=getattr(self.extractor,'dim',0)
+        try:dim=int(dim)
+        except (TypeError,ValueError):dim=0
+        return hashlib.sha1(str(self.model_path).encode('utf-8')).hexdigest()[:12]+f':{dim}'
 
     def embedding(self, samples):
         if len(samples)<16000: return None

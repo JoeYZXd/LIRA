@@ -102,12 +102,43 @@ class SyncConfig:
 
 
 @dataclass(frozen=True)
+class SpeakerConfig:
+    """声纹候选积累参数（开发者控制台改版 U6，KTD5）。
+
+    全部为**工程初值，不代表识别准确率**——板端质量阈值与样本目标的校准
+    属于 U8 验收门槛，校准不合格不得发布 100% 就绪承诺。改变 strategy_version
+    即宣告策略代次变化：旧候选证据失效（stale），要求重新积累，不静默续用。
+    """
+
+    #: 就绪目标：至少 N 段独立合格语音且累计 M 秒
+    target_segments: int = 3
+    target_seconds: float = 10.0
+    #: 单段质量门：最短时长（秒）、能量下限（RMS）、削波比例上限
+    min_segment_seconds: float = 1.0
+    min_rms: float = 0.01
+    max_clip_ratio: float = 0.05
+    #: 未绑定候选上限与过期天数（KTD5 数据关系：最多 20 个、7 天无证据过期）
+    max_candidates: int = 20
+    candidate_ttl_days: float = 7.0
+    #: 匹配门槛（已建立成员判定，与 SpeakerIdentity 同则）与歧义边际
+    match_threshold: float = 0.80
+    match_margin: float = 0.10
+    #: 候选指派门槛（低于 match_threshold：陌生声音才建新候选）
+    assign_threshold: float = 0.73
+    #: 段间一致性门（新段 vs 聚合向量、就绪复核的两两最小余弦）
+    consistency_threshold: float = 0.85
+    #: 采集策略版本：变化即旧候选 stale，重新积累
+    strategy_version: int = 1
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LlmConfig
     hal: HalConfig
     sync: SyncConfig
     ui: UiConfig
     dev_console: DevConsoleConfig
+    speaker: SpeakerConfig
     db_path: Path
     log_level: str
 
@@ -147,6 +178,21 @@ DEFAULTS: dict[str, Any] = {
     "dev_console": {
         "enabled": False,
     },
+    # 开发者控制台改版 U6：声纹候选积累参数（KTD5 工程初值，不代表识别准确率）
+    "speaker": {
+        "target_segments": 3,
+        "target_seconds": 10.0,
+        "min_segment_seconds": 1.0,
+        "min_rms": 0.01,
+        "max_clip_ratio": 0.05,
+        "max_candidates": 20,
+        "candidate_ttl_days": 7.0,
+        "match_threshold": 0.80,
+        "match_margin": 0.10,
+        "assign_threshold": 0.73,
+        "consistency_threshold": 0.85,
+        "strategy_version": 1,
+    },
     # U6：本地家电配置库（R13，安全规则本地持久化；gitignore *.db）
     "db_path": "data/device.db",
     # U6：设备↔后台同步（R30 设备侧）。ws_url 空 = 未配置后台（离线纯本地运行）
@@ -184,6 +230,12 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_UI_HOST": ("ui", "host", str),
     "LIRA_UI_PORT": ("ui", "port", int),
     "LIRA_DEV_CONSOLE": ("dev_console", "enabled", "bool"),
+    # U6：声纹候选积累常用参数（其余阈值经 config.yaml 的 speaker 段调整）
+    "LIRA_SPEAKER_TARGET_SEGMENTS": ("speaker", "target_segments", int),
+    "LIRA_SPEAKER_TARGET_SECONDS": ("speaker", "target_seconds", float),
+    "LIRA_SPEAKER_MIN_SEGMENT_SECONDS": ("speaker", "min_segment_seconds", float),
+    "LIRA_SPEAKER_MAX_CANDIDATES": ("speaker", "max_candidates", int),
+    "LIRA_SPEAKER_TTL_DAYS": ("speaker", "candidate_ttl_days", float),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
 
@@ -314,6 +366,36 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
     if not isinstance(config["dev_console"]["enabled"], bool):
         raise ConfigError("dev_console.enabled 必须为布尔值。")
 
+    # U6：声纹候选参数（数值合法性；工程初值语义见 SpeakerConfig docstring）
+    speaker = config["speaker"]
+    if int(speaker["target_segments"]) < 1:
+        raise ConfigError("speaker.target_segments 必须 >= 1（就绪目标段数）。")
+    if speaker["target_seconds"] <= 0:
+        raise ConfigError("speaker.target_seconds 必须为正数。")
+    if speaker["min_segment_seconds"] <= 0:
+        raise ConfigError("speaker.min_segment_seconds 必须为正数。")
+    if speaker["min_segment_seconds"] > speaker["target_seconds"]:
+        raise ConfigError("speaker.min_segment_seconds 不得大于 speaker.target_seconds。")
+    if speaker["min_rms"] < 0:
+        raise ConfigError("speaker.min_rms 必须 >= 0。")
+    if not 0 <= speaker["max_clip_ratio"] <= 1:
+        raise ConfigError("speaker.max_clip_ratio 必须在 [0, 1] 区间。")
+    if int(speaker["max_candidates"]) < 1:
+        raise ConfigError("speaker.max_candidates 必须 >= 1。")
+    if speaker["candidate_ttl_days"] <= 0:
+        raise ConfigError("speaker.candidate_ttl_days 必须为正数。")
+    for threshold in ("match_threshold", "assign_threshold", "consistency_threshold"):
+        if not 0 < speaker[threshold] <= 1:
+            raise ConfigError(f"speaker.{threshold} 必须在 (0, 1] 区间。")
+    if speaker["assign_threshold"] > speaker["match_threshold"]:
+        raise ConfigError(
+            "speaker.assign_threshold 不得高于 speaker.match_threshold"
+            "（候选指派门槛不应宽于已建立成员匹配门槛）。")
+    if speaker["match_margin"] < 0:
+        raise ConfigError("speaker.match_margin 必须 >= 0。")
+    if int(speaker["strategy_version"]) < 1:
+        raise ConfigError("speaker.strategy_version 必须 >= 1。")
+
     log_level = str(config["log_level"]).upper()
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
         raise ConfigError(f"log_level={config['log_level']!r} 非法。")
@@ -389,6 +471,20 @@ def load_config(
         ),
         dev_console=DevConsoleConfig(
             enabled=bool(config["dev_console"]["enabled"]),
+        ),
+        speaker=SpeakerConfig(
+            target_segments=int(config["speaker"]["target_segments"]),
+            target_seconds=float(config["speaker"]["target_seconds"]),
+            min_segment_seconds=float(config["speaker"]["min_segment_seconds"]),
+            min_rms=float(config["speaker"]["min_rms"]),
+            max_clip_ratio=float(config["speaker"]["max_clip_ratio"]),
+            max_candidates=int(config["speaker"]["max_candidates"]),
+            candidate_ttl_days=float(config["speaker"]["candidate_ttl_days"]),
+            match_threshold=float(config["speaker"]["match_threshold"]),
+            match_margin=float(config["speaker"]["match_margin"]),
+            assign_threshold=float(config["speaker"]["assign_threshold"]),
+            consistency_threshold=float(config["speaker"]["consistency_threshold"]),
+            strategy_version=int(config["speaker"]["strategy_version"]),
         ),
         db_path=_resolve_path(str(config["db_path"])),
         log_level=str(config["log_level"]),

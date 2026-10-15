@@ -139,6 +139,60 @@ class TestEnvOverride:
         assert cfg.ui.port == 8123
 
 
+class TestSpeakerConfig:
+    """U6：声纹候选积累参数（KTD5）默认值、env 覆盖与数值校验。"""
+
+    def test_speaker_defaults_are_engineering_initials(self, tmp_path):
+        cfg = load_config(write_cfg(tmp_path, FULL_YAML), env={})
+        assert cfg.speaker.target_segments == 3
+        assert cfg.speaker.target_seconds == 10.0
+        assert cfg.speaker.min_segment_seconds == 1.0
+        assert cfg.speaker.min_rms == 0.01
+        assert cfg.speaker.max_clip_ratio == 0.05
+        assert cfg.speaker.max_candidates == 20
+        assert cfg.speaker.candidate_ttl_days == 7.0
+        assert cfg.speaker.match_threshold == 0.80
+        assert cfg.speaker.match_margin == 0.10
+        assert cfg.speaker.assign_threshold == 0.73
+        assert cfg.speaker.consistency_threshold == 0.85
+        assert cfg.speaker.strategy_version == 1
+
+    def test_speaker_env_overrides(self, tmp_path):
+        env = {
+            "LIRA_SPEAKER_TARGET_SEGMENTS": "5",
+            "LIRA_SPEAKER_TARGET_SECONDS": "12.5",
+            "LIRA_SPEAKER_MIN_SEGMENT_SECONDS": "1.5",
+            "LIRA_SPEAKER_MAX_CANDIDATES": "8",
+            "LIRA_SPEAKER_TTL_DAYS": "3",
+        }
+        cfg = load_config(write_cfg(tmp_path, FULL_YAML), env=env)
+        assert cfg.speaker.target_segments == 5
+        assert cfg.speaker.target_seconds == 12.5
+        assert cfg.speaker.min_segment_seconds == 1.5
+        assert cfg.speaker.max_candidates == 8
+        assert cfg.speaker.candidate_ttl_days == 3.0
+
+    def test_speaker_yaml_override(self, tmp_path):
+        yaml_text = FULL_YAML + "speaker:\n  consistency_threshold: 0.9\n"
+        cfg = load_config(write_cfg(tmp_path, yaml_text), env={})
+        assert cfg.speaker.consistency_threshold == 0.9
+
+    def test_invalid_speaker_values_raise(self, tmp_path):
+        for yaml_tail, message in (
+            ("speaker:\n  target_segments: 0\n", "target_segments"),
+            ("speaker:\n  target_seconds: 0\n", "target_seconds"),
+            ("speaker:\n  min_segment_seconds: 20.0\n", "min_segment_seconds"),
+            ("speaker:\n  max_candidates: 0\n", "max_candidates"),
+            ("speaker:\n  candidate_ttl_days: 0\n", "candidate_ttl_days"),
+            ("speaker:\n  match_threshold: 1.5\n", "match_threshold"),
+            ("speaker:\n  assign_threshold: 0.9\n", "assign_threshold"),
+            ("speaker:\n  max_clip_ratio: 2.0\n", "max_clip_ratio"),
+            ("speaker:\n  strategy_version: 0\n", "strategy_version"),
+        ):
+            with pytest.raises(ConfigError, match=message):
+                load_config(write_cfg(tmp_path, FULL_YAML + yaml_tail), env={})
+
+
 class TestErrorPaths:
     def test_missing_api_key_raises_with_hint(self, tmp_path):
         yaml_text = "llm:\n  base_url: https://x\n"

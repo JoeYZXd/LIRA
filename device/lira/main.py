@@ -716,7 +716,13 @@ class DeviceRuntime:
         self._llm = llm
         self.personal_memory = None
         self.speaker_identity = None
+        self.speaker_candidates = None
         self.voice_member_id = None
+        # 结构化遥测（U2）：唯一输入旁路的音频包络 + VOICE_LOG 文本镜像。
+        # RouteDispatch.feed 经 getattr(streams, "telemetry") 取用，先于装配
+        # （下方 personal_memory 分支的候选事件面 event_sink 也引用它）。
+        self.telemetry = DevTelemetry()
+        VOICE_LOG.register_sink(self.telemetry)
         if os.environ.get("LIRA_PERSONAL_MEMORY", "0") == "1":
             from lira.personal_memory import PersonalMemory, SpeakerIdentity
             self.personal_memory=PersonalMemory(cfg.db_path,llm._client,cfg.llm.model,
@@ -729,12 +735,17 @@ class DeviceRuntime:
                 from lira.config import REPO_ROOT
                 model_path=REPO_ROOT / 'models' / 'lira-speaker.onnx'
             self.speaker_identity=SpeakerIdentity(self.personal_memory,model_path)
+            # U6/KTD6：候选积累存储与 PersonalMemory 同一 SQLite 连接——U7 的
+            # 同名确认晋升必须与 members/voice_profiles 同事务；观察事件经
+            # dev 遥测事件面（kind=voice_candidate）留痕，隐私时遥测自会拒收
+            from lira.speaker_candidates import VoiceCandidates
+            self.speaker_candidates=VoiceCandidates(self.personal_memory.db,
+                fingerprint=self.speaker_identity.model_fingerprint,
+                profiles_provider=self.personal_memory.profiles,
+                params=cfg.speaker,
+                privacy=lambda:self.privacy.is_on,
+                event_sink=self.telemetry.add_event)
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
-
-        # 结构化遥测（U2）：唯一输入旁路的音频包络 + VOICE_LOG 文本镜像。
-        # RouteDispatch.feed 经 getattr(streams, "telemetry") 取用，先于装配。
-        self.telemetry = DevTelemetry()
-        VOICE_LOG.register_sink(self.telemetry)
         # 模型显示观察器装配（U3/KTD7）：仿 llm.memory= 惯例运行时注入；
         # llm 可能为注入替身——setattr 不限类型（鸭子类型，无属性即新增）
         llm.telemetry = self.telemetry
@@ -787,6 +798,11 @@ class DeviceRuntime:
             return await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed,utterance_id=utterance_id)
         vector=await asyncio.to_thread(self.speaker_identity.embedding,samples)
         if self.privacy.is_on or generation!=self.dispatcher.generation or self.engine.state not in (State.LISTENING,State.FOLLOWUP):return
+        # U6：候选证据观察——提取后复检已过（AE5 第一道），observe 内部还有
+        # 隐私第二道防线与 established/质量/去重判定；返回值本单元不驱动行为，
+        # U7 磁贴与确认流程才消费。空样本（如命令通道兜底）与提取失败不观察。
+        if self.speaker_candidates is not None and vector is not None and samples is not None and len(samples):
+            self.speaker_candidates.observe(vector,samples)
         previous_pending=getattr(self.speaker_identity,'pending',None)
         member,notice,replay=self.speaker_identity.resolve(text,vector)
         if member!=self.voice_member_id or (member is None and previous_pending is not getattr(self.speaker_identity,'pending',None)):

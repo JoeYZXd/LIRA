@@ -83,7 +83,8 @@ async def test_identity_notice_replays_original_question_after_notice():
     await engine.on_wake()
     identity=SimpleNamespace(embedding=lambda samples:np.array([1.,0.]),
         resolve=lambda text,v:(1,'好，以后叫你爸爸。','帮我查明天天气'))
-    runtime=SimpleNamespace(speaker_identity=identity,engine=engine,privacy=SimpleNamespace(is_on=False),
+    runtime=SimpleNamespace(speaker_identity=identity,speaker_candidates=None,engine=engine,
+        privacy=SimpleNamespace(is_on=False),
         dispatcher=SimpleNamespace(generation=engine.listening_generation),voice_member_id=None)
     await DeviceRuntime.handle_voice_input(runtime,'我是爸爸',np.ones(16000),runtime.dispatcher.generation,False)
     assert asked==['帮我查明天天气'] and runtime.voice_member_id==1
@@ -128,9 +129,23 @@ async def test_new_speaker_question_is_answered_without_blocking_for_name():
     await engine.on_wake()
     identity=SimpleNamespace(pending={'text':'你是谁','asked':False},embedding=lambda samples:np.array([1.,0.]),
         resolve=lambda text,v:(None,'我们好像还没认识过，你希望我怎么称呼你呀？',None))
-    runtime=SimpleNamespace(speaker_identity=identity,engine=engine,privacy=SimpleNamespace(is_on=False),
+    runtime=SimpleNamespace(speaker_identity=identity,speaker_candidates=None,engine=engine,
+        privacy=SimpleNamespace(is_on=False),
         dispatcher=SimpleNamespace(generation=engine.listening_generation),voice_member_id=None)
     await DeviceRuntime.handle_voice_input(runtime,'你是谁',np.ones(16000),runtime.dispatcher.generation,False)
     assert asked==['你是谁']
     assert not any(x.startswith('我们好像还没认识过') for x in record.spoken)
     assert identity.pending['text'] is None
+
+async def test_model_fingerprint_is_stable_and_dimension_aware(tmp_path):
+    # U6/KTD5：候选表用指纹区分模型代次——路径+输出维度，跨重启稳定
+    m=memory(tmp_path)
+    s=SpeakerIdentity(m,None,extractor=object())
+    assert s.model_fingerprint==s.model_fingerprint
+    assert s.model_fingerprint.endswith(':0')  # 提取器无 dim 属性回退 0
+    dimmed=SpeakerIdentity(m,None,extractor=SimpleNamespace(dim=192))
+    assert dimmed.model_fingerprint.endswith(':192')
+    assert dimmed.model_fingerprint!=s.model_fingerprint
+    weird=SpeakerIdentity(m,None,extractor=SimpleNamespace(dim='not-a-number'))
+    assert weird.model_fingerprint.endswith(':0')  # 非法 dim 安全回退
+    await m.close()

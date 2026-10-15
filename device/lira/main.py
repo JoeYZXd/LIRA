@@ -50,6 +50,7 @@ from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
 from lira.dev_telemetry import DevTelemetry, owner_text, safe_add_event
+from lira.audio.voice_metrics import VoiceMetrics, current_trace
 from lira.hal.base import HalError
 from lira.llm.breaker import BreakerState
 from lira.hal.mock import (
@@ -451,6 +452,10 @@ class DeviceCallbacks:
         preview = text if len(text) <= 40 else text[:40] + "…"
         speak_line = f"语音输出中（{len(text)} 字）：{preview}"
         VOICE_LOG.log("speak", speak_line)
+        trace = current_trace.get()
+        if trace is not None:
+            current_trace.set(trace.bind(turn_id=getattr(self._rt.engine, "_turn_open", None),
+                                         owner=owner_text(owner)))
         # 播报开始观察事件（U3/KTD3）：与 VOICE_LOG 预览同位同文案，补 owner
         # 关联（镜像事件不带 owner）；守卫统一 safe_add_event，不影响出声
         safe_add_event(getattr(self._rt, "telemetry", None), "speak", speak_line,
@@ -715,6 +720,7 @@ class DeviceRuntime:
         # 结构化遥测（U2）：唯一输入旁路的音频包络 + VOICE_LOG 文本镜像。
         # RouteDispatch.feed 经 getattr(streams, "telemetry") 取用，先于装配
         # （下方 personal_memory 分支的候选事件面 event_sink 也引用它）。
+        self.voice_metrics = VoiceMetrics(enabled=os.environ.get("LIRA_VOICE_METRICS") == "1")
         self.telemetry = DevTelemetry()
         VOICE_LOG.register_sink(self.telemetry)
         if os.environ.get("LIRA_PERSONAL_MEMORY", "0") == "1":
@@ -781,6 +787,7 @@ class DeviceRuntime:
         self.privacy.subscribe(self._gate.apply)
         # 遥测联锁紧随音频门（AE5）：先关音频门，再清遥测缓冲并进入拒收态
         self.privacy.subscribe(self.telemetry.apply_privacy)
+        self.privacy.subscribe(self.voice_metrics.apply_privacy)
         self.privacy.subscribe(self.dispatcher.apply_privacy)
         self.privacy.subscribe(self.engine.apply_privacy)
         self.privacy.subscribe(self.clear_voice_identity)

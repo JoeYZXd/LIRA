@@ -7,6 +7,7 @@ import numpy as np
 
 from lira.audio.activity import CLIP_THRESHOLD, SpeechActivity
 from lira.dev_telemetry import safe_add_event
+from lira.audio.voice_metrics import current_trace, mark
 from lira.dialog.callbacks import invoke_callback
 from lira.dialog.intents import COMMAND_KWS_WORDS
 from lira.dialog.state_machine import AudioRoute, State
@@ -209,6 +210,11 @@ class RouteDispatch:
         async def deliver():
             if generation != self._generation:
                 return
+            metrics = getattr(self._streams, "voice_metrics", None)
+            if metrics is not None:
+                trace = metrics.trace(utterance_id=utterance_id)
+                current_trace.set(trace)
+                mark(trace, "asr_submit")
             self._emit_event("utterance", utterance_text,
                              capture_generation=generation,
                              utterance_id=utterance_id)

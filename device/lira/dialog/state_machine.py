@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Literal, Protocol
 
+from lira.audio.voice_metrics import current_answer
 from lira.dialog import phrasebook as pb
 from lira.dialog.callbacks import invoke_callback as _invoke
 from lira.dialog.context import ConversationHistory
@@ -736,7 +737,7 @@ class DialogEngine:
         streamed = []
         def reply_chunk(chunk):
             if self.is_current(owner):
-                completion = self._speak(chunk)
+                completion = self._speak(chunk, answer=True)
                 if completion is None:
                     completion = asyncio.Event()
                     completion.set()
@@ -1136,8 +1137,12 @@ class DialogEngine:
         _invoke(self._cb.start_listening, replay=replay)
         self._last_audio_progress = self._last_speech_progress = self.now
 
-    def _speak(self, text: str):
-        self._last_completion = _invoke(self._cb.speak, text, owner=self._owner)
+    def _speak(self, text: str, *, answer: bool = False):
+        token = current_answer.set(answer)
+        try:
+            self._last_completion = _invoke(self._cb.speak, text, owner=self._owner)
+        finally:
+            current_answer.reset(token)
         return self._last_completion
 
     def speak_progress(self, owner: object, text: str) -> None:
@@ -1157,7 +1162,7 @@ class DialogEngine:
         # （note_utterance 置 _turn_open=None）只按 utterance/owner 追溯
         answer_turn = self._turn_open
         answer_utterance = self._utterance_id
-        completion = streamed[-1] if streamed else self._speak(text)
+        completion = streamed[-1] if streamed else self._speak(text, answer=True)
         def finished():
             if not self.is_current(owner) or self.state is not State.SPEAKING:
                 return

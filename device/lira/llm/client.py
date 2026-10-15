@@ -45,6 +45,7 @@ from lira.llm.prompts import (
     is_medical_text,
 )
 from lira.dev_telemetry import safe_add_event
+from lira.audio.voice_metrics import current_trace, mark
 from lira.voice_log import VOICE_LOG
 
 __all__ = [
@@ -74,6 +75,9 @@ class _ModelObserve:
     """
 
     def __init__(self, telemetry, *, turn_id, path: str) -> None:
+        trace = current_trace.get()
+        self._metrics_trace = trace.bind(turn_id=turn_id) if trace else None
+        self._content_seen = False
         self._tel = telemetry
         self._turn = turn_id
         self._path = path
@@ -87,6 +91,7 @@ class _ModelObserve:
 
     def request(self, chars: int) -> None:
         """实际发起：结构化摘要，不含 prompt 内容（内容已在 utterance 事件）。"""
+        mark(self._metrics_trace, "llm_request")
         turn_id = f" turn={self._turn}" if self._turn is not None else ""
         self._emit("llm_request", f"path={self._path} chars={chars}{turn_id}")
 
@@ -96,6 +101,9 @@ class _ModelObserve:
         首个非空 delta 落 llm_first_delta；此后按 ≤0.5s 或 ≥200 字符节奏落
         llm_text 累计快照（幂等可追赶，不发增量）。
         """
+        if content and content.strip() and not self._content_seen:
+            self._content_seen = True
+            mark(self._metrics_trace, "llm_content")
         if self._tel is None:
             return
         self._text += content

@@ -14,12 +14,15 @@ from dataclasses import dataclass, field
 import sounddevice as sd
 
 from lira.hal.base import AudioIO, HalError
+from lira.audio.voice_metrics import current_trace, current_answer, mark
 
 __all__ = ["SoundDevicePlayer"]
 
 
 @dataclass
 class _Output:
+    trace: object = None
+    answer: bool = True
     stopped: threading.Event = field(default_factory=threading.Event)
     finished: threading.Event = field(default_factory=threading.Event)
     drained: threading.Event = field(default_factory=threading.Event)
@@ -55,7 +58,7 @@ class SoundDevicePlayer(AudioIO):
     async def play(self, data: bytes) -> None:
         """播放 int16 单声道 PCM；回调供音，线程等待输出完成。"""
         async with self._play_lock:
-            output = self._output = _Output()
+            output = self._output = _Output(trace=current_trace.get(), answer=current_answer.get())
             task = asyncio.create_task(asyncio.to_thread(self._play_blocking, data, output))
             try:
                 await asyncio.shield(task)
@@ -91,6 +94,8 @@ class SoundDevicePlayer(AudioIO):
         pcm = memoryview(data)
         def callback(outdata, frames, time_info, status):
             nonlocal position
+            if getattr(status, "output_underflow", False):
+                mark(output.trace, "buffer", device_underflow=1)
             size = frames * 2
             remaining = min(size, len(pcm) - position)
             if output.stopped.is_set():
@@ -98,6 +103,8 @@ class SoundDevicePlayer(AudioIO):
                 raise sd.CallbackAbort
             outdata[:remaining] = pcm[position:position + remaining]
             outdata[remaining:] = b"\0" * (size - remaining)
+            if position == 0 and remaining:
+                mark(output.trace, "output_consumed", frames=remaining // 2, answer=int(output.answer))
             position += remaining
             if position == len(pcm):
                 raise sd.CallbackStop
@@ -120,6 +127,7 @@ class SoundDevicePlayer(AudioIO):
             # A blocking Pa_WriteStream may remain stuck after abort on ALSA.
             # Callback output has no pending write to hold stop()/wake hostage.
             output.drained.wait()
+            mark(output.trace, "cancel_confirmed" if output.stopped.is_set() else "output_drained")
         except (OSError, sd.PortAudioError) as exc:
             if not output.stopped.is_set():
                 raise HalError(f"播放失败: {exc}") from exc

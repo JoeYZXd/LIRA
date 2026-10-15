@@ -193,3 +193,147 @@ async def test_parser_timeout_and_offline_never_create_partial_identity(tmp_path
     await e.handle('姓名资料',audio(),V,current=lambda:True)
     assert not e.active and not m.profiles()
     await m.close()
+
+
+async def runtime_registration(tmp_path, *, delayed=False):
+    from lira.main import DeviceRuntime, DeviceCallbacks
+    from lira.dialog import DialogEngine, Router
+    from lira.audio.tts import PlaybackCompletion
+    from lira.speaker_candidates import VoiceCandidates
+    from test_state_machine import Recorder
+
+    m, e = setup(tmp_path)
+    e.cancel()
+    candidates = VoiceCandidates(m.db, fingerprint='test', profiles_provider=m.profiles,
+        params=SpeakerConfig(), privacy=lambda: False)
+    requests = []
+    original_create = m.sdk.chat.completions.create
+    async def create(**kwargs):
+        requests.append(kwargs)
+        return await original_create(**kwargs)
+    m.sdk.chat.completions.create = create
+    record = Recorder()
+    completions = []
+    if delayed:
+        def speak(text, **kwargs):
+            record.spoken.append(text)
+            done = PlaybackCompletion(kwargs.get('owner'))
+            completions.append(done)
+            return done
+        record.speak = speak
+    engine = DialogEngine(Router(), record)
+    rt = SimpleNamespace(speaker_identity=SimpleNamespace(embedding=lambda samples: V, match=lambda v: None),
+        voice_enrollment=e, voice_member_id=None, personal_memory=m, engine=engine,
+        privacy=SimpleNamespace(is_on=False), dispatcher=SimpleNamespace(generation=0), tts=None,
+        speaker_candidates=candidates)
+    record.cancel_audio = lambda owner: DeviceCallbacks(rt).cancel_audio(owner)
+    await engine.on_wake()
+    if completions:
+        completions[-1].finish('success')
+        await asyncio.sleep(0)
+    async def say(text, *, seed=1, generation=None, wake_prefixed=False):
+        rt.dispatcher.generation = engine.listening_generation
+        await DeviceRuntime.handle_voice_input(rt, text, audio(seed),
+            rt.dispatcher.generation if generation is None else generation, wake_prefixed)
+    await say('录入声纹')
+    return m, e, engine, record, requests, completions, say
+
+
+@pytest.mark.parametrize('phase', ['details', 'samples'])
+@pytest.mark.parametrize('control', ['进入勿扰模式', '别说了', '结束聊天', '取消', '立即去休息'])
+async def test_registration_global_controls_reach_engine_without_parsing_or_sampling(tmp_path, phase, control):
+    from lira.dialog import State
+    m, e, engine, record, requests, _, say = await runtime_registration(tmp_path)
+    if phase == 'samples':
+        await say('我叫张三，叫我小张')
+        await say('今天过得很好')
+    before = len(requests), len(record.spoken)
+    await say(control, wake_prefixed=control == '立即去休息')
+    await asyncio.sleep(0)
+    assert not e.active and e.name == e.address == '' and not e.vectors and not e.hashes
+    assert not m.people.list_members() and not m.profiles()
+    assert m.db.execute('SELECT count(*) FROM voice_candidates').fetchone()[0] == 0
+    assert m.db.execute('SELECT count(*) FROM voice_candidate_evidence').fetchone()[0] == 0
+    assert len(requests) == before[0]
+    if control == '进入勿扰模式':
+        assert engine.dnd and len(record.spoken) == before[1]
+    if control != '立即去休息':
+        assert engine.state is State.STANDBY
+    else:
+        assert record.poweroffs == 1
+    await m.close()
+
+
+async def test_registration_stale_global_control_is_rejected_and_specific_cancel_still_answers(tmp_path):
+    from lira.dialog import State
+    m, e, engine, record, requests, _, say = await runtime_registration(tmp_path)
+    await say('进入勿扰模式', generation=engine.listening_generation - 1)
+    assert e.active and not engine.dnd and not requests
+    await say('取消注册')
+    assert not e.active and '没有保存' in record.spoken[-1]
+    assert engine.state is State.FOLLOWUP and not m.profiles()
+    await m.close()
+
+
+@pytest.mark.parametrize('phase', ['details', 'samples'])
+async def test_literal_stop_cancels_only_registration_with_existing_prompt(tmp_path, phase):
+    from lira.dialog import State
+    m, e, engine, record, requests, _, say = await runtime_registration(tmp_path)
+    if phase == 'samples':
+        await say('我叫张三，叫我小张')
+        await say('今天过得很好')
+    count = len(requests)
+    await say('停止')
+    assert not e.active and e.name == e.address == '' and not e.vectors
+    assert engine.state is State.FOLLOWUP and '没有保存' in record.spoken[-1]
+    assert len(requests) == count and not m.profiles()
+    await m.close()
+
+
+async def test_registration_prompt_requires_actual_playback_completion_and_timeout_clears_ram(tmp_path):
+    from lira.dialog import State
+    m, e, engine, record, requests, completions, say = await runtime_registration(tmp_path, delayed=True)
+    assert engine.state is State.SPEAKING
+    await say('我叫张三，叫我小张')
+    assert e.phase == 'details' and not requests
+    completions[-1].finish('success')
+    await asyncio.sleep(0)
+    assert engine.state is State.FOLLOWUP
+    await say('我叫张三，叫我小张')
+    completions[-1].finish('success')
+    await asyncio.sleep(0)
+    await say('今天过得很好')
+    assert len(e.vectors) == 1 and engine.state is State.SPEAKING
+    await say('又一段不同的话', seed=2)
+    assert len(e.vectors) == 1
+    completions[-1].finish('success')
+    await asyncio.sleep(0)
+    engine.tick(engine._deadline)
+    assert engine.state is State.STANDBY and not e.active
+    assert e.name == e.address == '' and not e.vectors and not e.hashes
+    assert not m.people.list_members() and not m.profiles()
+    await m.close()
+
+
+@pytest.mark.parametrize('limit', ['turns', 'vectors'])
+async def test_registration_bounded_collection_cancels_without_persistence(tmp_path, limit):
+    m, e = setup(tmp_path)
+    if limit == 'turns':
+        async def missing(**kwargs):
+            return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content='{}'))])
+        m.sdk.chat.completions.create = missing
+        for _ in range(12):
+            await e.handle('资料', audio(), V, current=lambda: True)
+        assert e.active and e.turns == 12
+        await e.handle('资料', audio(), V, current=lambda: True)
+    else:
+        from dataclasses import replace
+        e.params = replace(e.params, target_segments=11)
+        await e.handle('我叫张三，叫我小张', audio(), V, current=lambda: True)
+        for seed in range(10):
+            await e.handle('不同的一段话', audio(seed), V, current=lambda: True)
+        assert e.active and len(e.vectors) == 10
+        await e.handle('再一段话', audio(10), V, current=lambda: True)
+    assert not e.active and not e.vectors and not e.hashes and e.name == e.address == ''
+    assert not m.people.list_members() and not m.profiles()
+    await m.close()

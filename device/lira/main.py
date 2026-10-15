@@ -855,6 +855,17 @@ class DeviceRuntime:
         vector=await asyncio.to_thread(self.speaker_identity.embedding,samples)
         if self.privacy.is_on or generation!=self.dispatcher.generation or self.engine.state not in (State.LISTENING,State.FOLLOWUP):return
         enrollment=getattr(self,'voice_enrollment',None)
+        from lira.dialog.intents import (
+            is_cancel, is_exit_or_stop, is_shutdown_phrase, is_status_query,
+            match_dnd_phrase,
+        )
+        t = text.strip()
+        # Registration is subordinate to the engine's global controls. Keep their
+        # effects and owner cancellation in the engine, including its input guard.
+        if enrollment is not None and enrollment.active and (is_cancel(t) or t == '结束聊天' or is_exit_or_stop(t)
+                or match_dnd_phrase(t) is not None or is_status_query(t)
+                or (wake_prefixed and is_shutdown_phrase(t))):
+            return await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed,utterance_id=utterance_id)
         invitation=(getattr(self,'_voice_invitation_owner',None)==self.engine._owner and time.monotonic()-getattr(self,'_voice_invitation_time',0)<60)
         if not invitation and getattr(self,'_voice_invitation_owner',None) is not None:
             self._voice_invitation_owner=None

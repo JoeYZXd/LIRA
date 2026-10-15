@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import AsyncIterable
 import wave
 from pathlib import Path
 
@@ -32,6 +33,7 @@ class MockAudioIO(AudioIO):
         self.playback_released = asyncio.Event()
         self.playback_finished = asyncio.Event()
         self.playback_finished.set()
+        self._stream_producer: asyncio.Task | None = None
 
     async def open(self) -> None:
         if not self.wav_path.is_file():
@@ -75,4 +77,28 @@ class MockAudioIO(AudioIO):
 
     async def stop(self) -> None:
         self.playback_released.set()
+        if self._stream_producer is not None:
+            self._stream_producer.cancel()
         await self.playback_finished.wait()
+
+    async def play_stream(self, chunks: AsyncIterable[bytes]) -> None:
+        """Keep one logical mock output open across all supplied chunks."""
+        self.playback_finished.clear()
+        self.playback_released.clear()
+        self.playback_started.set()
+        async def consume():
+            async for data in chunks:
+                if len(data) % 2:
+                    raise HalError("PCM 必须包含完整 int16 帧")
+                self.played.append(bytes(data))
+        self._stream_producer = asyncio.create_task(consume())
+        try:
+            await self._stream_producer
+            if self.hold_playback:
+                await self.playback_released.wait()
+        except asyncio.CancelledError:
+            if not self.playback_released.is_set():
+                raise
+        finally:
+            self._stream_producer = None
+            self.playback_finished.set()

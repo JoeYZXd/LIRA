@@ -202,6 +202,10 @@ class TestMockAudio:
                 self.writes += 1
                 self.entered.set()
                 if len(streams) > 1:
+                    try:
+                        self.callback(bytearray(20), 10, None, None)
+                    except board_audio.sd.CallbackStop:
+                        pass
                     self.finished()
             def close(self):
                 pass

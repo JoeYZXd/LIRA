@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import AsyncIterable, Callable
 
 __all__ = [
     "HalError",
@@ -84,6 +84,17 @@ class AudioIO(_AsyncResource, ABC):
     @abstractmethod
     async def play(self, data: bytes) -> None:
         """播放一段 PCM 音频，返回即代表播放完成（TTS 完成事件依赖此语义）。"""
+
+    async def play_stream(self, chunks: AsyncIterable[bytes]) -> None:
+        """Consume bounded PCM input and return only after device drain.
+
+        Implementations must override this to provide continuous output; a
+        per-chunk play fallback would introduce audible sentence boundaries.
+        Board chunks are int16 mono at player.samplerate and must not exceed
+        two seconds each. The board bounds queued PCM to two seconds plus one
+        in-flight source chunk. Source completion is not output completion.
+        """
+        raise HalError("此音频接口不支持连续输出")
 
     async def stop(self) -> None:
         """停止当前输出，返回时硬件已静音；只有输入的实现不支持此操作。"""

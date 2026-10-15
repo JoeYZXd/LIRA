@@ -2,7 +2,7 @@
 
 ## Status and collection
 
-The host implementation includes incremental model delivery, one bounded continuous PCM output per answer, cross-fragment synthesis prefetch and playback-based completion. Board acoustic acceptance and comparative p50/p95 sampling remain pending. No deployment, service restart or default backend change was performed. Host tests establish software behavior; they do not establish speaker continuity or latency on the Orange Pi.
+The host implementation includes incremental model delivery, one bounded continuous PCM output per answer, cross-fragment synthesis prefetch and playback-based completion. After explicit user authorization on 2026-10-16, the local pipeline was deployed and the device service restarted; configuration, dependencies and the local default backend were preserved. Real HAL playback/drain/cancellation and microphone smoke checks passed. See the [deployment record](voice-streaming-deployment-2026-10-16.md). Board acoustic acceptance and comparative p50/p95 sampling remain pending; callback consumption does not establish measured speaker sound.
 
 Enable `LIRA_VOICE_METRICS=1` before starting the process. The default is disabled. In a diagnostic harness, read `runtime.voice_metrics.snapshot()` for raw numeric stage records or `.summary()` for per-utterance timings. Export outside playback callbacks. Rings retain at most 2048 records, dropping the oldest; `dropped_events` counts records skipped to avoid lock contention. Export frequently enough to retain complete samples; incomplete stages yield null, never zero. Do not treat missing measurements as success.
 

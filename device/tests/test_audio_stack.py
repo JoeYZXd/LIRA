@@ -218,12 +218,12 @@ class TestTtsNumberAndDate:
         assert done.is_set(), "speak 完成事件应被置位"
         assert events == ["occupied", "released"], "播放期占用/释放 hook 应按序广播"
         assert engine.occupied is False
-        assert len(player.played) == 1
-        assert len(player.played[0]) > 0
+        assert done.status == "success"
+        assert sum(map(len, player.played)) > 0
         # 16bit PCM 字节数为采样点数的 2 倍；matcha 采样有随机性，
         # speak() 内部重新合成的长度与 generate() 预览略有出入，只约束量级
-        assert len(player.played[0]) % 2 == 0
-        assert abs(len(player.played[0]) // 2 - len(samples)) < SAMPLE_RATE
+        assert all(len(pcm) % 2 == 0 for pcm in player.played)
+        assert abs(sum(map(len, player.played)) // 2 - len(samples)) < SAMPLE_RATE
 
     async def test_speed_up_produces_shorter_audio(self, tts: TtsEngine):
         text = "小丽拉已就绪"
@@ -381,6 +381,8 @@ class TestSerialPlayback:
         first = engine.speak("first", owner=1)
         second = engine.speak("second", owner=2)
         await player.playback_started.wait()
+        while not player.played:
+            await asyncio.sleep(0)
         assert len(player.played) == 1
         player.playback_released.set()
         await first.wait()
@@ -435,11 +437,11 @@ class TestSerialPlayback:
 
     async def test_failure_releases_output_and_queue_continues(self):
         class FailingPlayer(MockAudioIO):
-            async def play(self, pcm):
+            async def play_stream(self, chunks):
                 if not self.played:
-                    self.played.append(pcm)
+                    self.played.append(await anext(chunks))
                     raise RuntimeError("output failed")
-                await super().play(pcm)
+                await super().play_stream(chunks)
         engine = playback_engine(FailingPlayer(Path("/dev/null")))
         failed = engine.speak("fail")
         good = engine.speak("good")

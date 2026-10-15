@@ -29,6 +29,7 @@ import sherpa_onnx
 from lira.audio._paths import DOWNLOAD_HINT, TTS_MODEL_DIR, VOCODER_ONNX
 from lira.hal import AudioIO
 from lira.audio.speech_text import spoken_text
+from lira.audio.speech_session import SpeechSession
 from lira.audio.voice_metrics import current_trace, current_answer, mark
 
 __all__ = ["TtsEngine", "PlaybackCompletion"]
@@ -61,6 +62,7 @@ class _PlaybackRequest:
     cancelled: bool = False
     playing: bool = False
     abort: asyncio.Task | None = None
+    session: SpeechSession | None = None
 
 #: 规则 FST 优先级顺序（后挂的先匹配会被前面的覆盖，号码放最前最具体）
 _RULE_FSTS = ("phone.fst", "date.fst", "number.fst")
@@ -179,6 +181,14 @@ class TtsEngine:
         self._active: _PlaybackRequest | None = None
         self._closed = False
 
+    def start_session(self, speed: float = 1.0, volume: float = 1.0,
+                      *, owner: object = None) -> SpeechSession:
+        done = self._enqueue("", speed, volume, owner)
+        session = SpeechSession(done)
+        if not done.is_set():
+            self._queue[-1].session = session
+        return session
+
     def speak(self, text: str, speed: float = 1.0, volume: float = 1.0,
               *, owner: object = None) -> PlaybackCompletion:
         return self._enqueue(text, speed, volume, owner)
@@ -191,6 +201,9 @@ class TtsEngine:
         done = PlaybackCompletion(owner)
         if self._closed:
             done.finish("cancelled")
+            return done
+        if len(self._queue) >= 16:
+            done.finish("failed", RuntimeError("speech request capacity exceeded"))
             return done
         trace = current_trace.get()
         mark(trace, "segment_submit", answer=int(current_answer.get()))
@@ -209,6 +222,8 @@ class TtsEngine:
             if matches(request):
                 mark(request.trace, "cancel_requested")
                 request.cancelled = True
+                if request.session is not None:
+                    request.session.cancel()
                 request.done.finish("cancelled")
             else:
                 kept.append(request)
@@ -217,6 +232,8 @@ class TtsEngine:
         if request is not None and matches(request):
             mark(request.trace, "cancel_requested")
             request.cancelled = True
+            if request.session is not None:
+                request.session.cancel()
             if request.playing and request.abort is None:
                 request.abort = asyncio.create_task(self._abort_output(request))
             elif not request.playing:
@@ -261,54 +278,78 @@ class TtsEngine:
         logging.info("tts event=synthesis_ready chars=%d elapsed=%.3f", len(chunk), ended-started)
         return samples
 
-    async def _play_measured(self, request, samples):
-        token = current_trace.set(request.trace)
-        answer_token = current_answer.set(request.answer)
-        try:
-            await self._player.play(to_pcm16(samples, request.volume))
-        finally:
-            current_trace.reset(token)
-            current_answer.reset(answer_token)
+    async def _request_fragments(self, request):
+        if request.session is not None:
+            async for text in request.session.fragments():
+                cleaned = spoken_text(text)
+                if cleaned:
+                    yield cleaned
+        else:
+            for chunk in speech_chunks(spoken_text(request.text)):
+                yield chunk
 
     async def _drain(self) -> None:
         while self._queue:
             request = self._active = self._queue.popleft()
-            pending_synthesis = None
+            self.occupied = True
+            self._notify(self._on_occupied)
+            pending = None
+            async def synthesize_next(iterator):
+                try:
+                    chunk = await anext(iterator)
+                except StopAsyncIteration:
+                    return None
+                if request.cancelled:
+                    return None
+                return await asyncio.to_thread(self._generate_measured, request, chunk, 0)
+
+            async def pcm_source(first, iterator):
+                nonlocal pending
+                samples = first
+                while samples is not None and not request.cancelled:
+                    if iterator is not None:
+                        pending = asyncio.create_task(synthesize_next(iterator))
+                    pcm = to_pcm16(samples, request.volume)
+                    # HAL accepts at most two seconds per source chunk.
+                    limit = self.sample_rate * 2 * 2
+                    for offset in range(0, len(pcm), limit):
+                        if request.cancelled:
+                            return
+                        yield pcm[offset:offset + limit]
+                    samples = await asyncio.shield(pending) if pending is not None else None
+                    pending = None
+
             try:
-                self.occupied = True
-                self._notify(self._on_occupied)
+                iterator = None
                 if request.text is None:
                     t = np.arange(int(self.sample_rate * 0.08)) / self.sample_rate
                     samples = (0.18 * np.sin(2 * np.pi * 880 * t)
                                * np.sin(np.pi * np.arange(len(t)) / len(t)) ** 2)
                 else:
-                    chunks = list(speech_chunks(spoken_text(request.text)))
-                    for index, chunk in enumerate(chunks):
-                        if request.cancelled:
-                            break
-                        started = time.monotonic()
-                        if pending_synthesis is None:
-                            samples = await asyncio.to_thread(self._generate_measured, request, chunk, index)
-                        else:
-                            samples = await pending_synthesis
-                            pending_synthesis = None
-                        logging.debug("tts event=chunk_wait elapsed=%.3f", time.monotonic()-started)
-                        if not request.cancelled and index + 1 < len(chunks):
-                            pending_synthesis = asyncio.create_task(asyncio.to_thread(
-                                self._generate_measured, request, chunks[index+1], index+1))
-                        if not request.cancelled and self._player is not None:
-                            request.playing = True
-                            await self._play_measured(request, samples)
-                            request.playing = False
-                        if request.abort is not None:
-                            await request.abort
-                        if request.cancelled:
-                            break
-                    request.done.finish("cancelled" if request.cancelled else "success")
-                    continue
-                if not request.cancelled and self._player is not None:
-                    request.playing = True
-                    await self._play_measured(request, samples)
+                    iterator = self._request_fragments(request)
+                    samples = await synthesize_next(iterator)
+                if samples is not None and not request.cancelled:
+                    if self._player is not None:
+                        request.playing = True
+                        token = current_trace.set(request.trace)
+                        answer_token = current_answer.set(request.answer)
+                        source = pcm_source(samples, iterator)
+                        try:
+                            # Legacy injected test doubles only; production HALs
+                            # provide the continuous stream implementation.
+                            if hasattr(self._player, "play_stream"):
+                                await self._player.play_stream(source)
+                            else:
+                                async for pcm in source:
+                                    await self._player.play(pcm)
+                        finally:
+                            await source.aclose()
+                            current_trace.reset(token)
+                            current_answer.reset(answer_token)
+                        request.playing = False
+                    else:
+                        async for _ in pcm_source(samples, iterator):
+                            pass
                 if request.abort is not None:
                     await request.abort
                 request.done.finish("cancelled" if request.cancelled else "success")
@@ -316,10 +357,9 @@ class TtsEngine:
                 logging.exception("Audio output failed")
                 request.done.finish("failed", exc)
             finally:
-                # A cancelled reply must not leave a synth worker racing its successor.
-                if pending_synthesis is not None:
-                    await asyncio.gather(pending_synthesis, return_exceptions=True)
-                # An abort must finish before a new request acquires the player.
+                # Never cancel native inference: successors share this model.
+                if pending is not None:
+                    await asyncio.gather(pending, return_exceptions=True)
                 if request.abort is not None:
                     try:
                         await request.abort
@@ -327,9 +367,12 @@ class TtsEngine:
                         request.done.finish("failed", exc)
                 if request.cancelled:
                     mark(request.trace, "cancel_confirmed")
+                if request.session is not None:
+                    request.session.cancel()
                 self._active = None
-                self.occupied = False
-                self._notify(self._on_released)
+                if self.occupied:
+                    self.occupied = False
+                    self._notify(self._on_released)
 
     @staticmethod
     def _notify(callback: Callable[[], None] | None) -> None:

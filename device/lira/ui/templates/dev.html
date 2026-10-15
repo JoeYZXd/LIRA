@@ -55,23 +55,74 @@
     </div>
   </section>
 
-  <!-- 实时区磁贴（工作区，跨双列）：语音交互日志整体迁入 + 声音曲线诚实占位 -->
+  <!-- 实时区磁贴（工作区，跨双列，U5）：声音曲线 / 同轮交互 / 日志三个工作区。
+       KTD4：展开磁贴才开始 250ms 游标拉取，折叠或页面隐藏即停订阅。 -->
   <section class="tile tile--live" id="tile-voicelog">
     <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voicelog-body">
-      <span class="tile-title">实时区：语音交互日志</span>
-      <span class="tile-summary">每秒刷新 · 可暂停 / 清空 · 实时声音曲线占位</span>
+      <span class="tile-title">实时区：声音 · 同轮交互 · 日志</span>
+      <span class="tile-summary">展开时 250ms 观察真实输入与模型交互；折叠即停订阅</span>
     </button>
     <div class="tile-body" id="tile-voicelog-body" hidden>
-      <p class="muted">每秒显示处理后音频电平（dBFS 越接近 0 越响）、KWS 命中与唤醒判定、ASR 中间结果及输入拦截原因。待机仅检测唤醒词，不转写普通语音；无 KWS 命中不代表没有收到声音。音频条目停止更新时，请检查隐私模式、录音独占或采集异常。</p>
-      <div class="row">
-        <label><input type="checkbox" id="vl-auto" checked onchange="vlAuto(this)"> 自动刷新（1s）</label>
-        <button type="button" onclick="vlClear()">清空</button>
-        <span id="vl-out" class="muted"></span>
+      <p class="muted">观察的是隐私门之后的真实共享输入；无数据、断连与隐私开启都如实标注，绘制停顿不会伪造声音数据。</p>
+      <div id="privacy-banner" class="observe-banner" hidden>
+        <span id="privacy-banner-text"></span>
+        <button type="button" onclick="observeResume()">重新连接</button>
       </div>
-      <div id="vl-view" class="vl-view">（未加载）</div>
-      <div class="curve-placeholder" id="curve-placeholder">
-        <p class="curve-title">实时声音曲线</p>
-        <p>实时声音曲线将在后续单元接入（真实处理后包络、激活标记与间断提示）。</p>
+
+      <!-- 工作区一：声音曲线（真实处理后包络 + 唤醒/语句/播报标记 + 间断） -->
+      <div class="live-block" id="live-curve-block">
+        <div class="live-block-head">
+          <span class="live-block-title">实时声音曲线</span>
+          <span class="live-block-side">
+            <span id="curve-status" class="muted" aria-live="polite">等待数据</span>
+            <span id="curve-last" class="muted">最后更新：--:--:--</span>
+          </span>
+        </div>
+        <div class="curve-wrap">
+          <canvas id="curve-canvas" width="960" height="150" role="img"
+                  aria-label="实时声音曲线（最近 10 秒包络）：暂无数据"></canvas>
+          <div id="curve-empty" class="curve-empty">等待数据…（展开实时区后自动开始观察）</div>
+        </div>
+        <p class="muted" id="curve-legend">竖带 = 每桶 min~max；折线 = RMS（同一线性标度）；红色虚线 = 采集间断；轴上标记：唤 = 唤醒、语 = 语句、播 = 播报、断 = 播报被打断。</p>
+        <p class="muted" id="curve-gaps" hidden></p>
+      </div>
+
+      <!-- 工作区二：同轮交互（按 turn 合并语句/路由/模型/播报） -->
+      <div class="live-block" id="live-turns-block">
+        <div class="live-block-head">
+          <span class="live-block-title">同轮交互</span>
+          <span class="muted">按轮次合并：语句 → 实际路由 → 模型首段/回复 → 播报结果</span>
+        </div>
+        <div id="turns-view" class="turns-view"><p class="muted">（暂无语音轮次，与 LIRA 说一句话试试）</p></div>
+        <div id="unlinked-block" class="unlinked-block" hidden>
+          <span class="tile-summary">未关联轮次的模型事件（如阅读白话）</span>
+          <div id="unlinked-view" class="log-rows"></div>
+        </div>
+      </div>
+
+      <!-- 工作区三：日志（语音事件 / 模型交互 / 系统日志，共用暂停/筛选/清空） -->
+      <div class="live-block" id="live-logs-block">
+        <div class="live-block-head">
+          <span class="live-block-title">日志</span>
+          <div class="log-tabs" role="tablist" aria-label="日志类别">
+            <button type="button" class="log-tab" id="tab-voice" role="tab" aria-selected="true"
+                    onclick="setLogTab('voice')">语音事件</button>
+            <button type="button" class="log-tab" id="tab-model" role="tab" aria-selected="false"
+                    onclick="setLogTab('model')">模型交互</button>
+            <button type="button" class="log-tab" id="tab-sys" role="tab" aria-selected="false"
+                    onclick="setLogTab('sys')">系统日志</button>
+          </div>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="log-pause" checked> 暂停滚动</label>
+          <label for="log-kind">类别</label>
+          <select id="log-kind"><option value="">全部</option></select>
+          <input id="log-filter" type="search" placeholder="按关键字筛选" aria-label="按关键字筛选">
+          <button type="button" onclick="clearActiveLog()">清空当前展示</button>
+          <button type="button" id="log-refresh-btn" onclick="loadLogs()" hidden>刷新</button>
+          <span id="log-out" class="muted"></span>
+        </div>
+        <div id="log-view" class="vl-view log-view"><p class="muted">（暂无事件）</p></div>
       </div>
     </div>
   </section>
@@ -144,18 +195,6 @@
         <button type="button" onclick="replay(true)">回放（真实出声）</button>
         <span id="replay-out"></span></div>
       <pre id="replay-view"></pre>
-    </div>
-  </section>
-
-  <!-- 运行日志磁贴 -->
-  <section class="tile tile--logs" id="tile-logs">
-    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-logs-body">
-      <span class="tile-title">运行日志</span>
-      <span class="tile-summary">最近 100 条 · 手动刷新</span>
-    </button>
-    <div class="tile-body" id="tile-logs-body" hidden>
-      <div class="row"><button type="button" onclick="loadLogs()">刷新日志</button><span id="log-out"></span></div>
-      <pre id="log-view">（未加载）</pre>
     </div>
   </section>
 </main>

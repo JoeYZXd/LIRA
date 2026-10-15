@@ -613,6 +613,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         telemetry = getattr(handle.runtime, "telemetry", None)
         if telemetry is None:
             return JSONResponse({"error": "遥测未装配"}, status_code=503)
+        # 页面轮询即观察（U5 接线，KTD2）：每次拉取续期 2s 活动窗——页面停拉
+        # （折叠/隐藏/断开）后包络计算自然停止，无需显式生命周期回调
+        telemetry.note_observer_activity()
         params = request.query_params
         audio_cursor = _parse_cursor(params.get("audio_cursor"))
         event_cursor = _parse_cursor(params.get("event_cursor"))

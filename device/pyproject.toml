@@ -34,6 +34,12 @@ dev = [
     "pyjwt>=2.8", "bcrypt>=4.1", "itsdangerous>=2.1",
     "websockets>=13",
 ]
+# U5：dev 控制台浏览器测试（tests/browser）。仅文档化测试依赖——浏览器运行时
+# 不进设备生产依赖（计划 Verification Contract 分层表：浏览器为独立测试层）。
+# 执行方式：显式 `pytest tests/browser` 单独成层运行；默认全量 pytest 不收集
+# （pytest-playwright 的 sync 会话常驻 running loop，会破坏同进程内后续
+# pytest-asyncio 测试，两层必须分进程，见 tests/browser/conftest.py docstring）。
+browser = ["playwright>=1.59", "pytest-playwright>=0.10"]
 
 [build-system]
 requires = ["setuptools>=68"]

@@ -362,6 +362,26 @@ class TestObserverGating:
         assert frames[0].min == pytest.approx(0.4)
         assert frames[0].max == pytest.approx(0.4)
 
+    async def test_poll_activity_window_gates_computation(self, monkeypatch):
+        """页面轮询即观察（U5 接线）：note_observer_activity 续期 2s 活动窗，
+        与手动计数并存；窗口过期后计算自然停止（KTD2 无观察者不计算）。"""
+        tel = DevTelemetry()
+        clock = [100.0]
+        monkeypatch.setattr("lira.dev_telemetry.time.monotonic", lambda: clock[0])
+        assert tel.observer_count == 0
+        tel.note_observer_activity()
+        assert tel.observer_count == 1
+        _feed(tel, _sine(0.1))
+        assert len(_envelopes(tel)) == 1
+        clock[0] += 3.0  # 活动窗（2s）已过：停拉页面的包络计算自然停止
+        assert tel.observer_count == 0
+        _feed(tel, _sine(0.1))
+        assert len(_envelopes(tel)) == 1
+        tel.note_observer_activity()  # 手动计数与活动窗并存（任一为真即计算）
+        tel.add_observer()
+        _feed(tel, _sine(0.1))
+        assert len(_envelopes(tel)) == 2
+
 
 # ---------- 6 gap 标记 ----------
 

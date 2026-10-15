@@ -844,13 +844,15 @@ class TestConsoleErrorFeedback:
         assert "authRedirecting" in js  # 并发轮询只跳一次
 
     def test_console_panels_show_failure_in_place(self):
-        """整机状态/语音日志面板：加载失败时面板主体显示原因，不停留占位符。"""
+        """整机状态/实时观察面板：加载失败时面板主体显示原因，不停留占位符。"""
         _app, client, _rt = make_client()
         login(client)
         js = self._console_js(client)
-        # loadStatus / loadVoiceLog 失败路径写入面板主体（status-view / vl-view）
+        # loadStatus 失败路径写入面板主体（status-view）
         assert "getElementById('status-view').textContent = '（' + msg + '）'" in js
-        assert "getElementById('vl-view').textContent = '（' + msg + '）'" in js
+        # U5：实时观察失败退避时曲线状态行可见显示"已断连"，不停留占位符
+        assert "getElementById('curve-status').textContent" in js
+        assert "已断连" in js
 
     def test_console_settings_readback_and_validation_in_js(self):
         """U1 真实回读：JS 把 status 当前值/范围写入控件，保存前按范围预检，
@@ -959,11 +961,13 @@ class TestStaticAssets:
 
 
 class TestConsoleTiles:
-    """U1 磁贴结构（语义标记级；纯视觉样式不追加镜像测试）。"""
+    """U1/U5 磁贴结构（语义标记级；纯视觉样式不追加镜像测试）。
+
+    U5：运行日志磁贴并入实时区日志区（系统日志 tab），tile-logs 不复存在。"""
 
     TILE_IDS = (
         "tile-overview", "tile-voicelog", "tile-settings", "tile-voice",
-        "tile-vision", "tile-sync", "tile-replay", "tile-logs",
+        "tile-vision", "tile-sync", "tile-replay",
     )
 
     def test_console_renders_tile_semantics(self):
@@ -989,13 +993,15 @@ class TestConsoleTiles:
             "postForm('/volume'", "postForm('/speed'",
             "ttsSpeak()", "recordToggle()", "asrTest()",
             "previewToggle()", "orientBy(", "flip()", "visionTest()",
-            "syncPull()", "replay(", "vlClear()", "vlAuto(this)",
+            "syncPull()", "replay(", "clearActiveLog()", "setLogTab(",
         ):
             assert marker in page, marker
-        # 关键提示保留：录音独占 / OCR 机位 / 曲线诚实占位
+        # 关键提示保留：录音独占 / OCR 机位 / 曲线诚实标注（U5 起为真实曲线）
         assert "独占设备" in page
         assert "约 20 cm" in page
-        assert "实时声音曲线将在后续单元接入" in page
+        assert "不会伪造声音数据" in page
+        assert 'id="curve-canvas"' in page
+        assert 'id="log-pause"' in page, "日志区默认暂停滚动控件必须在页面结构中"
 
     def test_settings_tile_defaults_expanded(self):
         """常用参数原位展开（B3/B4）：运行参数磁贴默认 aria-expanded=true。"""

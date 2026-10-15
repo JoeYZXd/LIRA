@@ -1,4 +1,4 @@
-/* ===== LIRA 开发者控制台（U1 磁贴外壳） =====
+/* ===== LIRA 开发者控制台（U1 磁贴外壳 + U5 实时区三工作区） =====
    调色（脑图 A1）：奶油白底 + 杏桃橙主色 + 鼠尾草绿/淡紫分区 + 深棕文字；
    浅色不等于低对比度（正文深棕对奶油白约 9:1）。
    圆角软陶磁贴（A2）+ 轻按压反馈（A3）；无构建链、无 CDN、无框架。
@@ -136,14 +136,81 @@ img.shot {
 .vl-speak .vl-kind { color: var(--ok); }
 .vl-bad { color: var(--danger); }
 
-/* —— 实时声音曲线占位：诚实占位，不画假波形 —— */
-.curve-placeholder {
-  margin-top: 12px; padding: 20px 12px; text-align: center;
-  border: 2px dashed #C9B8DE; border-radius: var(--radius-sm);
-  background: rgba(220, 210, 233, .25); color: var(--ink-soft);
+/* —— 实时区（U5）：三工作区（声音曲线 / 同轮交互 / 日志） —— */
+.live-block {
+  margin-top: 14px; padding-top: 12px;
+  border-top: 1px dashed var(--border);
 }
-.curve-placeholder p { margin: 0; }
-.curve-title { font-weight: 700; color: var(--ink); }
+.live-block-head {
+  display: flex; flex-wrap: wrap; gap: 4px 14px;
+  align-items: baseline; justify-content: space-between;
+  margin-bottom: 6px;
+}
+.live-block-title { font-weight: 700; }
+.live-block-side { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+
+/* 声音曲线：画布只在数据到达时重绘（无动画循环，reduced-motion 信息完整） */
+.curve-wrap { position: relative; }
+#curve-canvas {
+  display: block; width: 100%; height: 150px;
+  background: var(--panel);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.curve-empty {
+  position: absolute; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0 12px; text-align: center;
+  color: var(--ink-soft); font-weight: 600; pointer-events: none;
+}
+.curve-empty[hidden] { display: none; }
+
+/* 同轮交互：每轮一张卡（用户/路由/回复/耗时），新轮在前 */
+.turns-view {
+  max-height: 420px; overflow: auto;
+  display: flex; flex-direction: column; gap: 8px;
+}
+.turn-card {
+  background: var(--panel);
+  border: 1px solid var(--border); border-left: 4px solid var(--sage);
+  border-radius: var(--radius-sm); padding: 8px 10px;
+}
+.turn-card.is-interrupted { border-left-color: var(--danger); }
+.turn-line { margin: 2px 0; overflow-wrap: anywhere; }
+.turn-role {
+  display: inline-block; min-width: 3em;
+  color: var(--ink-soft); font-weight: 600; font-size: 13px;
+}
+.turn-meta { color: var(--ink-soft); font-size: 13px; margin-top: 4px; }
+.unlinked-block { margin-top: 8px; }
+.unlinked-block .tile-summary { display: block; margin-bottom: 4px; }
+.log-rows {
+  max-height: 140px; overflow: auto;
+  background: var(--panel); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); padding: 6px 8px; font-size: 13px;
+}
+
+/* 日志区：三 tab + 暂停/筛选/清空共用控件 */
+.log-tabs { display: flex; flex-wrap: wrap; gap: 6px; }
+.log-tab {
+  padding: 5px 14px; border-radius: 999px;
+  background: transparent; border: 2px solid var(--border);
+  box-shadow: none; font-weight: 600;
+}
+.log-tab[aria-selected="true"] {
+  background: var(--apricot); border-color: var(--apricot-deep);
+}
+.log-view { max-height: 320px; overflow: auto; }
+.vl-sys-line { font-family: monospace; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* 观察/隐私横幅（403 停拉提示 + 手动恢复入口） */
+.observe-banner {
+  margin-top: 8px; padding: 10px 12px;
+  display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center;
+  background: rgba(220, 210, 233, .40);
+  border: 1px solid var(--lavender-deep);
+  border-radius: var(--radius-sm); font-weight: 600;
+}
+.observe-banner[hidden] { display: none; }
 
 /* —— 登录页 —— */
 .login-wrap {

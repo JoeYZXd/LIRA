@@ -140,6 +140,22 @@ class TestObserveAuth:
 
 
 class TestObserveIncremental:
+    def test_polling_itself_enables_envelope_computation(self):
+        """页面轮询即观察（U5 接线）：observe 拉取续期 2s 观察活动窗——
+        无任何手动观察者时，拉取后喂入的音频也产生包络（KTD2"无观察者
+        不计算"语义由端点轮询驱动，页面停拉 2s 后自然停止）。"""
+        _app, client, rt = make_observe_client()
+        login(client)
+        assert rt.telemetry.observer_count == 0
+
+        first = _pull(client)  # 首拉（空窗）；拉取动作本身续期观察活动窗
+        assert first["audio"]["items"] == []
+
+        _feed_audio(rt, 1)
+        body = _pull(client, audio_cursor=0)
+        assert [f["kind"] for f in body["audio"]["items"]] == ["envelope"]
+        assert body["audio"]["reset"] is False
+
     def test_first_pull_full_window_with_reset_baseline(self):
         _app, client, rt = make_observe_client()
         login(client)

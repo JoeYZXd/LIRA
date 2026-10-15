@@ -124,6 +124,8 @@ class DevTelemetry:
         self._audio_seq = 0
         self._event_seq = 0
         self._observers = 0
+        #: 轮询活动窗（note_observer_activity 续期；monotonic 过期即无观察者）
+        self._observer_until = 0.0
         self._privacy_on = False
         #: 最近一次 on_audio 见到的采集代次/路由/播报占用（gap 帧回填用）
         self._capture_generation = 0
@@ -148,9 +150,20 @@ class DevTelemetry:
             # 归零即丢弃未满桶：未观察窗口前的零散样本不混入下次计算的桶
             self._reset_acc()
 
+    def note_observer_activity(self) -> None:
+        """页面轮询即观察（U5 接线）：把"有观察者"状态延长到 monotonic+2s。
+
+        与手动 add_observer/remove_observer 计数并存（任一为真即计算包络）。
+        observe 端点每次拉取调用一次——页面停拉（折叠/隐藏/断开）后 2s 内
+        包络计算自然停止，符合 KTD2"无观察者不计算"，无需生命周期回调。
+        """
+        self._observer_until = time.monotonic() + 2.0
+
     @property
     def observer_count(self) -> int:
-        return self._observers
+        if self._observers > 0:
+            return self._observers
+        return 1 if time.monotonic() < self._observer_until else 0
 
     # ---------- 音频旁路 ----------
 
@@ -178,7 +191,10 @@ class DevTelemetry:
             return
         samples = np.asarray(samples, dtype=np.float32)
         pos, n = 0, samples.size
-        if not n or not self._observers:
+        if not n or not self.observer_count:
+            # 无观察者（手动计数为 0 且轮询活动窗已过）：不分配不计算；
+            # 顺手丢弃未满桶——未观察窗口的零散样本不混入恢复后的首桶
+            self._reset_acc()
             return
         # 桶边界按样本数划分：跨块/超大块都精确切到 1600 样本
         while pos < n:

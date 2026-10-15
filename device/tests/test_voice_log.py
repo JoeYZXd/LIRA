@@ -372,6 +372,9 @@ class TestDevEndpoints:
         assert client.get("/dev/api/voice-log").json()["entries"] == []
 
     def test_page_contains_section(self):
+        """dev 页保留语音交互日志展示面（U5 起：实时区日志工作区的语音事件 tab）。"""
         client = self._client()
         client.post("/dev/login", json={"passphrase": PASSPHRASE})
-        assert "语音交互日志" in client.get("/dev").text
+        page = client.get("/dev").text
+        assert "实时区：声音 · 同轮交互 · 日志" in page
+        assert "语音事件" in page

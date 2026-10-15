@@ -341,7 +341,7 @@ class TtsEngine:
         if self._player is not None:
             await self._player.close()
 
-    def _generate_measured(self, request, chunk, segment):
+    def _generate_measured(self, request, chunk):
         segment = next(_METRIC_SEGMENTS)
         started = time.monotonic()
         mark(request.trace, "synthesis_start", segment=segment, at=started)
@@ -409,7 +409,7 @@ class TtsEngine:
                     return None
                 if request.cancelled:
                     return None
-                return await asyncio.to_thread(self._generate_measured, request, chunk, 0)
+                return await asyncio.to_thread(self._generate_measured, request, chunk)
 
             async def pcm_source(first, iterator):
                 nonlocal pending

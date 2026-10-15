@@ -88,6 +88,6 @@ def test_measured_synthesis_records_full_compute_not_remaining_prefetch_wait(mon
     engine.generate = lambda text, speed: np.ones(16)
     request = _PlaybackRequest(PlaybackCompletion('owner'), 'test', 1, 1,
                                trace=metrics.trace(turn_id=1, owner='owner'))
-    engine._generate_measured(request, 'test', 0)
+    engine._generate_measured(request, 'test')
     assert metrics.summary()[0]['synthesis_seconds'] == 2.0
     assert metrics.summary()[0]['rtf'] == 0.5

@@ -35,6 +35,7 @@ import logging
 import secrets
 import time
 from dataclasses import dataclass
+import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -290,6 +291,17 @@ def _classify_text(runtime, text: str) -> dict | None:
 # ---------- 观察快照 / 设置能力（U4 接口层：序列化与元信息在此，不进遥测层） ----------
 
 
+def _loglevel_name() -> str:
+    """生效日志级别名（未显式设置时沿继承链取有效级别，恒有真实名字）。"""
+    return logging.getLevelName(logging.getLogger("lira").getEffectiveLevel())
+
+
+def _camera_oriented(runtime) -> object | None:
+    """支持方向设置的相机（缺失/不支持返回 None——status 与 settings 同源判断）。"""
+    camera = getattr(runtime, "camera", None)
+    return camera if camera is not None and hasattr(camera, "rotation") else None
+
+
 def _status_payload(handle: DevHandle) -> dict:
     """/dev/api/status 与 /dev/api/observe 共用的状态载荷（两处同构）。
 
@@ -303,51 +315,24 @@ def _status_payload(handle: DevHandle) -> dict:
     s["tts_speed"] = rt.settings.tts_speed
     s["volume_range"] = list(DeviceSettings.VOLUME_RANGE)
     s["speed_range"] = list(DeviceSettings.SPEED_RANGE)
-    # 生效级别映射名字（未显式设置时沿继承链取有效级别，恒有真实名字）
-    s["loglevel"] = logging.getLevelName(
-        logging.getLogger("lira").getEffectiveLevel()
-    )
+    s["loglevel"] = _loglevel_name()
     # 相机实际方向；相机缺失（未装配/不支持）时省略字段
-    camera = getattr(rt, "camera", None)
-    if camera is not None and hasattr(camera, "rotation"):
+    camera = _camera_oriented(rt)
+    if camera is not None:
         s["camera_rotation"] = camera.rotation
         s["camera_hflip"] = bool(getattr(camera, "hflip", False))
     return s
 
 
 def _audio_frame_json(frame: "AudioFrame") -> dict:
-    """AudioFrame → JSON dict（None 保留 null，浮点保留原值，枚举串直传）。"""
-    return {
-        "seq": frame.seq,
-        "t_mono": frame.t_mono,
-        "ts": frame.ts,
-        "capture_generation": frame.capture_generation,
-        "route": frame.route,
-        "tts_occupied": frame.tts_occupied,
-        "kind": frame.kind,
-        "reason": frame.reason,
-        "min": frame.min,
-        "max": frame.max,
-        "rms": frame.rms,
-        "peak": frame.peak,
-        "clip_ratio": frame.clip_ratio,
-    }
+    """AudioFrame → JSON dict。字段与 dataclass 一一对应，用 asdict 免手抄
+    （U8 化简审查：手写映射在加字段时会静默丢字段）。"""
+    return dataclasses.asdict(frame)
 
 
 def _event_json(event: "TelemetryEvent") -> dict:
     """TelemetryEvent → JSON dict（utterance/turn/owner 缺省保留 null）。"""
-    return {
-        "seq": event.seq,
-        "instance_id": event.instance_id,
-        "ts": event.ts,
-        "t_mono": event.t_mono,
-        "capture_generation": event.capture_generation,
-        "kind": event.kind,
-        "text": event.text,
-        "utterance_id": event.utterance_id,
-        "turn_id": event.turn_id,
-        "operation_owner": event.operation_owner,
-    }
+    return dataclasses.asdict(event)
 
 
 def _parse_cursor(raw: str | None) -> int | None:
@@ -366,96 +351,57 @@ def _parse_cursor(raw: str | None) -> int | None:
     return value if value >= 0 else None
 
 
+def _writable_item(key: str, label: str, value, constraint: dict,
+                   write_endpoint: str) -> dict:
+    """可写设置项样板（U8 化简审查：writable/effective 两常量键不再逐项手抄）。"""
+    return {"key": key, "label": label, "value": value, "writable": True,
+            "effective": "immediate", "constraint": constraint,
+            "write_endpoint": write_endpoint}
+
+
+def _readonly_item(key: str, label: str, value) -> dict:
+    """只读项：仅能力元信息，constraint/write_endpoint 恒空。"""
+    return {"key": key, "label": label, "value": value, "writable": False,
+            "effective": "immediate", "constraint": None, "write_endpoint": None}
+
+
 def _settings_items(runtime) -> list[dict]:
     """设置能力元信息（U4/R11）：真实当前值 + 可写性 + 生效方式 + 取值约束。
 
     只描述既有写路径（write_endpoint 指向既有 POST 端点），不新增写面；
-    只读项（模型就绪、同步会话）值取自 runtime.status()，仅展示元信息。
+    取值与 /dev/api/status 同源（_loglevel_name/_camera_oriented——U8 化简
+    审查：原两处表达式重复，靠注释维持"同源互证"）；只读项值取自 status。
     """
     settings = runtime.settings
     status = runtime.status()
     items: list[dict] = [
-        {
-            "key": "volume",
-            "label": "音量",
-            "value": settings.volume,
-            "writable": True,
-            "effective": "immediate",
-            "constraint": {
-                "type": "range",
-                "min": DeviceSettings.VOLUME_RANGE[0],
-                "max": DeviceSettings.VOLUME_RANGE[1],
-            },
-            "write_endpoint": "/volume",
-        },
-        {
-            "key": "tts_speed",
-            "label": "语速",
-            "value": settings.tts_speed,
-            "writable": True,
-            "effective": "immediate",
-            "constraint": {
-                "type": "range",
-                "min": DeviceSettings.SPEED_RANGE[0],
-                "max": DeviceSettings.SPEED_RANGE[1],
-            },
-            "write_endpoint": "/speed",
-        },
-        {
-            "key": "loglevel",
-            "label": "日志级别",
-            "value": logging.getLevelName(
-                logging.getLogger("lira").getEffectiveLevel()
-            ),
-            "writable": True,
-            "effective": "immediate",
-            "constraint": {
-                "type": "choices",
-                "values": ["DEBUG", "INFO", "WARNING", "ERROR"],
-            },
-            "write_endpoint": "/dev/api/loglevel",
-        },
+        _writable_item(
+            "volume", "音量", settings.volume,
+            {"type": "range", "min": DeviceSettings.VOLUME_RANGE[0],
+             "max": DeviceSettings.VOLUME_RANGE[1]}, "/volume"),
+        _writable_item(
+            "tts_speed", "语速", settings.tts_speed,
+            {"type": "range", "min": DeviceSettings.SPEED_RANGE[0],
+             "max": DeviceSettings.SPEED_RANGE[1]}, "/speed"),
+        _writable_item(
+            "loglevel", "日志级别", _loglevel_name(),
+            {"type": "choices", "values": ["DEBUG", "INFO", "WARNING", "ERROR"]},
+            "/dev/api/loglevel"),
     ]
     # 相机项随装配出现（与 /status 相机回读同一存在性判断）
-    camera = getattr(runtime, "camera", None)
-    if camera is not None and hasattr(camera, "rotation"):
-        items.append({
-            "key": "camera_rotation",
-            "label": "相机方向",
-            "value": camera.rotation,
-            "writable": True,
-            "effective": "immediate",
-            "constraint": {"type": "choices", "values": [0, 90, 180, 270]},
-            "write_endpoint": "/dev/api/camera/orientation",
-        })
-        items.append({
-            "key": "camera_hflip",
-            "label": "相机水平翻转",
-            "value": bool(getattr(camera, "hflip", False)),
-            "writable": True,
-            "effective": "immediate",
-            "constraint": {"type": "bool"},
-            "write_endpoint": "/dev/api/camera/orientation",
-        })
-    # 只读项：仅能力元信息，constraint/write_endpoint 恒空
-    items.append({
-        "key": "models",
-        "label": "模型就绪状态",
-        "value": status.get("models", {}),
-        "writable": False,
-        "effective": "immediate",
-        "constraint": None,
-        "write_endpoint": None,
-    })
-    items.append({
-        "key": "sync_session",
-        "label": "同步会话",
-        "value": (status.get("sync") or {}).get("session"),
-        "writable": False,
-        "effective": "immediate",
-        "constraint": None,
-        "write_endpoint": None,
-    })
+    camera = _camera_oriented(runtime)
+    if camera is not None:
+        items.append(_writable_item(
+            "camera_rotation", "相机方向", camera.rotation,
+            {"type": "choices", "values": [0, 90, 180, 270]},
+            "/dev/api/camera/orientation"))
+        items.append(_writable_item(
+            "camera_hflip", "相机水平翻转", bool(getattr(camera, "hflip", False)),
+            {"type": "bool"}, "/dev/api/camera/orientation"))
+    # 只读项：仅能力元信息
+    items.append(_readonly_item("models", "模型就绪状态", status.get("models", {})))
+    items.append(_readonly_item("sync_session", "同步会话",
+                                (status.get("sync") or {}).get("session")))
     return items
 
 
@@ -641,11 +587,15 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             # （len(items)==上限时可能还有后续；reset 分页重建时同样以此为据）
             event_items = event_items[:_OBSERVE_EVENT_PAGE]
             event_next = event_items[-1].seq
-        # 日志纪律：只记数量与布尔，不记事件/音频内容
-        logger.info(
-            "dev event=observe n_audio=%d n_events=%d reset=%s",
-            len(audio_items), len(event_items), audio_reset or event_reset,
-        )
+        # 日志纪律：只记数量与布尔，不记事件/音频内容。U8 效率审查：250ms
+        # 轮询下 INFO 会以 4 行/秒冲刷环形日志（控制台日志视图自己就是受害
+        # 者）——常规拍降 debug，仅 reset（实例重启/游标失效）留 INFO 痕。
+        if audio_reset or event_reset:
+            logger.info("dev event=observe reset=true n_audio=%d n_events=%d",
+                        len(audio_items), len(event_items))
+        else:
+            logger.debug("dev event=observe n_audio=%d n_events=%d",
+                         len(audio_items), len(event_items))
         return JSONResponse({
             "instance_id": telemetry.instance_id,
             "audio": {
@@ -657,6 +607,8 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
                 "items": [_event_json(e) for e in event_items],
                 "next_cursor": event_next,
                 "reset": event_reset,
+                # 页长回显：客户端续页判断以此为据，不再各自硬编码（U8 化简审查）
+                "page": _OBSERVE_EVENT_PAGE,
             },
             "status": _status_payload(handle),
         })
@@ -691,8 +643,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         if (getattr(rt, "speaker_candidates", None) is None
                 or getattr(rt, "personal_memory", None) is None):
             return JSONResponse({"error": "声纹候选未装配"}, status_code=503)
-        snap = rt.speaker_candidates.snapshot()
-        profiles_ids = {member for member, _vector in rt.personal_memory.profiles()}
+        profiles = rt.personal_memory.profiles()
+        snap = rt.speaker_candidates.snapshot(established=profiles)
+        profiles_ids = {member for member, _vector in profiles}
         members = [
             {"member_id": m["id"], "name": m["name"], "emoji": m["emoji"],
              "has_profile": m["id"] in profiles_ids}

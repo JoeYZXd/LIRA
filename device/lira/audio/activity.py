@@ -2,6 +2,11 @@
 from __future__ import annotations
 import numpy as np
 
+#: 削波判阈（单一出处）：|x| >= 该值记削波。消费方：RouteDispatch 每秒统计、
+#: DevTelemetry 包络桶、VoiceCandidates 质量门——三者口径必须一致（U8 化简
+#: 审查收口：原先三处各自定义、靠注释互相对齐）。
+CLIP_THRESHOLD = 0.999
+
 
 class SpeechActivity:
     def __init__(self, *, sample_rate=16000, onset_seconds=0.08, silence_seconds=0.65):

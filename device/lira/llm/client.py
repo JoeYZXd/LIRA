@@ -44,6 +44,7 @@ from lira.llm.prompts import (
     is_complex_text,
     is_medical_text,
 )
+from lira.dev_telemetry import safe_add_event
 from lira.voice_log import VOICE_LOG
 
 __all__ = [
@@ -82,12 +83,7 @@ class _ModelObserve:
         self._snapshot_len = 0
 
     def _emit(self, kind: str, text: str) -> None:
-        if self._tel is None:
-            return
-        try:
-            self._tel.add_event(kind, text, turn_id=self._turn)
-        except Exception:
-            logger.debug("llm event=telemetry_emit_failed kind=%s", kind, exc_info=True)
+        safe_add_event(self._tel, kind, text, turn_id=self._turn)
 
     def request(self, chars: int) -> None:
         """实际发起：结构化摘要，不含 prompt 内容（内容已在 utterance 事件）。"""

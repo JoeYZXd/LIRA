@@ -94,11 +94,23 @@ class ChatStore:
 
     # ---------- 成员 ----------
 
-    def create_member(self, name: str, emoji: str | None = None) -> dict:
-        """创建家庭成员；重名显式拒绝（UNIQUE 约束直接裁决），emoji 缺省落默认头像。"""
+    def create_member(self, name: str, emoji: str | None = None, *, commit: bool = True) -> dict:
+        """创建家庭成员；重名显式拒绝（UNIQUE 约束直接裁决），emoji 缺省落默认头像。
+
+        commit=False：只执行 INSERT 不提交——供调用方的外层事务（如
+        VoiceCandidates.promote_new_name 的统一晋升事务）收编提交/回滚，
+        使 members 插入与声纹写入保持原子（U8 化简审查：替代 PersonalMemory
+        的 schema 克隆内联插入）。返回成员 dict（两种模式下同形）。
+        """
         created_at = int(self._now())
         try:
-            with self._conn:
+            if commit:
+                with self._conn:
+                    cur = self._conn.execute(
+                        "INSERT INTO members (name, emoji, created_at) VALUES (?, ?, ?)",
+                        (name, _DEFAULT_EMOJI if emoji is None else emoji, created_at),
+                    )
+            else:
                 cur = self._conn.execute(
                     "INSERT INTO members (name, emoji, created_at) VALUES (?, ?, ?)",
                     (name, _DEFAULT_EMOJI if emoji is None else emoji, created_at),

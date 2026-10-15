@@ -28,6 +28,7 @@
 
 from __future__ import annotations
 
+import logging
 import math
 import time
 import uuid
@@ -37,8 +38,10 @@ from dataclasses import dataclass
 import numpy as np
 
 from lira.audio._paths import SAMPLE_RATE
+from lira.audio.activity import CLIP_THRESHOLD
 
-__all__ = ["AudioFrame", "TelemetryEvent", "DevTelemetry", "owner_text"]
+__all__ = ["AudioFrame", "TelemetryEvent", "DevTelemetry", "owner_text",
+           "safe_add_event", "CLIP_THRESHOLD"]
 
 #: 每桶样本数：100ms @ 16kHz。桶边界按样本数划分，与输入 chunk 大小解耦。
 _BUCKET_SAMPLES = SAMPLE_RATE // 10
@@ -47,8 +50,6 @@ _MAX_AUDIO_FRAMES = 100
 #: 文本事件双界：条数与 utf-8 字节数同时满足，超限从最旧淘汰。
 _MAX_TEXT_EVENTS = 500
 _MAX_TEXT_BYTES = 512 * 1024
-#: 削波判阈（与 RouteDispatch 每秒统计同阈：|x| >= 0.999 记削波）。
-_CLIP_THRESHOLD = 0.999
 
 
 def owner_text(owner: object) -> str | None:
@@ -64,6 +65,24 @@ def owner_text(owner: object) -> str | None:
     if epoch is None or operation_id is None:
         return str(owner)
     return f"{epoch}.{operation_id}"
+
+
+def safe_add_event(telemetry, kind: str, text: str, **fields) -> None:
+    """观察旁路的统一守卫（U8 化简审查收口，原先五处各自 try/except）：
+
+    telemetry 未装配（None）即 no-op；接受遥测实例或绑定的 add_event 可调用
+    （鸭子类型，getattr 回退）；发射异常吞并 + debug 留痕——观察是纯旁路，
+    绝不影响主链路。各模块经此发射，不再自抄守卫样板。
+    """
+    if telemetry is None:
+        return
+    try:
+        add = getattr(telemetry, "add_event", telemetry)
+        add(kind, text, **fields)
+    except Exception:  # noqa: BLE001 - 观察旁路不拖垮主链路
+        logging.getLogger(__name__).debug(
+            "dev_telemetry event=safe_add_event_failed kind=%s", kind,
+            exc_info=True)
 
 
 @dataclass
@@ -102,6 +121,8 @@ class TelemetryEvent:
     utterance_id: int | None = None
     turn_id: int | None = None
     operation_owner: str | None = None
+    #: utf-8 字节数缓存（淘汰时免二次 encode；U8 效率审查）
+    text_bytes: int = 0
 
 
 class DevTelemetry:
@@ -209,7 +230,7 @@ class DevTelemetry:
             if seg_max > self._acc_max:
                 self._acc_max = seg_max
             self._acc_clipped += int(
-                np.count_nonzero(np.abs(seg) >= _CLIP_THRESHOLD))
+                np.count_nonzero(np.abs(seg) >= CLIP_THRESHOLD))
             pos += take
             if self._acc_samples >= _BUCKET_SAMPLES:
                 self._flush_bucket(generation, route_text, occupied)
@@ -237,14 +258,15 @@ class DevTelemetry:
         if self._privacy_on:
             return
         text = str(text)
+        text_bytes = len(text.encode("utf-8"))
         self._event_seq += 1  # 序号从 1 起：初始 cursor=0 恰好覆盖第一条
         self._events.append(TelemetryEvent(
             seq=self._event_seq, instance_id=self.instance_id,
             ts=time.time(), t_mono=time.monotonic(),
             capture_generation=capture_generation, kind=kind, text=text,
             utterance_id=utterance_id, turn_id=turn_id,
-            operation_owner=operation_owner))
-        self._text_bytes += len(text.encode("utf-8"))
+            operation_owner=operation_owner, text_bytes=text_bytes))
+        self._text_bytes += text_bytes
         self._trim_events()
 
     #: 语义别名：与 ``on_audio`` 同面的"事件写入口"（隐私拒收说明所指）
@@ -259,7 +281,7 @@ class DevTelemetry:
         while self._events and (len(self._events) > _MAX_TEXT_EVENTS
                                 or self._text_bytes > _MAX_TEXT_BYTES):
             evicted = self._events.popleft()
-            self._text_bytes -= len(evicted.text.encode("utf-8"))
+            self._text_bytes -= evicted.text_bytes
 
     # ---------- 隐私联锁（AE5） ----------
 
@@ -295,7 +317,14 @@ class DevTelemetry:
         if cursor + 1 < oldest:
             # 请求区间已有条目被淘汰/清空（含隐私清空后的 gap 辨认）
             return list(ring), next_seq, True
-        return [item for item in ring if item.seq > cursor], next_seq, False
+        # seq 单调递增：从环尾反向收集到 cursor 即停（250ms 轮询下避免全环扫描）
+        items = []
+        for item in reversed(ring):
+            if item.seq <= cursor:
+                break
+            items.append(item)
+        items.reverse()
+        return items, next_seq, False
 
     # ---------- 内部 ----------
 

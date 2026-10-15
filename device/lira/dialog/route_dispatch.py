@@ -5,7 +5,8 @@ from collections import deque
 import logging
 import numpy as np
 
-from lira.audio.activity import SpeechActivity
+from lira.audio.activity import CLIP_THRESHOLD, SpeechActivity
+from lira.dev_telemetry import safe_add_event
 from lira.dialog.callbacks import invoke_callback
 from lira.dialog.intents import COMMAND_KWS_WORDS
 from lira.dialog.state_machine import AudioRoute, State
@@ -180,15 +181,10 @@ class RouteDispatch:
         return self._utterance_id
 
     def _emit_event(self, kind: str, text: str, **fields) -> None:
-        """遥测旁路发射（U3）：未装配即 no-op；异常只留痕不进主链路。"""
-        telemetry = getattr(self._streams, "telemetry", None)
-        if telemetry is None:
-            return
-        try:
-            telemetry.add_event(kind, text, **fields)
-        except Exception:
-            logging.debug("dispatch event=telemetry_emit_failed kind=%s", kind,
-                          exc_info=True)
+        """遥测旁路发射（U3）：守卫统一走 safe_add_event（U8 收口）——
+        未装配即 no-op，异常只留痕不进主链路。"""
+        safe_add_event(getattr(self._streams, "telemetry", None), kind, text,
+                       **fields)
 
     def _deliver(self, text, *, wake_prefixed=None, voice_samples=None, source="asr"):
         """投递一句话文本。wake_prefixed=None（ASR 通道）时消费一次唤醒前缀
@@ -250,7 +246,7 @@ class RouteDispatch:
         self._audio_energy += float(np.sum(samples * samples))
         if samples.size:
             self._audio_peak = max(self._audio_peak, float(np.max(np.abs(samples))))
-            self._audio_clipped += int(np.count_nonzero(np.abs(samples) >= 0.999))
+            self._audio_clipped += int(np.count_nonzero(np.abs(samples) >= CLIP_THRESHOLD))
         if self._audio_samples >= _SAMPLE_RATE:
             rms = np.sqrt(self._audio_energy / self._audio_samples)
             db = 20 * np.log10(max(float(rms), 1e-10))

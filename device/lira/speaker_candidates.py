@@ -47,7 +47,6 @@ stale / expired / 去重滚动的语义选择：
 from __future__ import annotations
 
 import hashlib
-import logging
 import sqlite3
 import time
 from dataclasses import dataclass
@@ -56,17 +55,16 @@ from typing import Callable
 import numpy as np
 
 from lira.audio._paths import SAMPLE_RATE
+from lira.audio.activity import CLIP_THRESHOLD
+from lira.dev_telemetry import safe_add_event
 
 __all__ = [
     "VoiceCandidates", "Verdict", "CandidateError", "CandidateNotFound",
-    "CandidateConflict", "ASSOCIATION_PENDING",
+    "CandidateConflict", "ASSOCIATION_PENDING", "CLIP_THRESHOLD",
 ]
 
 #: 去重标识全局滚动上限（KTD5 数据关系：最多保留最近 100 个标识）
 MAX_DEDUP_KEYS = 100
-
-#: 削波判阈（与 dev_telemetry/RouteDispatch 同阈：|x| >= 0.999 记削波）
-CLIP_THRESHOLD = 0.999
 
 #: 进度封顶：未过段间一致性门时最多 99%（KTD5：条件齐备才 100%）
 PROGRESS_CAP = 0.99
@@ -101,6 +99,25 @@ class CandidateNotFound(CandidateError):
 
 class CandidateConflict(CandidateError):
     """状态不符或成员已有声纹——拒绝且不覆盖（409 语义，AE4）。"""
+
+
+def _top_or_ambiguous(scored, threshold, margin):
+    """「top-1 达标 + 对次高边际」统一判定（U8 审查收口，原先 4 处手写、
+    靠注释互称同则——含 SpeakerIdentity.match）。
+
+    scored 为 [(score, payload)] 任意顺序；按分数降序（稳定）后：
+    top1 ≥ threshold 且（无次高或 top1−top2 ≥ margin）→ (payload, False)；
+    top1 达标但边际不足 → (None, True)（歧义：声音归属不明确）；
+    无达标 → (None, False)。
+    """
+    if not scored:
+        return None, False
+    ordered = sorted(scored, key=lambda item: item[0], reverse=True)
+    if ordered[0][0] < threshold:
+        return None, False
+    if len(ordered) > 1 and ordered[0][0] - ordered[1][0] < margin:
+        return None, True
+    return ordered[0][1], False
 
 
 @dataclass(frozen=True)
@@ -147,8 +164,9 @@ class VoiceCandidates:
         # 这是"候选不产生成员权限"（KTD6）的物理体现。U7 追加三列：未发布的
         # 开发库分支内直接改 CREATE TABLE，对 U6 时代已存在的库用 ALTER 兜底
         # （取简：幂等加列，无需迁移框架；失败重开即重建候选可重新积累）。
-        # voice_profiles 是 PersonalMemory 的既有表——确认事务要往里写聚合
-        # 向量，store 独立使用（测试直连空库）时也必须幂等存在。
+        # voice_profiles 是 PersonalMemory 的既有表（其 DDL 唯一出处）——确认
+        # 事务往里写聚合向量时表必已存在（生产装配共享同一连接且 PersonalMemory
+        # 先建；U8 化简审查：此处不再复制 DDL，防双定义静默漂移）。
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS voice_candidates (
                 candidate_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -171,9 +189,6 @@ class VoiceCandidates:
                 duration REAL NOT NULL,
                 vector BLOB NOT NULL,
                 created_at REAL NOT NULL);
-            CREATE TABLE IF NOT EXISTS voice_profiles (
-                member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
-                vector BLOB NOT NULL);
         ''')
         for column in ("pending_name TEXT", "proposed_member_id INTEGER", "member_id INTEGER"):
             try:
@@ -197,8 +212,17 @@ class VoiceCandidates:
                 (self._now(), self.fingerprint, self.params.strategy_version))
 
     def _expire_candidates(self, now: float) -> None:
-        """惰性过期：accumulating 候选超过 ttl 无新证据 → expired。"""
+        """惰性过期：accumulating 候选超过 ttl 无新证据 → expired。
+
+        U8 效率审查：先只读探测（绝大多数时刻 0 行命中），避免 observe/
+        snapshot 每次都开一次空写事务、与主循环在共享连接上互相插锁。
+        """
         cutoff = now - self.params.candidate_ttl_days * 86400.0
+        due = self.db.execute(
+            "SELECT 1 FROM voice_candidates "
+            "WHERE status='accumulating' AND updated_at < ? LIMIT 1", (cutoff,)).fetchone()
+        if due is None:
+            return
         with self.db:
             self.db.execute(
                 "UPDATE voice_candidates SET status='expired' "
@@ -282,30 +306,33 @@ class VoiceCandidates:
                 "DELETE FROM voice_candidate_evidence WHERE id NOT IN "
                 "(SELECT id FROM voice_candidate_evidence ORDER BY id DESC LIMIT ?)",
                 (MAX_DEDUP_KEYS,))
-            # 就绪复核（同事务，KTD5）：计数、时长与现存证据两两一致性齐备才 ready
-            worst = self._min_pairwise_cos(candidate_id)
+            # 就绪复核（同事务，KTD5）：计数、时长与现存证据两两一致性齐备才
+            # ready。U8 效率审查：只在未过门且计数时长达标时才做 O(n²) 复核
+            # （已 passed 或未达标阶段，全量证据拉取 + 两两 dot 是纯浪费）。
             passed = bool(self.db.execute(
                 "SELECT consistency_passed FROM voice_candidates WHERE candidate_id=?",
                 (candidate_id,)).fetchone()[0])
-            if (worst is not None and worst >= self.params.consistency_threshold
-                    and new_count >= self.params.target_segments
+            if (not passed and new_count >= self.params.target_segments
                     and new_seconds >= self.params.target_seconds):
-                self.db.execute(
-                    "UPDATE voice_candidates SET consistency_passed=1, status='ready' "
-                    "WHERE candidate_id=?", (candidate_id,))
-                passed = True
+                worst = self._min_pairwise_cos(candidate_id)
+                if worst is not None and worst >= self.params.consistency_threshold:
+                    self.db.execute(
+                        "UPDATE voice_candidates SET consistency_passed=1, status='ready' "
+                        "WHERE candidate_id=?", (candidate_id,))
+                    passed = True
         return self._verdict(ACCEPTED, candidate_id=candidate_id,
                              progress=self._progress(new_count, new_seconds, passed),
                              reason=f"有效证据 {new_count} 段 / {new_seconds:.1f}s")
 
     # ---------- 快照（U7 磁贴数据面） ----------
 
-    def snapshot(self, *, now: float | None = None) -> dict:
+    def snapshot(self, *, now: float | None = None, established=None) -> dict:
         """候选与汇总快照。字段用 candidate（候选数不直接称为人数）。
 
         U7：每候选带 pending_name/proposed_member_id/member_id/status；
         established_count 只统计真实 voice_profiles（AE2：采集 100% 但未
-        确认的候选不计已建立人数）。
+        确认的候选不计已建立人数）。established 可传入已取的 profile 列表
+        （U8 效率审查：dev 端点同请求内避免第二次全表 BLOB 解码）。
         """
         now = self._now() if now is None else now
         self._expire_candidates(now)
@@ -331,7 +358,8 @@ class VoiceCandidates:
                 "proposed_member_id": row[7],
                 "member_id": row[8],
             })
-        established = self._profiles_provider() or []
+        if established is None:
+            established = self._profiles_provider() or []
         return {
             "candidates": candidates,
             "summary": {
@@ -353,9 +381,9 @@ class VoiceCandidates:
     def lookup(self, vector) -> int | None:
         """当前声音对应的活跃候选 id（命名上下文绑定用）；**只读不变更**。
 
-        与 _assign 同则（现任活跃候选按 cos 降序，assign 阈值 + 边际判定），
-        但绝不建候选、置 stale 或写任何行——歧义（边际不足）与陌生声音都返回
-        None，命名上下文宁缺毋错绑。每轮 resolve 都会调用，故不发遥测事件。
+        与 _assign 同则（经 _top_or_ambiguous 收口），但绝不建候选、置 stale
+        或写任何行——歧义（边际不足）与陌生声音都返回 None，命名上下文
+        宁缺毋错绑。每轮 resolve 都会调用，故不发遥测事件。
         """
         vector = np.asarray(vector, np.float32)
         norm = float(np.linalg.norm(vector))
@@ -368,12 +396,9 @@ class VoiceCandidates:
             if aggregate.shape != vector.shape:
                 continue  # 维度不符（防御）：跳过，lookup 不做任何置失效写
             scored.append((float(np.dot(vector, aggregate)), int(row[0])))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        if not scored or scored[0][0] < self.params.assign_threshold:
-            return None
-        if len(scored) > 1 and scored[0][0] - scored[1][0] < self.params.match_margin:
-            return None  # 声音归属不明确：不绑定命名上下文
-        return scored[0][1]
+        hit, _ambiguous = _top_or_ambiguous(scored, self.params.assign_threshold,
+                                            self.params.match_margin)
+        return hit
 
     def set_pending_name(self, candidate_id: int, name: str,
                          *, now: float | None = None) -> bool:
@@ -522,7 +547,8 @@ class VoiceCandidates:
             return 0
 
     def _match_established(self, vector):
-        """已建立成员判定（与 SpeakerIdentity.match 同则）。
+        """已建立成员判定（与 SpeakerIdentity.match 同则，经 _top_or_ambiguous
+        收口——"同则"由共用实现保证而非注释）。
 
         最高 cos >= match_threshold 且对次高边际 >= match_margin →
         (member_id, False)；最高达标但边际不足 → (None, True) 表示歧义；
@@ -534,14 +560,11 @@ class VoiceCandidates:
             if member_vector.shape != vector.shape:
                 continue
             scores.append((float(np.dot(vector, member_vector)), int(member)))
-        if not scores:
-            return None
-        scores.sort(reverse=True)
-        if scores[0][0] < self.params.match_threshold:
-            return None
-        if len(scores) > 1 and scores[0][0] - scores[1][0] < self.params.match_margin:
-            return None, True
-        return scores[0][1], False
+        hit, ambiguous = _top_or_ambiguous(scores, self.params.match_threshold,
+                                           self.params.match_margin)
+        if hit is None:
+            return (None, True) if ambiguous else None
+        return hit, False
 
     def _active_rows(self):
         """现任指纹 + 现任策略版本的活跃候选（observe 只在这些里指派）。
@@ -557,17 +580,14 @@ class VoiceCandidates:
             (*ACTIVE_STATUSES, self.fingerprint, self.params.strategy_version)).fetchall()
 
     def _count_active(self) -> int:
-        """现任指纹 + 现任策略版本的活跃候选数（max_candidates 名额口径）。"""
-        placeholders = ",".join("?" * len(ACTIVE_STATUSES))
-        row = self.db.execute(
-            f"SELECT COUNT(*) FROM voice_candidates WHERE status IN ({placeholders}) "
-            "AND model_fingerprint=? AND strategy_version=?",
-            (*ACTIVE_STATUSES, self.fingerprint, self.params.strategy_version)).fetchone()
-        return int(row[0])
+        """现任指纹 + 现任策略版本的活跃候选数（max_candidates 名额口径；
+        上限 20，行数极小，直接复用 _active_rows 免复制 WHERE——U8 审查）。"""
+        return len(self._active_rows())
 
     def _assign(self, vector, now: float):
-        """候选指派：现任活跃候选按 cos 降序——最高达标且边际足 → 归入；
-        最高达标但边际不足 → 歧义拒绝；无达标 → 新建候选（未满上限时）。
+        """候选指派：现任活跃候选按 cos 降序（经 _top_or_ambiguous 收口）——
+        最高达标且边际足 → 归入；最高达标但边际不足 → 歧义拒绝；
+        无达标 → 新建候选（未满上限时）。
 
         返回 (candidate_id, aggregate_blob, segment_count, total_seconds) 或 Verdict。
         """
@@ -581,11 +601,12 @@ class VoiceCandidates:
                                     "WHERE candidate_id=?", (row[0],))
                 continue
             scored.append((float(np.dot(vector, aggregate)), row))
-        scored.sort(key=lambda item: item[0], reverse=True)
-        if scored and scored[0][0] >= self.params.assign_threshold:
-            if len(scored) > 1 and scored[0][0] - scored[1][0] < self.params.match_margin:
-                return Verdict(AMBIGUOUS, reason="声音归属不明确，本段不计入任何候选")
-            return scored[0][1]
+        hit, ambiguous = _top_or_ambiguous(scored, self.params.assign_threshold,
+                                           self.params.match_margin)
+        if ambiguous:
+            return Verdict(AMBIGUOUS, reason="声音归属不明确，本段不计入任何候选")
+        if hit is not None:
+            return hit
         if self._count_active() >= self.params.max_candidates:
             return Verdict(BOUND_REACHED,
                            reason="未绑定候选已达上限，新声音暂不积累（等待确认或过期腾出名额）")
@@ -626,13 +647,9 @@ class VoiceCandidates:
 
     def _verdict(self, outcome: str, *, candidate_id: int | None = None,
                  progress: float | None = None, reason: str = "") -> Verdict:
-        """构造 Verdict；事件面（kind 前缀 voice_）进 dev 遥测，异常只留痕。"""
+        """构造 Verdict；事件面（kind 前缀 voice_）经 safe_add_event 统一守卫。"""
         verdict = Verdict(outcome, candidate_id=candidate_id,
                           progress=progress, reason=reason)
-        if self._event_sink is not None:
-            try:
-                text = f"{outcome} candidate={candidate_id} {reason}".strip()
-                self._event_sink("voice_candidate", text)
-            except Exception:  # noqa: BLE001 - 观察旁路不拖垮主链路
-                logging.debug("speaker_candidates event=sink_failed", exc_info=True)
+        text = f"{outcome} candidate={candidate_id} {reason}".strip()
+        safe_add_event(self._event_sink, "voice_candidate", text)
         return verdict

@@ -49,7 +49,7 @@ from lira.dialog.intents import COMMANDS_KEYWORDS_FILE, PLAYBACK_WHITELIST_KEYWO
 from lira.dialog.route_dispatch import RouteDispatch
 from lira.dialog.router import Router
 from lira.dialog.state_machine import AudioRoute, DialogEngine, State
-from lira.dev_telemetry import DevTelemetry, owner_text
+from lira.dev_telemetry import DevTelemetry, owner_text, safe_add_event
 from lira.hal.base import HalError
 from lira.llm.breaker import BreakerState
 from lira.hal.mock import (
@@ -452,15 +452,9 @@ class DeviceCallbacks:
         speak_line = f"语音输出中（{len(text)} 字）：{preview}"
         VOICE_LOG.log("speak", speak_line)
         # 播报开始观察事件（U3/KTD3）：与 VOICE_LOG 预览同位同文案，补 owner
-        # 关联（镜像事件不带 owner）；发射异常不影响出声主链路
-        telemetry = getattr(self._rt, "telemetry", None)
-        if telemetry is not None:
-            try:
-                telemetry.add_event("speak", speak_line,
-                                    operation_owner=owner_text(owner))
-            except Exception:
-                logging.debug("main event=telemetry_emit_failed kind=speak",
-                              exc_info=True)
+        # 关联（镜像事件不带 owner）；守卫统一 safe_add_event，不影响出声
+        safe_add_event(getattr(self._rt, "telemetry", None), "speak", speak_line,
+                       operation_owner=owner_text(owner))
         tts = self._rt.tts
         if tts is None:
             # 日志纪律：只记事件与字数，话术文本（可含 LLM 回复/误听内容）不落日志
@@ -735,6 +729,11 @@ class DeviceRuntime:
                 from lira.config import REPO_ROOT
                 model_path=REPO_ROOT / 'models' / 'lira-speaker.onnx'
             self.speaker_identity=SpeakerIdentity(self.personal_memory,model_path)
+            # U8 复用审查：匹配阈值/边际单一出处收归 SpeakerConfig——原先
+            # SpeakerIdentity 硬编码 0.80/0.10 与 config 各一份，改配置会
+            # 静默只影响候选侧判定
+            self.speaker_identity.threshold=cfg.speaker.match_threshold
+            self.speaker_identity.margin=cfg.speaker.match_margin
             # U6/KTD6：候选积累存储与 PersonalMemory 同一 SQLite 连接——U7 的
             # 同名确认晋升必须与 members/voice_profiles 同事务；观察事件经
             # dev 遥测事件面（kind=voice_candidate）留痕，隐私时遥测自会拒收
@@ -751,6 +750,11 @@ class DeviceRuntime:
             self.personal_memory.candidates=self.speaker_candidates
             self.speaker_identity.candidates=self.speaker_candidates
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
+        # 模型就绪快照（status 面消费；启动期定型——语音栈/OCR 引擎装配即定）
+        self._models_status = {
+            "audio": _audio_models_ready(),
+            "ocr": _ocr_models_ready(cfg),
+        }
         # 模型显示观察器装配（U3/KTD7）：仿 llm.memory= 惯例运行时注入；
         # llm 可能为注入替身——setattr 不限类型（鸭子类型，无属性即新增）
         llm.telemetry = self.telemetry
@@ -890,10 +894,9 @@ class DeviceRuntime:
             },
             "network": bool(self._network_ok()),
             "breaker": breaker_state.name if breaker_state is not None else "unknown",
-            "models": {
-                "audio": _audio_models_ready(),
-                "ocr": _ocr_models_ready(self._cfg),
-            },
+            # U8 效率审查：模型就绪是启动期事实（语音栈/OCR 引擎装配即定型），
+            # 缓存一次——observe 250ms 轮询下原先每拍 8 次文件系统 stat
+            "models": self._models_status,
         }
 
     def sync_pull(self) -> str:

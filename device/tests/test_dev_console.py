@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+import numpy as np
 from fastapi.testclient import TestClient
 
 from lira.appliances.store import ApplianceStore
@@ -575,8 +576,7 @@ class FakeCamera:
         if self.fail:
             raise OSError("no /dev/video0")
         import cv2
-        import numpy as np
-
+    
         image = np.full((60, 200, 3), 255, dtype=np.uint8)
         ok, jpeg = cv2.imencode(".jpg", image)
         assert ok
@@ -585,8 +585,7 @@ class FakeCamera:
 
 class FakeOcr:
     def detect(self, image):
-        import numpy as np
-
+    
         y = 10.0
         return [np.array([[5, y], [195, y], [195, y + 20], [5, y + 20]], dtype=np.float32)]
 
@@ -653,8 +652,7 @@ class TestVisionEndpoint:
 
     def test_orientation_transform_math(self):
         """旋转/翻转纯函数：形状与内容方向正确。"""
-        import numpy as np
-
+    
         from lira.hal.board.camera_isp import _apply_orientation
 
         img = np.zeros((4, 6, 3), dtype=np.uint8)
@@ -1025,7 +1023,6 @@ class TestConsoleTiles:
 
 def _vc_samples(seconds: float, seed: int):
     """可控假音频（过质量门：4s、RMS≈0.2；内容与向量无关）。"""
-    import numpy as np
 
     rng = np.random.default_rng(seed)
     return (rng.standard_normal(int(16000 * seconds)) * 0.2).astype(np.float32)
@@ -1037,7 +1034,6 @@ def make_voice_memory_client(tmp_path):
     与生产装配同构（memory.db 即 ChatStore 连接）；隐私谓词与 rt.privacy
     同源，便于翻转联锁。
     """
-    import numpy as np
 
     from lira.config import SpeakerConfig
     from lira.personal_memory import PersonalMemory
@@ -1068,8 +1064,7 @@ class TestVoiceCandidatesEndpoints:
     def test_auth_and_privacy_matrix(self, tmp_path):
         """新端点鉴权矩阵：未登录 401（路由守卫遍历自动覆盖）；隐私开启时
         确认 POST 403（禁止身份确认操作），GET 快照仍可用（磁贴结构可见）。"""
-        import numpy as np
-
+    
         _app, client, rt = make_voice_memory_client(tmp_path)
         assert client.get("/dev/api/voice-candidates").status_code == 401
         assert client.post("/dev/api/voice-candidates/1/confirm",
@@ -1084,8 +1079,7 @@ class TestVoiceCandidatesEndpoints:
     def test_snapshot_payload_and_established_semantics(self, tmp_path):
         """AE2：established 只按真实 voice_profiles 统计；就绪 100% 未确认
         候选不进入已建立人数；awaiting_console 明细带提议关联的成员名。"""
-        import numpy as np
-
+    
         _app, client, rt = make_voice_memory_client(tmp_path)
         login(client)
         store = rt.speaker_candidates
@@ -1117,8 +1111,7 @@ class TestVoiceCandidatesEndpoints:
     def test_confirm_success_retry_idempotent_and_conflicts(self, tmp_path):
         """确认 POST：成功 200、重试幂等不重复插声纹、成员已有声纹 409 不覆盖、
         候选不存在 404、状态不符 409、参数非法 400。"""
-        import numpy as np
-
+    
         _app, client, rt = make_voice_memory_client(tmp_path)
         login(client)
         store = rt.speaker_candidates

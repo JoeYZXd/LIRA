@@ -211,7 +211,7 @@ function renderVoiceCandidates(data) {
   parts.push('<div class="vc-block"><div class="vc-block-title">已建立成员 ' + (data.members || []).length + '</div>' +
     (memberCards || '<p class="muted">（还没有成员）</p>') + '</div>');
   // 候选卡（E3/E4）：状态徽标 + 可解释进度；待确认卡带确认按钮
-  const pendingIds = new Set((data.pending_confirmations || []).map(p => p.candidate_id));
+  // （U8 化简审查：只留 Map 一个索引——Set 与 Map 键集合恒同，双份会漂移）
   const pendingByCid = new Map((data.pending_confirmations || []).map(p => [p.candidate_id, p]));
   const candidateCards = (data.candidates || []).map(c => {
     const pct = Math.round((c.progress || 0) * 100);
@@ -228,7 +228,7 @@ function renderVoiceCandidates(data) {
       const m = (data.members || []).find(x => x.member_id === c.member_id);
       extra += '<div class="vc-await">已关联成员：' + (m ? vlEscape(m.emoji + ' ' + m.name) : ('#' + c.member_id)) + '</div>';
     }
-    return '<div class="vc-card' + (pendingIds.has(c.candidate_id) ? ' is-awaiting' : '') + '">' +
+    return '<div class="vc-card' + (pendingByCid.has(c.candidate_id) ? ' is-awaiting' : '') + '">' +
       '<div class="vc-card-head">待认识的声音 ' + String(c.candidate_id).padStart(2, '0') +
       vcStatusBadge(c.status) + '</div>' +
       '<div class="vc-progress"><div class="vc-progress-fill" style="width:' + pct + '%"></div></div>' +
@@ -310,23 +310,26 @@ async function asrTest() {
 
 /* ---------- 视觉链路磁贴 ---------- */
 
+/* 方向响应收口（U8 化简审查：orientBy/flip 尾部三行不再各自手抄） */
+async function applyOrientation(r) {
+  flipped = !!r.body.hflip;
+  out('orient-out', '方向: ' + r.body.rotation + '°' + (flipped ? '（已翻转）' : ''), 'ok');
+  if (previewOn) { await fetchFrame(); }
+}
+
 async function orientBy(delta) {
   // delta=0 复位；90/-90 相对当前方向累加（可多次点击循环）
   const payload = delta === 0 ? {rotation: 0} : {rotate_by: delta};
   const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify(payload)});
   if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
-  flipped = !!r.body.hflip;
-  out('orient-out', '方向: ' + r.body.rotation + '°' + (flipped ? '（已翻转）' : ''), 'ok');
-  if (previewOn) { await fetchFrame(); }
+  await applyOrientation(r);
 }
 
 async function flip() {
   // 水平翻转（U1 补实现）：同一方向端点，hflip 取反
   const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify({hflip: !flipped})});
   if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
-  flipped = !!r.body.hflip;
-  out('orient-out', '方向: ' + r.body.rotation + '°' + (flipped ? '（已翻转）' : ''), 'ok');
-  if (previewOn) { await fetchFrame(); }
+  await applyOrientation(r);
 }
 
 async function visionTest() {
@@ -420,7 +423,8 @@ const turnCards = new Map();   // turn_id -> 轮卡聚合
 const unlinkedLlm = [];        // 无 turn_id 的 llm_* 事件（未关联轮次）
 const logBuffers = { voice: [], model: [], sys: [] }; // 日志区三 tab 数据源
 let logTab = 'voice';
-let logDirty = false;
+/* 日志脏标记按 tab 分账（U8 效率审查：全局标记会让未变化的 tab 全量重建） */
+const logDirty = { voice: false, model: false };
 let lastKindSig = '';
 let lastAudioAt = 0;           // 最近一次见到新音频帧的本地墙钟（ms）
 
@@ -472,8 +476,10 @@ async function observePull() {
     observe.failCount = 0;
     applyObserve(r.body);
     if (!observe.liveOpen || document.hidden || observe.stopped) { return; } // 态已变：不续排
-    // 事件满页（==上限）可能还有续页：立即续拉（仍受单飞约束）
-    if (r.body.events.items.length >= 100) { observeTick(); return; }
+    // 事件满页（==服务端回显页长）可能还有续页：立即续拉（仍受单飞约束；
+    // 页长以响应 events.page 为准——U8 化简审查：不再与服务端各自硬编码）
+    const page = (r.body.events && r.body.events.page) || 100;
+    if (r.body.events.items.length >= page) { observeTick(); return; }
     observeSchedule(OBSERVE_TICK_MS);
     return;
   }
@@ -549,7 +555,7 @@ function clearLocalBuffers() {
   logBuffers.model.length = 0;
   observe.idlePolls = 0;
   lastAudioAt = 0;
-  logDirty = true;
+  logDirty.voice = logDirty.model = true;
   lastKindSig = '';
 }
 
@@ -567,9 +573,14 @@ function applyObserve(body) {
     observe.idlePolls += 1; // 有响应无新帧：停更判定计数（不假装实时）
   }
   observe.audioCursor = body.audio.next_cursor;
+  const markersBefore = markerEvents.length;
   for (const ev of body.events.items) { ingestEvent(ev); }
   observe.eventCursor = body.events.next_cursor;
-  drawCurve();
+  // U8 效率审查：静默拍（无新帧、无新标记、非 reset）跳过全画布重绘——
+  // 250ms 节拍下停更时段不再空转；updateCurveMeta 便宜，保持每拍刷新状态行
+  if (didReset || body.audio.items.length || markerEvents.length !== markersBefore) {
+    drawCurve();
+  }
   updateCurveMeta();
   // reset 后即使快照为空也必须重渲染（旧轮卡不得残留）
   if (didReset || body.events.items.length) {
@@ -601,7 +612,7 @@ function ingestEvent(ev) {
   const bucket = isModelKind(ev.kind) ? logBuffers.model : logBuffers.voice;
   bucket.push(ev);
   if (bucket.length > LOG_BUFFER_LIMIT) { bucket.splice(0, bucket.length - LOG_BUFFER_LIMIT); }
-  logDirty = true;
+  logDirty[isModelKind(ev.kind) ? 'model' : 'voice'] = true;
 }
 
 function applyEventToTurn(ev) {
@@ -808,15 +819,15 @@ function rowClass(kind) {
     return 'vl-bad';
   }
   if (kind === 'wake') { return 'vl-wake'; }
-  if (isModelKind(kind) || kind === 'llm' || kind === 'llm_reply') { return 'vl-llm'; }
+  if (isModelKind(kind) || kind === 'llm') { return 'vl-llm'; }
   if (kind === 'speak' || kind === 'speak_done') { return 'vl-speak'; }
   return '';
 }
 
-function logRowMatches(item) {
-  const kw = document.getElementById('log-filter').value.trim();
+function logRowMatches(item, kw, kindSel) {
+  // 筛选值由 renderLog 取一次传入（U8 效率审查：逐行 getElementById 在
+  // 500 行缓冲下单次渲染多达上千次 DOM 查询）
   if (logTab === 'sys') { return !kw || item.indexOf(kw) !== -1; }
-  const kindSel = document.getElementById('log-kind').value;
   if (kindSel && item.kind !== kindSel) { return false; }
   return !kw || item.text.indexOf(kw) !== -1;
 }
@@ -842,8 +853,9 @@ function rebuildKindOptions(buf) {
 }
 
 function renderLog(force) {
-  if (!force && !logDirty) { return; }
-  logDirty = false;
+  // 脏标记按 tab 分账（U8 效率审查：全局脏标记会让未变化 tab 全量重建）
+  if (!force && !logDirty[logTab]) { return; }
+  logDirty[logTab] = false;
   const view = document.getElementById('log-view');
   const buf = logBuffers[logTab];
   document.getElementById('log-refresh-btn').hidden = logTab !== 'sys';
@@ -851,9 +863,11 @@ function renderLog(force) {
   // 暂停滚动（默认勾选）时绝不自动滚；跟随时仅当已滚到底才贴底
   const follow = !document.getElementById('log-pause').checked &&
     view.scrollTop + view.clientHeight >= view.scrollHeight - 8;
+  const kw = document.getElementById('log-filter').value.trim();
+  const kindSel = document.getElementById('log-kind').value;
   const rows = [];
   for (let i = buf.length - 1; i >= 0 && rows.length < LOG_RENDER_LIMIT; i--) {
-    if (logRowMatches(buf[i])) {
+    if (logRowMatches(buf[i], kw, kindSel)) {
       rows.push(logTab === 'sys'
         ? '<div class="vl-row"><span class="vl-sys-line">' + vlEscape(buf[i]) + '</span></div>'
         : rowHtml(buf[i]));

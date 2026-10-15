@@ -49,7 +49,7 @@ from lira.dialog.intents import (
 )
 from lira.dialog.context import StatusFacts
 from lira.dialog.router import Router, RouterTier
-from lira.dev_telemetry import owner_text
+from lira.dev_telemetry import owner_text, safe_add_event
 from lira.voice_log import VOICE_LOG
 
 __all__ = ["State", "AudioRoute", "DialogCallbacks", "DialogEngine", "OperationOwner"]
@@ -537,15 +537,9 @@ class DialogEngine:
     # ---------- 遥测旁路（U3/KTD3：utterance→turn→operation 映射） ----------
 
     def _emit_event(self, kind: str, text: str, **fields) -> None:
-        """遥测事件发射：未装配 telemetry 即 no-op；异常吞并只留 debug 痕——
-        观察是纯旁路，绝不影响对话主链路。"""
-        if self.telemetry is None:
-            return
-        try:
-            self.telemetry.add_event(kind, text, **fields)
-        except Exception:
-            logging.debug("dialog event=telemetry_emit_failed kind=%s", kind,
-                          exc_info=True)
+        """遥测事件发射：None-check 与异常守卫统一走 safe_add_event（U8 收口）
+        ——观察是纯旁路，绝不影响对话主链路。"""
+        safe_add_event(self.telemetry, kind, text, **fields)
 
     def _accept_turn(self, text: str) -> int:
         """语句被接受处分配轮次并落 turn 事件（KTD3）。

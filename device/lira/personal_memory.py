@@ -10,7 +10,7 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 import numpy as np
-from lira.chat.store import ChatStore
+from lira.chat.store import ChatStore, DuplicateMemberError
 from lira.speaker_candidates import CandidateConflict,CandidateError
 
 
@@ -49,9 +49,13 @@ class PersonalMemory:
         return [(r['member_id'], np.frombuffer(r['vector'], np.float32).copy())
                 for r in self.db.execute('SELECT * FROM voice_profiles')]
 
+    def find_member(self, name):
+        """按名查成员（唯一出处；enroll 与 SpeakerIdentity 共用——U8 审查收口）。"""
+        return next((m for m in self.people.list_members() if m['name']==name), None)
+
     def enroll(self, name, vector, *, allow_existing=False):
         # A claimed existing name cannot replace or gain access to an existing identity.
-        existing = next((m for m in self.people.list_members() if m['name']==name), None)
+        existing = self.find_member(name)
         if existing is not None and (not allow_existing or any(member==existing['id'] for member,_ in self.profiles())):
             raise ValueError('name already belongs to a member')
         member = existing or self.people.create_member(name)
@@ -228,48 +232,47 @@ class SpeakerIdentity:
                 self.pending=None
                 return None,'好，那先不关联这个身份。',None
             if self.pending.get('name'):
-                name=self.pending['name'];existing=self._existing_member(name)
-                # 误绑防线：纯文本阶段已把称呼暂存到某候选——当前声音命中的
-                # 候选对不上（含 lookup 歧义/无候选）就不晋升，宁缺毋错绑
-                mismatch=self.pending.get('cid') not in (None,cid)
-                if mismatch:
-                    self.pending=None
-                    return None,'现在这个声音和刚才报名字的对不上，先不登记，以免认错人。',None
-                if existing is not None:
-                    notice=self._request_association(cid,existing['id'],name)
-                    self.pending['existing_name']=name;self.pending.pop('name',None)
-                    return None,notice,None
-                self.pending=None
-                member,notice=self._promote_new_name(cid,name)
-                return (member,None,None) if member is not None else (None,notice,None)
+                name=self.pending['name']
+                return self._settle_pending(cid,name)
             match=introduction
             if match:
                 name=match.group(1).strip()
                 # Accept an explicit introduction, or a short answer to our name question.
                 if text.startswith(('我叫','我是','叫我','你可以叫我')) or len(name)<=4:
-                    existing=self._existing_member(name)
-                    original=self.pending.get('text')
-                    mismatch=self.pending.get('cid') not in (None,cid)
-                    if mismatch:
-                        self.pending=None
-                        return None,'现在这个声音和刚才报名字的对不上，先不登记，以免认错人。',None
-                    if existing is not None:
-                        notice=self._request_association(cid,existing['id'],name)
-                        self.pending['existing_name']=name
-                        return None,notice,None
-                    self.pending=None
-                    member,notice=self._promote_new_name(cid,name)
-                    if member is not None:
-                        return member,f'好，那我以后就叫你{name}。',original
-                    return None,notice,None
+                    return self._settle_pending(cid,name,
+                        success_notice=f'好，那我以后就叫你{name}。',
+                        original=self.pending.get('text'))
             return None,'你希望我怎么称呼你呀？',None
         self.pending={'vector':vector,'text':text,'time':time.monotonic(),'asked':False}
         return None,'我们好像还没认识过，你希望我怎么称呼你呀？',None
 
     # ---------- U7：登记出口改造（候选是登记/关联的唯一出口，KTD6） ----------
 
+    def _settle_pending(self,cid,name,success_notice=None,original=None):
+        """落名收口（U8 化简审查：pending['name'] 与 introduction 两分支共用的
+        同一套逻辑）——误绑对账 → 同名转关联请求 → 新名晋升。
+
+        误绑防线：纯文本阶段已把称呼暂存到某候选——当前声音命中的候选对不上
+        （含 lookup 歧义/无候选）就不晋升，宁缺毋错绑。返回 (member, notice,
+        original)；成功话术与 original 由调用方注入（两分支仅此有差异）。
+        """
+        mismatch=self.pending.get('cid') not in (None,cid)
+        if mismatch:
+            self.pending=None
+            return None,'现在这个声音和刚才报名字的对不上，先不登记，以免认错人。',None
+        existing=self._existing_member(name)
+        if existing is not None:
+            notice=self._request_association(cid,existing['id'],name)
+            self.pending['existing_name']=name;self.pending.pop('name',None)
+            return None,notice,None
+        self.pending=None
+        member,notice=self._promote_new_name(cid,name)
+        if member is not None:
+            return member,success_notice,original
+        return None,notice,None
+
     def _existing_member(self,name):
-        return next((m for m in self.memory.people.list_members() if m['name']==name),None)
+        return self.memory.find_member(name)
 
     def _stage_pending_name(self,name):
         # 纯文本称呼暂存：用 pending 里的声音 lookup 候选才写（不凭空登记）
@@ -307,14 +310,10 @@ class SpeakerIdentity:
                 '开发者控制台确认，确认前我不会读取这个身份的记忆。')
 
     def _member_factory(self,name):
-        # promote_new_name 统一事务的成员创建适配：ChatStore.create_member
-        # 自带 `with conn` 会在晋升事务中途提交——这里按 members 表同构内联
-        # 插入（emoji 缺省与 UNIQUE 重名裁决同 chat.store），提交/回滚交给
-        # promote_new_name 的外层事务统一处理。
+        # promote_new_name 统一事务的成员创建适配：commit=False 不自带提交
+        #（schema 单一出处回到 ChatStore——U8 化简审查），提交/回滚交给
+        # promote_new_name 的外层事务统一处理；DuplicateMemberError → 冲突语义
         try:
-            cur=self.memory.people._conn.execute(
-                "INSERT INTO members (name, emoji, created_at) VALUES (?, '🙂', ?)",
-                (str(name),int(time.time())))
-        except sqlite3.IntegrityError as exc:
+            return self.memory.people.create_member(str(name),commit=False)['id']
+        except DuplicateMemberError as exc:
             raise CandidateConflict(f'成员名已存在: {name}') from exc
-        return cur.lastrowid

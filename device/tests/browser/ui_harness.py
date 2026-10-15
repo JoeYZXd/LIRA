@@ -43,6 +43,10 @@ class BrowserRuntime:
         # dev 页仅需 engine.state.value（/dev/api/voice-log 展示面）
         self.engine = SimpleNamespace(state=SimpleNamespace(value="standby"))
         self.telemetry = DevTelemetry()
+        # U7 声纹面：默认未装配（磁贴诚实降级）；用例经 attach_voice_memory
+        # 挂真实 PersonalMemory + VoiceCandidates 后磁贴才有数据
+        self.personal_memory = None
+        self.speaker_candidates = None
 
     def sync_pull(self) -> str:
         return "not_configured"
@@ -91,6 +95,33 @@ class DevBrowserServer:
         """镜像 main.py 装配次序的隐私联锁（privacy.subscribe 双道同触发）。"""
         self.runtime.privacy._on = on
         self.telemetry.apply_privacy(on)
+
+
+def attach_voice_memory(runtime) -> "object":
+    """挂真实 PersonalMemory + VoiceCandidates（共享连接，同生产装配形态）。
+
+    dev.py 经 getattr 在请求时解析 runtime 属性，服务无需重建：测试先 attach
+    再打开磁贴即可。内存库（:memory:），用例结束随进程丢弃。
+    """
+    from lira.config import SpeakerConfig
+    from lira.personal_memory import PersonalMemory
+    from lira.speaker_candidates import VoiceCandidates
+
+    memory = PersonalMemory(":memory:", None, "kimi-k2.6",
+                            lambda: runtime.privacy.is_on)
+    runtime.personal_memory = memory
+    runtime.speaker_candidates = VoiceCandidates(
+        memory.db, fingerprint="browser-fp:2", profiles_provider=memory.profiles,
+        params=SpeakerConfig(), privacy=lambda: runtime.privacy.is_on)
+    return memory
+
+
+def vc_samples(seed: int, seconds: float = 4.0, level: float = 0.2):
+    """过质量门的可控假音频（内容与向量无关；seed 区分去重键）。"""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    return (rng.standard_normal(int(16000 * seconds)) * level).astype(np.float32)
 
 
 def free_port() -> int:

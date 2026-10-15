@@ -24,6 +24,9 @@
  *     跟随时仅在已滚到底时贴底）/ 类别与关键字筛选 / 清空当前展示（仅前端
  *     缓冲，服务端环不受影响）。旧 /dev/api/voice-log 1s 轮询移除，页面统一
  *     走 observe 事件流。
+ * U7 声纹小档案磁贴：候选/已建立成员快照 + 同名关联确认（领域操作 POST）。
+ *   低频单拉（展开时/确认后），不进 observe 节拍；未装配诚实降级；进度依据
+ *   文案给出段数/秒数/一致性，已建立人数只看真实 profile（AE2）。
  */
 
 'use strict';
@@ -168,6 +171,105 @@ async function postForm(path, inputId, label, rangeKey, outId) {
 async function setLevel() {
   const r = await api('/dev/api/loglevel', {method: 'POST', body: JSON.stringify({level: document.getElementById('lvl').value})});
   out('lvl-out', r.status === 200 ? '已调整' : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
+}
+
+/* ---------- 声纹小档案磁贴（U7）：候选/成员快照 + 同名关联确认 ----------
+ * 数据获取纪律：展开磁贴时 + 确认操作后单拉 /dev/api/voice-candidates
+ * （低频数据，不进 250ms observe 节拍）；503=未装配 → 诚实降级文案。
+ * 状态徽标映射候选 status；进度依据文案给出"几段/几秒/一致性"，让
+ * 百分比可解释（E4a：进度 ≠ 身份确认，已建立只看真实 profile）。 */
+
+const VC_STATUS_LABELS = {
+  accumulating: '采集中', ready: '采集就绪待命名', awaiting_console: '同名待确认',
+  promoted: '已建立', stale: '已失效（模型/策略变化，需重新积累）', expired: '已过期'
+};
+
+function vcProgressBasis(c) {
+  const t = c.targets || {};
+  return c.segment_count + '/' + (t.segments ?? '?') + ' 段 · ' +
+    (Math.round(c.total_seconds * 10) / 10) + '/' + (t.seconds ?? '?') + ' 秒 · ' +
+    (c.consistency_passed ? '一致性通过' : '一致性未过（进度封顶 99%）');
+}
+
+function vcStatusBadge(status) {
+  const label = VC_STATUS_LABELS[status] || status;
+  return '<span class="vc-badge vc-badge--' + vlEscape(status) + '">' + vlEscape(label) + '</span>';
+}
+
+function renderVoiceCandidates(data) {
+  const s = data.summary || {};
+  const summary = document.getElementById('voice-candidates-summary');
+  summary.textContent = '已建立 ' + (s.established_count ?? 0) + ' · 采集中 ' +
+    (s.accumulating_count ?? 0) + ' · 待命名 ' + (s.ready_count ?? 0) +
+    ' · 同名待确认 ' + (s.awaiting_console_count ?? 0);
+  const parts = [];
+  // 已建立成员卡（E2）：真实成员名单 + 声纹状态
+  const memberCards = (data.members || []).map(m =>
+    '<div class="vc-member">' + vlEscape(m.emoji || '🙂') + ' ' + vlEscape(m.name) +
+    '<span class="vc-member-state">' + (m.has_profile ? '声纹已建立' : '无声纹（文字聊天成员）') + '</span></div>'
+  ).join('');
+  parts.push('<div class="vc-block"><div class="vc-block-title">已建立成员 ' + (data.members || []).length + '</div>' +
+    (memberCards || '<p class="muted">（还没有成员）</p>') + '</div>');
+  // 候选卡（E3/E4）：状态徽标 + 可解释进度；待确认卡带确认按钮
+  const pendingIds = new Set((data.pending_confirmations || []).map(p => p.candidate_id));
+  const pendingByCid = new Map((data.pending_confirmations || []).map(p => [p.candidate_id, p]));
+  const candidateCards = (data.candidates || []).map(c => {
+    const pct = Math.round((c.progress || 0) * 100);
+    let extra = '';
+    if (c.status === 'awaiting_console') {
+      const p = pendingByCid.get(c.candidate_id);
+      const name = p && p.member_name ? p.member_name : ('成员 ' + (p ? p.proposed_member_id : '?'));
+      extra = '<div class="vc-await">与已有成员「' + vlEscape(name) + '」同名——确认前不读取该成员记忆' +
+        '<button type="button" onclick="confirmAssociation(' + c.candidate_id + ',' +
+        (p ? p.proposed_member_id : 'null') + ')">确认关联</button><span id="vc-confirm-out-' +
+        c.candidate_id + '" class="muted"></span></div>';
+    }
+    if (c.member_id !== null && c.member_id !== undefined) {
+      const m = (data.members || []).find(x => x.member_id === c.member_id);
+      extra += '<div class="vc-await">已关联成员：' + (m ? vlEscape(m.emoji + ' ' + m.name) : ('#' + c.member_id)) + '</div>';
+    }
+    return '<div class="vc-card' + (pendingIds.has(c.candidate_id) ? ' is-awaiting' : '') + '">' +
+      '<div class="vc-card-head">待认识的声音 ' + String(c.candidate_id).padStart(2, '0') +
+      vcStatusBadge(c.status) + '</div>' +
+      '<div class="vc-progress"><div class="vc-progress-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="vc-meta">' + pct + '% · ' + vlEscape(vcProgressBasis(c)) + '</div>' + extra + '</div>';
+  }).join('');
+  parts.push('<div class="vc-block"><div class="vc-block-title">声音候选 ' + (data.candidates || []).length + '</div>' +
+    (candidateCards || '<p class="muted">（暂无候选——与 LIRA 自然交谈时会自动积累）</p>') + '</div>');
+  document.getElementById('voice-candidates-view').innerHTML = parts.join('');
+}
+
+async function loadVoiceCandidates() {
+  const r = await api('/dev/api/voice-candidates');
+  if (r.status === 503) {
+    // 未装配（LIRA_PERSONAL_MEMORY=1 / 声纹模型缺失）：诚实降级，不假装空态
+    document.getElementById('voice-candidates-summary').textContent = '未装配';
+    document.getElementById('voice-candidates-view').innerHTML =
+      '<p class="muted">声纹候选未装配（需 LIRA_PERSONAL_MEMORY=1 与声纹模型）</p>';
+    return out('voice-candidates-out', r.body.error || '未装配', 'muted');
+  }
+  if (r.status !== 200) {
+    document.getElementById('voice-candidates-view').innerHTML =
+      '<p class="muted">（加载失败：' + vlEscape(r.body.error || String(r.status)) + '）</p>';
+    return out('voice-candidates-out', r.body.error || r.status, 'err');
+  }
+  renderVoiceCandidates(r.body);
+  out('voice-candidates-out', '已更新', 'ok');
+}
+
+async function confirmAssociation(candidateId, memberId) {
+  if (memberId === null || memberId === undefined) { return; }
+  const r = await api('/dev/api/voice-candidates/' + candidateId + '/confirm',
+    {method: 'POST', body: JSON.stringify({member_id: memberId})});
+  if (r.status === 200) {
+    // 成功 → 局部刷新整块（成员/候选/统计同源一次往返）
+    out('voice-candidates-out', '已确认关联（成员 ' + r.body.member_id + '）', 'ok');
+    return loadVoiceCandidates();
+  }
+  const msg = (r.body && r.body.error) || ('HTTP ' + r.status);
+  const target = document.getElementById('vc-confirm-out-' + candidateId);
+  if (target) { target.textContent = msg; target.className = 'err'; }
+  else { out('voice-candidates-out', msg, 'err'); }
 }
 
 /* ---------- 语音链路测试磁贴 ---------- */
@@ -805,6 +907,7 @@ function setTileOpen(tile, open) {
   head.setAttribute('aria-expanded', open ? 'true' : 'false');
   body.hidden = !open;
   if (tile.id === 'tile-voicelog') { observeLiveChange(open); }
+  if (tile.id === 'tile-voice-candidates' && open) { loadVoiceCandidates(); }
 }
 
 function initTiles() {

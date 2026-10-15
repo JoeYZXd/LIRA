@@ -30,11 +30,13 @@ import time
 import pytest
 
 from ui_harness import (
+    attach_voice_memory,
     install_observe_probe,
     login_console,
     observe_count,
     observe_entries,
     open_live_tile,
+    vc_samples,
     wait_for_text,
     wait_incremental_pull,
     wait_observe_count,
@@ -357,3 +359,86 @@ class TestSystemLogTab:
         wait_for_text(page, "#log-view", "暂无匹配事件")
         page.click("#log-refresh-btn")
         wait_for_text(page, "#log-view", "browser-syslog-marker")
+
+
+# ---------- U7：声纹小档案磁贴（真实 VoiceCandidates 数据源，低频单拉） ----------
+
+
+def open_voice_tile(page) -> None:
+    """展开声纹磁贴（触达即单拉 /dev/api/voice-candidates）。"""
+    head = page.locator("#tile-voice-candidates .tile-head")
+    if head.get_attribute("aria-expanded") != "true":
+        head.click()
+    page.wait_for_selector("#tile-voice-candidates-body:not([hidden])")
+
+
+class TestVoiceCandidatesTile:
+    def test_summary_members_and_progress_basis(self, dev_server, page):
+        """磁贴摘要行 + 已建立成员卡 + 候选卡（状态徽标与可解释进度依据）。
+        AE2：就绪 100% 但未确认的候选不计入已建立人数。"""
+        import numpy as np
+
+        memory = attach_voice_memory(dev_server.runtime)
+        store = dev_server.runtime.speaker_candidates
+        mama = memory.enroll("妈妈", np.array([0.0, 1.0], np.float32))
+        assert mama is not None
+        vec_a = np.array([1.0, 0.0], np.float32)
+        store.observe(vec_a, vc_samples(11))
+        store.observe(vec_a, vc_samples(12))
+        store.observe(vec_a, vc_samples(13))  # 就绪（3 段 12s，一致性过）
+        login_console(page, dev_server)
+        open_voice_tile(page)
+        wait_for_text(page, "#voice-candidates-summary", "已建立 1")
+        wait_for_text(page, "#voice-candidates-summary", "待命名 1")
+        wait_for_text(page, "#voice-candidates-view", "妈妈")
+        wait_for_text(page, "#voice-candidates-view", "声纹已建立")
+        wait_for_text(page, "#voice-candidates-view", "采集就绪待命名")
+        wait_for_text(page, "#voice-candidates-view", "3/3 段")
+        wait_for_text(page, "#voice-candidates-view", "一致性通过")
+        summary = page.locator("#voice-candidates-summary").text_content()
+        assert "已建立 1" in summary and "采集中 0" in summary
+
+    def test_awaiting_console_confirm_posts_and_refreshes(self, dev_server, page):
+        """同名待确认卡 → 点击确认 → POST 成功 → 局部刷新为已建立（AE4 路径）。"""
+        import numpy as np
+
+        memory = attach_voice_memory(dev_server.runtime)
+        store = dev_server.runtime.speaker_candidates
+        baba = memory.people.create_member("爸爸")["id"]
+        vec_a = np.array([1.0, 0.0], np.float32)
+        v1 = store.observe(vec_a, vc_samples(21))
+        store.create_association_request(v1.candidate_id, baba)
+        login_console(page, dev_server)
+        open_voice_tile(page)
+        wait_for_text(page, "#voice-candidates-view", "同名待确认")
+        wait_for_text(page, "#voice-candidates-view", "爸爸")
+        page.click("#voice-candidates-view button:has-text('确认关联')")
+        wait_for_text(page, "#voice-candidates-view", "已建立")
+        wait_for_text(page, "#voice-candidates-summary", "已建立 1")
+        assert "同名待确认 0" in page.locator("#voice-candidates-summary").text_content()
+        assert len(memory.profiles()) == 1, "确认真实落声纹（统一事务）"
+
+    def test_confirm_conflict_shows_reason_in_place(self, dev_server, page):
+        """409 冲突：成员已有声纹 → 卡片内显示冲突原因，不覆盖、不假成功。"""
+        import numpy as np
+
+        memory = attach_voice_memory(dev_server.runtime)
+        store = dev_server.runtime.speaker_candidates
+        baba = memory.enroll("爸爸", np.array([0.0, 1.0], np.float32))
+        vec_a = np.array([1.0, 0.0], np.float32)
+        v1 = store.observe(vec_a, vc_samples(31))
+        store.create_association_request(v1.candidate_id, baba)
+        login_console(page, dev_server)
+        open_voice_tile(page)
+        wait_for_text(page, "#voice-candidates-view", "同名待确认")
+        page.click("#voice-candidates-view button:has-text('确认关联')")
+        wait_for_text(page, "#voice-candidates-view", "该成员已有声纹记录")
+        assert "同名待确认 1" in page.locator("#voice-candidates-summary").text_content()
+        assert len(memory.profiles()) == 1, "既有声纹未被覆盖"
+
+    def test_tile_degrades_honestly_when_not_assembled(self, dev_server, page):
+        """未装配（503）→ 磁贴显示降级文案，不显示空态假象。"""
+        login_console(page, dev_server)
+        open_voice_tile(page)
+        wait_for_text(page, "#voice-candidates-view", "声纹候选未装配")
+        wait_for_text(page, "#voice-candidates-summary", "未装配")

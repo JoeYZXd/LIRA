@@ -18,7 +18,13 @@ import pytest
 
 from lira.config import SpeakerConfig
 from lira.personal_memory import PersonalMemory
-from lira.speaker_candidates import MAX_DEDUP_KEYS, VoiceCandidates
+from lira.speaker_candidates import (
+    ASSOCIATION_PENDING,
+    MAX_DEDUP_KEYS,
+    CandidateConflict,
+    CandidateNotFound,
+    VoiceCandidates,
+)
 
 SAMPLE_RATE = 16000
 
@@ -57,6 +63,31 @@ def make_store(tmp_path, *, fingerprint="fp-a:2", cfg=None, profiles=lambda: [],
                privacy=lambda: False, clock=None):
     return open_store(tmp_path, fingerprint=fingerprint, cfg=cfg, profiles=profiles,
                       privacy=privacy, clock=clock)
+
+
+def make_memory_store(tmp_path, *, fingerprint="fp-a:2", cfg=None,
+                      privacy=lambda: False, clock=None):
+    """共享连接形态（U7 生产装配）：PersonalMemory + 候选存储同一 SQLite 连接。
+
+    members/voice_candidates 晋升同事务只有在这种形态下成立；用例结束直接
+    people.close()（无后台任务，无需走 async close）。
+    """
+    memory = PersonalMemory(tmp_path / "device.db", None, "kimi-k2.6", privacy)
+    store = VoiceCandidates(memory.db, fingerprint=fingerprint,
+                            profiles_provider=memory.profiles,
+                            params=cfg or SpeakerConfig(), privacy=privacy,
+                            now=clock or Clock())
+    return store, memory
+
+
+def raw_member_factory(memory):
+    """promote_new_name 的成员创建适配（同 personal_memory.SpeakerIdentity
+    的内联插入：不自带 commit，事务归 promote 的外层 with 管）。"""
+    def create(name):
+        cur = memory.people._conn.execute(
+            "INSERT INTO members (name, emoji, created_at) VALUES (?, '🙂', ?)", (name, 0))
+        return cur.lastrowid
+    return create
 
 
 def open_store(tmp_path, *, fingerprint="fp-a:2", cfg=None, profiles=lambda: [],
@@ -241,7 +272,13 @@ async def test_idempotent_open_keeps_legacy_tables_and_adds_no_member_permission
         assert [(mid, np.allclose(v, A)) for mid, v in profiles] == [(1, True)], "既有声纹不变"
         assert memory.db.execute("SELECT COUNT(*) FROM memory_turns").fetchone()[0] == 1
         columns = {r[1] for r in memory.db.execute("PRAGMA table_info(voice_candidates)")}
-        assert "member_id" not in columns
+        # U7：三列已加（分支内直接改 CREATE TABLE + ALTER 兜底），但 KTD6 的
+        # 物理边界改由"确认前恒 NULL"承载：列存在、值全空、无到 members 的外键
+        assert {"pending_name", "proposed_member_id", "member_id"} <= columns
+        assert all(r[0] is None
+                   for r in memory.db.execute("SELECT member_id FROM voice_candidates"))
+        fks = list(memory.db.execute("PRAGMA foreign_key_list(voice_candidates)"))
+        assert all(fk[2] != "members" for fk in fks), "候选表不建到 members 的外键"
     finally:
         await memory.close()
 
@@ -367,8 +404,186 @@ def test_snapshot_summary_and_candidate_wording(tmp_path):
     store.observe(A, samples_for(4.0, seed=1))
     store.observe(B, samples_for(4.0, seed=2))
     summary = store.snapshot()["summary"]
-    assert summary == {"established_count": 0, "accumulating_count": 2, "ready_count": 0}
+    assert summary == {"established_count": 0, "accumulating_count": 2,
+                       "ready_count": 0, "awaiting_console_count": 0}
     profiles.append((1, A))
     assert store.snapshot()["summary"]["established_count"] == 1
     entry = store.snapshot()["candidates"][0]
     assert "candidate_id" in entry, "字段用 candidate——候选数不直接称为人数"
+
+
+# ---------- U7：命名上下文（lookup / pending_name） ----------
+
+
+def test_lookup_is_read_only_and_respects_threshold_and_margin(tmp_path):
+    store, _, _ = make_store(tmp_path)
+    first = store.observe(A, samples_for(4.0, seed=1))
+    second = store.observe(B, samples_for(4.0, seed=2))
+    assert store.lookup(A) == first.candidate_id
+    assert store.lookup(B) == second.candidate_id
+    assert store.lookup(MIX) is None, "边际不足（歧义）不绑定命名上下文"
+    assert store.lookup(vec(120.0)) is None, "陌生声音（低于指派阈值）返回 None"
+    assert store.lookup(np.array([0.0, 0.0], np.float32)) is None, "零向量返回 None"
+    assert table_counts(store) == (2, 2), "lookup 只读：不建候选、不写证据"
+    assert all(c["status"] == "accumulating" for c in store.snapshot()["candidates"])
+
+
+def test_set_and_clear_pending_name_only_on_active_candidates(tmp_path):
+    store, db, clock = make_store(tmp_path)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    assert store.set_pending_name(v1.candidate_id, "爸爸") is True
+    assert candidate_rows(store)[v1.candidate_id]["pending_name"] == "爸爸"
+    store.clear_pending_name(v1.candidate_id)
+    assert candidate_rows(store)[v1.candidate_id]["pending_name"] is None
+    assert store.set_pending_name(999, "妈妈") is False, "候选不存在返回 False"
+    # 误绑防线：已失效候选不可再设称呼
+    db.close()
+    store2, db2, _ = open_store(tmp_path, fingerprint="fp-b:2", clock=clock)
+    assert candidate_rows(store2)[v1.candidate_id]["status"] == "stale"
+    assert store2.set_pending_name(v1.candidate_id, "爸爸") is False
+    db2.close()
+
+
+# ---------- U7：新名晋升（promote_new_name 统一事务） ----------
+
+
+def test_promote_new_name_single_transaction_visibility(tmp_path):
+    """AE2/事务一致性：成员 + profile + 候选状态一次可见（同一事务提交）。"""
+    store, memory = make_memory_store(tmp_path)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    store.set_pending_name(v1.candidate_id, "爸爸")
+    member_id = store.promote_new_name(v1.candidate_id, "爸爸",
+                                       member_factory=raw_member_factory(memory))
+    assert [m["name"] for m in memory.people.list_members()] == ["爸爸"]
+    profiles = memory.profiles()
+    assert len(profiles) == 1 and profiles[0][0] == member_id
+    aggregate = store.db.execute(
+        "SELECT aggregate_vector FROM voice_candidates WHERE candidate_id=?",
+        (v1.candidate_id,)).fetchone()[0]
+    assert np.allclose(profiles[0][1], np.frombuffer(aggregate, np.float32)), \
+        "成员声纹 = 候选聚合向量"
+    row = candidate_rows(store)[v1.candidate_id]
+    assert row["status"] == "promoted" and row["member_id"] == member_id
+    assert row["pending_name"] is None and row["proposed_member_id"] is None
+    summary = store.snapshot()["summary"]
+    assert summary["established_count"] == 1, "晋升后计入已建立人数"
+    assert summary["accumulating_count"] == 0, "promoted 不再占活跃名额"
+    memory.people.close()
+
+
+def test_promote_rejects_duplicate_name_and_pending_mismatch(tmp_path):
+    store, memory = make_memory_store(tmp_path)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    memory.people.create_member("爸爸")
+    store.set_pending_name(v1.candidate_id, "爸爸")
+    with pytest.raises(CandidateConflict):
+        store.promote_new_name(v1.candidate_id, "爸爸",
+                               member_factory=raw_member_factory(memory))
+    assert len(memory.people.list_members()) == 1, "重名拒绝：走同名关联路径，不建第二成员"
+    assert memory.profiles() == [], "拒绝时零写入（事务回滚）"
+    store.clear_pending_name(v1.candidate_id)
+    with pytest.raises(CandidateConflict):
+        store.promote_new_name(v1.candidate_id, "爸爸",
+                               member_factory=raw_member_factory(memory))
+    memory.people.close()
+
+
+def test_promote_missing_candidate_not_found(tmp_path):
+    store, memory = make_memory_store(tmp_path)
+    with pytest.raises(CandidateNotFound):
+        store.promote_new_name(999, "爸爸", member_factory=raw_member_factory(memory))
+    memory.people.close()
+
+
+# ---------- U7：同名关联（create_association_request / confirm_association） ----------
+
+
+def test_association_request_idempotent_and_console_confirm_promotes(tmp_path):
+    store, memory = make_memory_store(tmp_path)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    mama = memory.people.create_member("妈妈")["id"]
+    verdict = store.create_association_request(v1.candidate_id, mama)
+    assert verdict.outcome == ASSOCIATION_PENDING
+    row = candidate_rows(store)[v1.candidate_id]
+    assert row["status"] == "awaiting_console" and row["proposed_member_id"] == mama
+    assert memory.profiles() == [], "挂请求绝不写 voice_profiles（权限边界）"
+    # 幂等：同候选同成员的重复请求不重建
+    store.create_association_request(v1.candidate_id, mama)
+    assert candidate_rows(store)[v1.candidate_id]["proposed_member_id"] == mama
+    assert len(candidate_rows(store)) == 1
+    # 控制台确认成功：声纹 = 聚合向量，候选终态 promoted
+    result = store.confirm_association(v1.candidate_id, mama)
+    assert result == {"ok": True, "member_id": mama, "already": False}
+    assert len(memory.profiles()) == 1
+    row = candidate_rows(store)[v1.candidate_id]
+    assert row["status"] == "promoted" and row["member_id"] == mama
+    assert row["proposed_member_id"] is None
+    # AE4 重试无重复：已晋升 → 幂等可见，不重复插 profile/成员
+    again = store.confirm_association(v1.candidate_id, mama)
+    assert again == {"ok": True, "member_id": mama, "already": True}
+    assert len(memory.profiles()) == 1 and len(memory.people.list_members()) == 1
+    memory.people.close()
+
+
+def test_confirm_rejects_existing_profile_without_overwrite(tmp_path):
+    """AE4：成员已有声纹 → 409 语义冲突拒绝，既有声纹不被覆盖。"""
+    store, memory = make_memory_store(tmp_path)
+    mama = memory.enroll("妈妈", B)  # 成员 + 既有声纹
+    v1 = store.observe(A, samples_for(4.0, seed=1))  # A 与 B cos≈0.64，正常建候选
+    store.create_association_request(v1.candidate_id, mama)
+    with pytest.raises(CandidateConflict):
+        store.confirm_association(v1.candidate_id, mama)
+    assert np.allclose(dict(memory.profiles())[mama], B), "既有声纹原样保留"
+    assert candidate_rows(store)[v1.candidate_id]["status"] == "awaiting_console"
+    memory.people.close()
+
+
+def test_confirm_rejects_wrong_member_and_missing_request(tmp_path):
+    store, memory = make_memory_store(tmp_path)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    mama = memory.people.create_member("妈妈")["id"]
+    other = memory.people.create_member("爸爸")["id"]
+    # 没有待确认请求 → 冲突
+    with pytest.raises(CandidateConflict):
+        store.confirm_association(v1.candidate_id, mama)
+    store.create_association_request(v1.candidate_id, mama)
+    # 不能确认到不同成员
+    with pytest.raises(CandidateConflict):
+        store.confirm_association(v1.candidate_id, other)
+    memory.people.delete_member(mama)
+    # 成员已不存在
+    with pytest.raises(CandidateNotFound):
+        store.confirm_association(v1.candidate_id, mama)
+    # 候选不存在
+    with pytest.raises(CandidateNotFound):
+        store.confirm_association(4242, other)
+    memory.people.close()
+
+
+def test_awaiting_console_stays_active_and_counts_in_snapshot(tmp_path):
+    store, memory = make_memory_store(tmp_path)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    mama = memory.enroll("妈妈", B)
+    store.create_association_request(v1.candidate_id, mama)
+    v2 = store.observe(A, samples_for(4.0, seed=2))
+    assert v2.outcome == "accepted" and v2.candidate_id == v1.candidate_id, \
+        "同名待确认仍算活跃候选：等待期继续积累证据"
+    summary = store.snapshot()["summary"]
+    assert summary["awaiting_console_count"] == 1
+    assert summary["accumulating_count"] == 0
+    entry = store.snapshot()["candidates"][0]
+    assert entry["proposed_member_id"] == mama
+    memory.people.close()
+
+
+def test_stale_fingerprint_also_invalidates_awaiting_console(tmp_path):
+    clock = Clock(1000.0)
+    store, memory = make_memory_store(tmp_path, clock=clock)
+    v1 = store.observe(A, samples_for(4.0, seed=1))
+    mama = memory.people.create_member("妈妈")["id"]
+    store.create_association_request(v1.candidate_id, mama)
+    memory.people.close()
+    store2, db2, _ = open_store(tmp_path, fingerprint="fp-b:2", clock=clock)
+    assert candidate_rows(store2)[v1.candidate_id]["status"] == "stale", \
+        "模型/策略变化对同名待确认候选同样失效"
+    db2.close()

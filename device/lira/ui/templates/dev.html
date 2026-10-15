@@ -127,6 +127,21 @@
     </div>
   </section>
 
+  <!-- 声纹小档案磁贴（U7）：候选/已建立成员总览 + 同名关联确认（领域操作）。
+       低频单拉 /dev/api/voice-candidates（展开时 + 确认后），不进 250ms observe 节拍。 -->
+  <section class="tile tile--voice-candidates" id="tile-voice-candidates">
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voice-candidates-body">
+      <span class="tile-title">声纹小档案</span>
+      <span class="tile-summary" id="voice-candidates-summary">候选与已建立成员（展开加载）</span>
+    </button>
+    <div class="tile-body" id="tile-voice-candidates-body" hidden>
+      <p class="muted">候选数不是人数：同一人的不同声音条件可能形成多个候选；确认前候选不产生成员身份，也不读取个人记忆。</p>
+      <div id="voice-candidates-view" class="voice-candidates"><p class="muted">（未加载）</p></div>
+      <div class="row"><button type="button" onclick="loadVoiceCandidates()">刷新声纹档案</button>
+        <span id="voice-candidates-out" class="muted"></span></div>
+    </div>
+  </section>
+
   <!-- 语音链路测试磁贴 -->
   <section class="tile tile--voice" id="tile-voice">
     <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voice-body">

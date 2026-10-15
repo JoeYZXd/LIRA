@@ -58,6 +58,7 @@ body {
 .tile--overview { --tile-accent: var(--apricot); }
 .tile--live     { --tile-accent: var(--lavender); }
 .tile--settings { --tile-accent: var(--sage); }
+.tile--voice-candidates { --tile-accent: var(--sage); }
 .tile--voice    { --tile-accent: var(--apricot); }
 .tile--vision   { --tile-accent: var(--lavender); }
 .tile--sync     { --tile-accent: var(--sage); }
@@ -201,6 +202,35 @@ img.shot {
 }
 .log-view { max-height: 320px; overflow: auto; }
 .vl-sys-line { font-family: monospace; font-size: 13px; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* —— 声纹小档案（U7）：成员卡 + 候选卡（状态徽标/进度条/依据文案） —— */
+.vc-block { margin: 10px 0; }
+.vc-block-title { font-weight: 700; margin-bottom: 6px; }
+.vc-member {
+  display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;
+  padding: 4px 0; border-bottom: 1px dashed var(--border);
+}
+.vc-member-state { color: var(--ink-soft); font-size: 13px; }
+.vc-card {
+  border: 1px solid var(--border); border-left: 4px solid var(--sage);
+  border-radius: 10px; padding: 8px 10px; margin: 8px 0; background: rgba(202, 216, 189, .12);
+}
+.vc-card.is-awaiting { border-left-color: var(--apricot); background: rgba(246, 197, 153, .16); }
+.vc-card-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-weight: 600; }
+.vc-badge {
+  font-size: 12px; font-weight: 700; border-radius: 999px; padding: 1px 10px;
+  background: var(--sage); color: #2F3A28;
+}
+.vc-badge--awaiting_console { background: var(--apricot); color: #5A3A1A; }
+.vc-badge--promoted { background: var(--ok); color: #FFFFFF; }
+.vc-badge--stale, .vc-badge--expired { background: rgba(166, 61, 47, .18); color: var(--danger); }
+.vc-progress {
+  height: 8px; border-radius: 999px; background: rgba(73, 61, 53, .12);
+  overflow: hidden; margin: 6px 0 4px;
+}
+.vc-progress-fill { height: 100%; border-radius: 999px; background: var(--sage); }
+.vc-meta { color: var(--ink-soft); font-size: 13px; }
+.vc-await { margin-top: 6px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 
 /* 观察/隐私横幅（403 停拉提示 + 手动恢复入口） */
 .observe-banner {

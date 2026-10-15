@@ -745,6 +745,11 @@ class DeviceRuntime:
                 params=cfg.speaker,
                 privacy=lambda:self.privacy.is_on,
                 event_sink=self.telemetry.add_event)
+            # U7 装配顺序（memory→identity→candidates 后回填引用）：候选存储
+            # 是登记/关联的唯一出口——memory 持引用（dev API 快照取用），
+            # identity 回填（resolve 出口经 lookup/set/promote 操作候选）
+            self.personal_memory.candidates=self.speaker_candidates
+            self.speaker_identity.candidates=self.speaker_candidates
         self._snapshot_announcer = make_snapshot_announcer(store, self.callbacks.speak)
         # 模型显示观察器装配（U3/KTD7）：仿 llm.memory= 惯例运行时注入；
         # llm 可能为注入替身——setattr 不限类型（鸭子类型，无属性即新增）
@@ -839,7 +844,15 @@ class DeviceRuntime:
     def clear_voice_identity(self, enabled):
         if enabled:
             self.voice_member_id=None
-            if self.speaker_identity is not None:self.speaker_identity.pending=None
+            identity=self.speaker_identity
+            if identity is not None:
+                pending=identity.pending
+                identity.pending=None
+                # U7 误绑防线（切隐私）：命名上下文作废时同步清掉候选上的
+                # 暂存称呼——迟到回执/后续声音不得再拿这个名字去晋升
+                cid=pending.get('cid') if pending else None
+                if cid is not None and self.speaker_candidates is not None:
+                    self.speaker_candidates.clear_pending_name(cid)
 
     def voice_identity_context(self):
         pending=self.speaker_identity.pending if self.speaker_identity is not None else None

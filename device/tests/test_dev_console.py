@@ -966,7 +966,8 @@ class TestConsoleTiles:
     U5：运行日志磁贴并入实时区日志区（系统日志 tab），tile-logs 不复存在。"""
 
     TILE_IDS = (
-        "tile-overview", "tile-voicelog", "tile-settings", "tile-voice",
+        "tile-overview", "tile-voicelog", "tile-settings",
+        "tile-voice-candidates", "tile-voice",
         "tile-vision", "tile-sync", "tile-replay",
     )
 
@@ -1014,3 +1015,146 @@ class TestConsoleTiles:
         overview_head = page[page.index('id="tile-overview"'):]
         overview_head = overview_head[: overview_head.index("tile-body")]
         assert 'aria-expanded="false"' in overview_head
+        candidates_head = page[page.index('id="tile-voice-candidates"'):]
+        candidates_head = candidates_head[: candidates_head.index("tile-body")]
+        assert 'aria-expanded="false"' in candidates_head
+
+
+# ---------- U7：声纹候选快照与同名关联确认 ----------
+
+
+def _vc_samples(seconds: float, seed: int):
+    """可控假音频（过质量门：4s、RMS≈0.2；内容与向量无关）。"""
+    import numpy as np
+
+    rng = np.random.default_rng(seed)
+    return (rng.standard_normal(int(16000 * seconds)) * 0.2).astype(np.float32)
+
+
+def make_voice_memory_client(tmp_path):
+    """挂真实 PersonalMemory + VoiceCandidates（共享连接）的替身 runtime。
+
+    与生产装配同构（memory.db 即 ChatStore 连接）；隐私谓词与 rt.privacy
+    同源，便于翻转联锁。
+    """
+    import numpy as np
+
+    from lira.config import SpeakerConfig
+    from lira.personal_memory import PersonalMemory
+    from lira.speaker_candidates import VoiceCandidates
+
+    rt = FakeRuntime()
+    memory = PersonalMemory(tmp_path / "device.db", None, "kimi-k2.6",
+                            lambda: rt.privacy.is_on)
+    rt.personal_memory = memory
+    rt.speaker_candidates = VoiceCandidates(
+        memory.db, fingerprint="test-fp:2", profiles_provider=memory.profiles,
+        params=SpeakerConfig(), privacy=lambda: rt.privacy.is_on)
+    app, client, rt_out = make_client(runtime=rt)
+    return app, client, rt_out
+
+
+class TestVoiceCandidatesEndpoints:
+    def test_not_assembled_returns_503(self):
+        """未装配（无 personal_memory/候选）→ 503 诚实降级，前端显示降级文案。"""
+        _app, client, _rt = make_client()
+        login(client)
+        r = client.get("/dev/api/voice-candidates")
+        assert r.status_code == 503
+        assert "声纹候选未装配" in r.json()["error"]
+        r = client.post("/dev/api/voice-candidates/1/confirm", json={"member_id": 1})
+        assert r.status_code == 503
+
+    def test_auth_and_privacy_matrix(self, tmp_path):
+        """新端点鉴权矩阵：未登录 401（路由守卫遍历自动覆盖）；隐私开启时
+        确认 POST 403（禁止身份确认操作），GET 快照仍可用（磁贴结构可见）。"""
+        import numpy as np
+
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        assert client.get("/dev/api/voice-candidates").status_code == 401
+        assert client.post("/dev/api/voice-candidates/1/confirm",
+                           json={"member_id": 1}).status_code == 401
+        login(client)
+        rt.privacy._on = True
+        assert client.post("/dev/api/voice-candidates/1/confirm",
+                           json={"member_id": 1}).status_code == 403
+        rt.privacy._on = False
+        assert client.get("/dev/api/voice-candidates").status_code == 200
+
+    def test_snapshot_payload_and_established_semantics(self, tmp_path):
+        """AE2：established 只按真实 voice_profiles 统计；就绪 100% 未确认
+        候选不进入已建立人数；awaiting_console 明细带提议关联的成员名。"""
+        import numpy as np
+
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store = rt.speaker_candidates
+        mama = rt.personal_memory.enroll("妈妈", np.array([0.0, 1.0], np.float32))
+        assert mama is not None
+        vec_a = np.array([1.0, 0.0], np.float32)
+        v1 = store.observe(vec_a, _vc_samples(4.0, 1))
+        store.observe(vec_a, _vc_samples(4.0, 2))
+        store.observe(vec_a, _vc_samples(4.0, 3))  # 就绪（3 段 12s，一致性过）
+        # 50° 方向：与妈妈(0,1) cos≈0.77<0.80、与 A cos≈0.64<0.73——互不相扰
+        vec_b = np.array([np.cos(np.radians(50.0)), np.sin(np.radians(50.0))], np.float32)
+        v2 = store.observe(vec_b, _vc_samples(4.0, 4))
+        baba = rt.personal_memory.people.create_member("爸爸")["id"]
+        store.create_association_request(v2.candidate_id, baba)
+        body = client.get("/dev/api/voice-candidates").json()
+        assert body["summary"]["established_count"] == 1, "只算真实 profile"
+        assert body["summary"]["ready_count"] == 1, "就绪未确认不算已建立"
+        assert body["summary"]["awaiting_console_count"] == 1
+        names = {m["name"]: m for m in body["members"]}
+        assert names["妈妈"]["has_profile"] is True
+        assert names["爸爸"]["has_profile"] is False
+        assert v1.candidate_id != v2.candidate_id
+        pending = body["pending_confirmations"]
+        assert len(pending) == 1
+        assert pending[0]["candidate_id"] == v2.candidate_id
+        assert pending[0]["proposed_member_id"] == baba
+        assert pending[0]["member_name"] == "爸爸"
+
+    def test_confirm_success_retry_idempotent_and_conflicts(self, tmp_path):
+        """确认 POST：成功 200、重试幂等不重复插声纹、成员已有声纹 409 不覆盖、
+        候选不存在 404、状态不符 409、参数非法 400。"""
+        import numpy as np
+
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store = rt.speaker_candidates
+        vec_a = np.array([1.0, 0.0], np.float32)
+        v1 = store.observe(vec_a, _vc_samples(4.0, 1))
+        baba = rt.personal_memory.people.create_member("爸爸")["id"]
+        store.create_association_request(v1.candidate_id, baba)
+        url = f"/dev/api/voice-candidates/{v1.candidate_id}/confirm"
+        assert client.post(url, json={}).status_code == 400
+        assert client.post(url, json={"member_id": "x"}).status_code == 400
+        assert client.post("/dev/api/voice-candidates/999/confirm",
+                           json={"member_id": baba}).status_code == 404
+        # 状态不符：新候选没有挂请求
+        vec_b = np.array([np.cos(np.radians(50.0)), np.sin(np.radians(50.0))], np.float32)
+        v2 = store.observe(vec_b, _vc_samples(4.0, 2))
+        assert client.post(f"/dev/api/voice-candidates/{v2.candidate_id}/confirm",
+                           json={"member_id": baba}).status_code == 409
+        # 成功：200 + 落一份 profile
+        r = client.post(url, json={"member_id": baba})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "member_id": baba, "already": False}
+        assert len(rt.personal_memory.profiles()) == 1
+        # AE4 确认重试：幂等可见，不重复插 profile/成员
+        r = client.post(url, json={"member_id": baba})
+        assert r.status_code == 200 and r.json()["already"] is True
+        assert len(rt.personal_memory.profiles()) == 1
+        assert len(rt.personal_memory.people.list_members()) == 1
+        # 成员已有声纹：409 且不覆盖（另一候选再次指向同一成员）
+        store.create_association_request(v2.candidate_id, baba)
+        r = client.post(f"/dev/api/voice-candidates/{v2.candidate_id}/confirm",
+                        json={"member_id": baba})
+        assert r.status_code == 409
+        assert "已有声纹" in r.json()["error"]
+        expected = rt.personal_memory.profiles()[0][1]
+        aggregate = store.db.execute(
+            "SELECT aggregate_vector FROM voice_candidates WHERE candidate_id=?",
+            (v1.candidate_id,)).fetchone()[0]
+        assert np.allclose(expected, np.frombuffer(aggregate, np.float32)), \
+            "既有声纹仍是首次确认写入的聚合向量，未被覆盖"

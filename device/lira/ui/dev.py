@@ -22,6 +22,10 @@ templates/dev_login.html、templates/dev.html；CSS/JS 为本地静态资源
 文本事件环与状态面，游标增量 + reset 恢复，单次响应限事件条数；
 /dev/api/settings 提供设置能力元信息（真实当前值/可写性/生效方式/约束），
 写路径全部沿用既有端点，本模块不新增任何写端点。
+
+声纹候选（dev-console 改版 U7，KTD6）：/dev/api/voice-candidates 出候选/
+已建立成员快照；同名关联确认是唯一的领域操作 POST（会话 + 隐私双闸，
+409 拒绝覆盖既有声纹），仍无任何通用参数写入面。
 """
 
 from __future__ import annotations
@@ -42,6 +46,7 @@ from fastapi.templating import Jinja2Templates
 from lira.appliances.store import ApplianceStore
 from lira.privacy import PassphraseVault
 from lira.settings import DeviceSettings
+from lira.speaker_candidates import CandidateConflict, CandidateNotFound
 
 if TYPE_CHECKING:
     from lira.dev_telemetry import AudioFrame, TelemetryEvent
@@ -668,6 +673,87 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         if denied is not None:
             return denied
         return JSONResponse({"settings": _settings_items(handle.runtime)})
+
+    # ---------- 声纹候选与成员（U7，KTD6） ----------
+
+    @app.get("/dev/api/voice-candidates")
+    async def dev_voice_candidates(request: Request):
+        """候选/已建立成员快照（磁贴数据面；低频单拉，不进 observe 节拍）。
+
+        established_count 来自真实 voice_profiles（AE2：采集 100% 但未确认
+        的候选不计已建立人数）；awaiting_console 明细带提议关联的成员名，
+        供确认卡片展示。日志只记事件，不记成员名/称呼内容。
+        """
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        rt = handle.runtime
+        if (getattr(rt, "speaker_candidates", None) is None
+                or getattr(rt, "personal_memory", None) is None):
+            return JSONResponse({"error": "声纹候选未装配"}, status_code=503)
+        snap = rt.speaker_candidates.snapshot()
+        profiles_ids = {member for member, _vector in rt.personal_memory.profiles()}
+        members = [
+            {"member_id": m["id"], "name": m["name"], "emoji": m["emoji"],
+             "has_profile": m["id"] in profiles_ids}
+            for m in rt.personal_memory.people.list_members()
+        ]
+        by_id = {m["member_id"]: m for m in members}
+        pending = []
+        for c in snap["candidates"]:
+            if c["status"] == "awaiting_console" and c.get("proposed_member_id"):
+                member = by_id.get(c["proposed_member_id"])
+                pending.append({
+                    "candidate_id": c["candidate_id"],
+                    "proposed_member_id": c["proposed_member_id"],
+                    "member_name": member["name"] if member else None,
+                    "progress": c["progress"],
+                    "segment_count": c["segment_count"],
+                    "total_seconds": c["total_seconds"],
+                })
+        logger.info("dev event=voice_candidates n=%d awaiting=%d",
+                    len(snap["candidates"]), len(pending))
+        return JSONResponse({**snap, "members": members,
+                             "pending_confirmations": pending})
+
+    @app.post("/dev/api/voice-candidates/{candidate_id}/confirm")
+    async def dev_voice_candidate_confirm(candidate_id: str, request: Request):
+        """确认同名关联（领域操作端点，无通用参数写面，KTD6）。
+
+        边界次序：会话（401）→ 隐私（403——隐私开启禁止身份确认操作）→
+        装配（503）→ 参数（400）→ 领域事务（404 候选/成员不存在、
+        409 状态不符或成员已有声纹——绝不覆盖既有 profile）。
+        路径参数手动解析为 int（不用 FastAPI 类型校验）：会话/隐私闸必须
+        先于参数校验，未鉴权请求一律 401 而非 422。
+        """
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        privacy_denied = await _privacy_reject()
+        if privacy_denied is not None:
+            return privacy_denied
+        candidates = getattr(handle.runtime, "speaker_candidates", None)
+        if candidates is None:
+            return JSONResponse({"error": "声纹候选未装配"}, status_code=503)
+        try:
+            candidate_id_int = int(candidate_id)
+        except ValueError:
+            return JSONResponse({"error": "candidate_id 须为整数"}, status_code=400)
+        body = await request.json()
+        member_id = body.get("member_id")
+        if not isinstance(member_id, int) or isinstance(member_id, bool):
+            return JSONResponse({"error": "member_id 须为整数"}, status_code=400)
+        try:
+            result = candidates.confirm_association(candidate_id_int, member_id)
+        except CandidateNotFound as exc:
+            return JSONResponse({"error": str(exc)}, status_code=404)
+        except CandidateConflict as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        # 日志纪律：只记 id 与幂等布尔，不记成员名/称呼
+        logger.info("dev event=voice_candidate_confirm candidate=%d member=%d already=%s",
+                    candidate_id_int, result["member_id"], result.get("already", False))
+        return JSONResponse({"ok": True, "member_id": result["member_id"],
+                             "already": result.get("already", False)})
 
     # ---------- 语音链路测试（U3） ----------
 

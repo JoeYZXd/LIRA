@@ -25,7 +25,19 @@ stale / expired / 去重滚动的语义选择：
     策略/模型变化不能静默把旧证据变成新 100%）；observe 只指派现任指纹 +
     现任策略版本的候选；
   - **expired**（惰性置位）：observe/snapshot 开头把超过 ttl 无新证据的
-    accumulating 候选置 expired；ready 候选不过期（U7 确认流程负责收尾）；
+    accumulating 候选置 expired；ready/awaiting_console 候选不过期
+    （U7 确认流程负责收尾；久拖不决由控制台显式处理，不静默丢关联）；
+
+候选状态机（U7，KTD6"身份确认和记忆授权分别受门控"）：
+    accumulating ──就绪复核──> ready ──┬─ 新名自然确认（promote_new_name）─┐
+        │  ▲                           └─ 同名介绍（create_association_request）│
+        │  └─ 继续接受有效证据          │                                     │
+        ├─> awaiting_console ──控制台确认（confirm_association）──────────────┤
+        ├─> stale（指纹/策略变化，终态留痕）                                   │
+        ├─> expired（ttl 无新证据，仅 accumulating）                          │
+        └──────────────────────────────────> promoted（终态，member_id 回填）
+  member_id / proposed_member_id 两列是权限边界的物理体现：确认/晋升事务之外
+  恒为 NULL——确认前候选没有成员身份，个人记忆读写保持关闭（KTD6）。
   - **去重标识全局滚动保留最近 100 条**：现存标识命中即 duplicate 拒绝
     （sha256 对样本原始字节，跨重启稳定）；标识被淘汰后重复保护随之失效——
     同片段按新片段重新判定（永久保留全部标识不可行；100 条按写入时间滚动，
@@ -45,7 +57,10 @@ import numpy as np
 
 from lira.audio._paths import SAMPLE_RATE
 
-__all__ = ["VoiceCandidates", "Verdict"]
+__all__ = [
+    "VoiceCandidates", "Verdict", "CandidateError", "CandidateNotFound",
+    "CandidateConflict", "ASSOCIATION_PENDING",
+]
 
 #: 去重标识全局滚动上限（KTD5 数据关系：最多保留最近 100 个标识）
 MAX_DEDUP_KEYS = 100
@@ -68,6 +83,24 @@ PRIVACY = "privacy"
 STALE_FINGERPRINT = "stale_fingerprint"
 BOUND_REACHED = "bound_reached"
 INCONSISTENT = "inconsistent"
+ASSOCIATION_PENDING = "association_pending"
+
+#: 候选状态：可继续积累证据 / 可被命名晋升的"活跃"集合
+ACTIVE_STATUSES = ("accumulating", "ready", "awaiting_console")
+#: 候选状态：可被自然命名晋升（awaiting_console 已挂同名请求，不再走新名路径）
+NAMEABLE_STATUSES = ("accumulating", "ready")
+
+
+class CandidateError(Exception):
+    """候选/确认操作失败基类（dev 端点按子类映射 404/409，不记内容）。"""
+
+
+class CandidateNotFound(CandidateError):
+    """候选或其挂载的成员/请求不存在（404 语义）。"""
+
+
+class CandidateConflict(CandidateError):
+    """状态不符或成员已有声纹——拒绝且不覆盖（409 语义，AE4）。"""
 
 
 @dataclass(frozen=True)
@@ -109,8 +142,13 @@ class VoiceCandidates:
         self._privacy = privacy
         self._now = time.time if now is None else now
         self._event_sink = event_sink
-        # 幂等建表（KTD8）：新表不触碰既有 members/voice_profiles/memory_turns；
-        # 故意不建到 members 的外键——确认前候选没有 member_id 权限（KTD6）。
+        # 幂等建表（KTD8）：新表不触碰既有 members/memory_turns；候选与 members
+        # 不建外键——member_id 列只在确认/晋升事务内回填，确认前恒 NULL，
+        # 这是"候选不产生成员权限"（KTD6）的物理体现。U7 追加三列：未发布的
+        # 开发库分支内直接改 CREATE TABLE，对 U6 时代已存在的库用 ALTER 兜底
+        # （取简：幂等加列，无需迁移框架；失败重开即重建候选可重新积累）。
+        # voice_profiles 是 PersonalMemory 的既有表——确认事务要往里写聚合
+        # 向量，store 独立使用（测试直连空库）时也必须幂等存在。
         self.db.executescript('''
             CREATE TABLE IF NOT EXISTS voice_candidates (
                 candidate_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,7 +160,10 @@ class VoiceCandidates:
                 strategy_version INTEGER NOT NULL,
                 status TEXT NOT NULL,
                 created_at REAL NOT NULL,
-                updated_at REAL NOT NULL);
+                updated_at REAL NOT NULL,
+                pending_name TEXT,
+                proposed_member_id INTEGER,
+                member_id INTEGER);
             CREATE TABLE IF NOT EXISTS voice_candidate_evidence (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 candidate_id INTEGER NOT NULL REFERENCES voice_candidates(candidate_id),
@@ -130,7 +171,15 @@ class VoiceCandidates:
                 duration REAL NOT NULL,
                 vector BLOB NOT NULL,
                 created_at REAL NOT NULL);
+            CREATE TABLE IF NOT EXISTS voice_profiles (
+                member_id INTEGER PRIMARY KEY REFERENCES members(id) ON DELETE CASCADE,
+                vector BLOB NOT NULL);
         ''')
+        for column in ("pending_name TEXT", "proposed_member_id INTEGER", "member_id INTEGER"):
+            try:
+                self.db.execute(f"ALTER TABLE voice_candidates ADD COLUMN {column}")
+            except sqlite3.OperationalError:
+                pass  # 列已存在（幂等重开）
         self._invalidate_foreign()
 
     # ---------- 生命周期 ----------
@@ -143,7 +192,7 @@ class VoiceCandidates:
         with self.db:
             self.db.execute(
                 "UPDATE voice_candidates SET status='stale', updated_at=? "
-                "WHERE status IN ('accumulating','ready') "
+                "WHERE status IN ('accumulating','ready','awaiting_console') "
                 "AND (model_fingerprint != ? OR strategy_version != ?)",
                 (self._now(), self.fingerprint, self.params.strategy_version))
 
@@ -252,12 +301,18 @@ class VoiceCandidates:
     # ---------- 快照（U7 磁贴数据面） ----------
 
     def snapshot(self, *, now: float | None = None) -> dict:
-        """候选与汇总快照。字段用 candidate（候选数不直接称为人数）。"""
+        """候选与汇总快照。字段用 candidate（候选数不直接称为人数）。
+
+        U7：每候选带 pending_name/proposed_member_id/member_id/status；
+        established_count 只统计真实 voice_profiles（AE2：采集 100% 但未
+        确认的候选不计已建立人数）。
+        """
         now = self._now() if now is None else now
         self._expire_candidates(now)
         rows = self.db.execute(
             "SELECT candidate_id,status,segment_count,total_seconds,"
-            "consistency_passed,updated_at FROM voice_candidates "
+            "consistency_passed,updated_at,pending_name,proposed_member_id,"
+            "member_id FROM voice_candidates "
             "ORDER BY candidate_id").fetchall()
         candidates = []
         for row in rows:
@@ -272,6 +327,9 @@ class VoiceCandidates:
                             "seconds": self.params.target_seconds},
                 "consistency_passed": passed,
                 "updated_at": float(row[5]),
+                "pending_name": row[6],
+                "proposed_member_id": row[7],
+                "member_id": row[8],
             })
         established = self._profiles_provider() or []
         return {
@@ -280,8 +338,178 @@ class VoiceCandidates:
                 "established_count": len(established),
                 "accumulating_count": sum(1 for c in candidates if c["status"] == "accumulating"),
                 "ready_count": sum(1 for c in candidates if c["status"] == "ready"),
+                "awaiting_console_count": sum(
+                    1 for c in candidates if c["status"] == "awaiting_console"),
             },
         }
+
+    # ---------- 命名上下文与确认晋升（U7，KTD6） ----------
+
+    def _candidate_row(self, candidate_id: int):
+        return self.db.execute(
+            "SELECT * FROM voice_candidates WHERE candidate_id=?",
+            (candidate_id,)).fetchone()
+
+    def lookup(self, vector) -> int | None:
+        """当前声音对应的活跃候选 id（命名上下文绑定用）；**只读不变更**。
+
+        与 _assign 同则（现任活跃候选按 cos 降序，assign 阈值 + 边际判定），
+        但绝不建候选、置 stale 或写任何行——歧义（边际不足）与陌生声音都返回
+        None，命名上下文宁缺毋错绑。每轮 resolve 都会调用，故不发遥测事件。
+        """
+        vector = np.asarray(vector, np.float32)
+        norm = float(np.linalg.norm(vector))
+        if norm <= 1e-6:
+            return None
+        vector = vector / norm
+        scored = []
+        for row in self._active_rows():
+            aggregate = np.frombuffer(row[1], np.float32)
+            if aggregate.shape != vector.shape:
+                continue  # 维度不符（防御）：跳过，lookup 不做任何置失效写
+            scored.append((float(np.dot(vector, aggregate)), int(row[0])))
+        scored.sort(key=lambda item: item[0], reverse=True)
+        if not scored or scored[0][0] < self.params.assign_threshold:
+            return None
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < self.params.match_margin:
+            return None  # 声音归属不明确：不绑定命名上下文
+        return scored[0][1]
+
+    def set_pending_name(self, candidate_id: int, name: str,
+                         *, now: float | None = None) -> bool:
+        """把自然对话中给出的称呼暂存到候选（可命名状态才收）；失效返回 False。
+
+        误绑防线之一：候选已 stale/expired/promoted 时不设——名字只绑当前
+        仍在积累的活跃候选。纯暂存，不创建成员、不写声纹。
+        """
+        row = self._candidate_row(candidate_id)
+        if row is None or row["status"] not in NAMEABLE_STATUSES:
+            return False
+        with self.db:
+            self.db.execute(
+                "UPDATE voice_candidates SET pending_name=?, updated_at=? "
+                "WHERE candidate_id=?",
+                (str(name), self._now() if now is None else now, candidate_id))
+        return True
+
+    def clear_pending_name(self, candidate_id: int, *, now: float | None = None) -> None:
+        """清暂存称呼（隐私开启 / 会话上下文作废时调用，防迟到回执错绑）。"""
+        with self.db:
+            self.db.execute(
+                "UPDATE voice_candidates SET pending_name=NULL, updated_at=? "
+                "WHERE candidate_id=?",
+                (self._now() if now is None else now, candidate_id))
+
+    def create_association_request(self, candidate_id: int, member_id: int,
+                                   *, now: float | None = None) -> Verdict:
+        """同名候选 → 挂"待控制台确认"请求；幂等；**绝不写 voice_profiles**。
+
+        AE4/KTD6：同名成员关联只能由鉴权控制台确认，会话内确认不登记；
+        本操作只标记意图（proposed_member_id + awaiting_console），权限边界
+        （member_id 列）不动。
+        """
+        now = self._now() if now is None else now
+        self._expire_candidates(now)
+        row = self._candidate_row(candidate_id)
+        if row is None:
+            raise CandidateNotFound(f"候选不存在: {candidate_id}")
+        if row["status"] == "awaiting_console" and row["proposed_member_id"] == member_id:
+            return self._verdict(ASSOCIATION_PENDING, candidate_id=candidate_id,
+                                 reason="同名关联待控制台确认（重复请求不重复生成）")
+        if row["status"] not in ACTIVE_STATUSES:
+            raise CandidateConflict(
+                f"候选 {candidate_id} 状态 {row['status']} 不再活跃，无法挂关联请求")
+        if self.db.execute("SELECT 1 FROM members WHERE id=?", (member_id,)).fetchone() is None:
+            raise CandidateNotFound(f"成员不存在: {member_id}")
+        with self.db:
+            self.db.execute(
+                "UPDATE voice_candidates SET status='awaiting_console', "
+                "proposed_member_id=?, pending_name=NULL, updated_at=? "
+                "WHERE candidate_id=?", (int(member_id), now, candidate_id))
+        return self._verdict(ASSOCIATION_PENDING, candidate_id=candidate_id,
+                             reason="同名关联已生成，等待开发者控制台确认")
+
+    def promote_new_name(self, candidate_id: int, name: str, *,
+                         member_factory: Callable[[str], int],
+                         now: float | None = None) -> int:
+        """新称呼自然确认 → 统一事务晋升：建成员 + 写声纹 + 候选置 promoted。
+
+        事务载体（KTD6"身份确认 API 与语音晋升使用同一领域操作及事务"）：
+        ``with self.db`` 单事务包住 member_factory（members 插入）+
+        voice_profiles（候选聚合向量落为成员声纹）+ 候选状态/回填三步，
+        任一步失败整体回滚——成员列表、profile 与候选状态一次可见、一致。
+        member_factory 必须在**调用方连接上**做纯插入（不自带 commit），
+        否则会在外层事务中途提交、破坏原子性（ChatStore.create_member
+        自带 ``with conn``，故由调用方适配内联插入）。
+
+        拒绝条件：候选不存在 / 非可命名状态 / pending_name 不匹配（名字
+        只晋升给给过这个名字的候选——误绑防线）/ 成员重名（走 association
+        路径）。成功后候选终态 promoted、member_id 回填（权限边界的开启
+        时刻），pending_name/proposed_member_id 清空。
+        """
+        now = self._now() if now is None else now
+        self._expire_candidates(now)
+        row = self._candidate_row(candidate_id)
+        if row is None:
+            raise CandidateNotFound(f"候选不存在: {candidate_id}")
+        if row["status"] not in NAMEABLE_STATUSES:
+            raise CandidateConflict(
+                f"候选 {candidate_id} 状态 {row['status']} 不可命名晋升")
+        if row["pending_name"] != str(name):
+            raise CandidateConflict("候选暂存称呼与晋升名字不符，拒绝晋升（防错绑）")
+        with self.db:
+            try:
+                member_id = int(member_factory(str(name)))
+            except sqlite3.IntegrityError as exc:
+                raise CandidateConflict(f"成员名已存在，走同名关联路径: {name}") from exc
+            self.db.execute("INSERT INTO voice_profiles(member_id, vector) VALUES (?,?)",
+                            (member_id, row["aggregate_vector"]))
+            self.db.execute(
+                "UPDATE voice_candidates SET status='promoted', member_id=?, "
+                "pending_name=NULL, proposed_member_id=NULL, updated_at=? "
+                "WHERE candidate_id=?", (member_id, now, candidate_id))
+        self._verdict(ACCEPTED, candidate_id=candidate_id,
+                      reason=f"候选 {candidate_id} 已晋升为成员 {member_id}")
+        return member_id
+
+    def confirm_association(self, candidate_id: int, member_id: int,
+                            *, now: float | None = None) -> dict:
+        """控制台确认同名关联 → 统一事务：写声纹 + 候选置 promoted。
+
+        核对（全部通过才写）：候选处于 awaiting_console 且
+        proposed_member_id==member_id；**成员已有 voice_profile → 冲突拒绝，
+        绝不覆盖**（AE4）。重试已晋升且指向同一成员 → 幂等返回 already（不
+        重复插 profile/成员）；指向不同成员 → 冲突。成功则同事务插入
+        voice_profiles(aggregate) 并置 promoted、member_id 回填、清 proposed。
+        """
+        now = self._now() if now is None else now
+        self._expire_candidates(now)
+        row = self._candidate_row(candidate_id)
+        if row is None:
+            raise CandidateNotFound(f"候选不存在: {candidate_id}")
+        if row["status"] == "promoted":
+            if row["member_id"] == member_id:
+                return {"ok": True, "member_id": int(member_id), "already": True}
+            raise CandidateConflict("候选已关联到其他成员，不能重复确认")
+        if row["status"] != "awaiting_console" or row["proposed_member_id"] is None:
+            raise CandidateConflict(f"候选 {candidate_id} 没有待确认的同名关联")
+        if row["proposed_member_id"] != member_id:
+            raise CandidateConflict("待确认关联指向其他成员，不能确认到不同成员")
+        if self.db.execute("SELECT 1 FROM members WHERE id=?", (member_id,)).fetchone() is None:
+            raise CandidateNotFound(f"成员不存在: {member_id}")
+        if self.db.execute("SELECT 1 FROM voice_profiles WHERE member_id=?",
+                           (member_id,)).fetchone() is not None:
+            raise CandidateConflict("该成员已有声纹记录，确认被拒绝（不覆盖既有声纹）")
+        with self.db:
+            self.db.execute("INSERT INTO voice_profiles(member_id, vector) VALUES (?,?)",
+                            (member_id, row["aggregate_vector"]))
+            self.db.execute(
+                "UPDATE voice_candidates SET status='promoted', member_id=?, "
+                "pending_name=NULL, proposed_member_id=NULL, updated_at=? "
+                "WHERE candidate_id=?", (int(member_id), now, candidate_id))
+        self._verdict(ACCEPTED, candidate_id=candidate_id,
+                      reason=f"控制台确认：候选 {candidate_id} 已关联成员 {member_id}")
+        return {"ok": True, "member_id": int(member_id), "already": False}
 
     # ---------- 判定辅助 ----------
 
@@ -316,19 +544,25 @@ class VoiceCandidates:
         return scores[0][1], False
 
     def _active_rows(self):
-        """现任指纹 + 现任策略版本的活跃候选（observe 只在这些里指派）。"""
+        """现任指纹 + 现任策略版本的活跃候选（observe 只在这些里指派）。
+
+        awaiting_console（同名待确认）仍算活跃：确认等待期继续积累证据，
+        但它已挂请求，不走新名晋升路径（见 NAMEABLE_STATUSES）。
+        """
+        placeholders = ",".join("?" * len(ACTIVE_STATUSES))
         return self.db.execute(
             "SELECT candidate_id,aggregate_vector,segment_count,total_seconds "
-            "FROM voice_candidates WHERE status IN ('accumulating','ready') "
+            f"FROM voice_candidates WHERE status IN ({placeholders}) "
             "AND model_fingerprint=? AND strategy_version=? ORDER BY candidate_id",
-            (self.fingerprint, self.params.strategy_version)).fetchall()
+            (*ACTIVE_STATUSES, self.fingerprint, self.params.strategy_version)).fetchall()
 
     def _count_active(self) -> int:
         """现任指纹 + 现任策略版本的活跃候选数（max_candidates 名额口径）。"""
+        placeholders = ",".join("?" * len(ACTIVE_STATUSES))
         row = self.db.execute(
-            "SELECT COUNT(*) FROM voice_candidates WHERE status IN ('accumulating','ready') "
+            f"SELECT COUNT(*) FROM voice_candidates WHERE status IN ({placeholders}) "
             "AND model_fingerprint=? AND strategy_version=?",
-            (self.fingerprint, self.params.strategy_version)).fetchone()
+            (*ACTIVE_STATUSES, self.fingerprint, self.params.strategy_version)).fetchone()
         return int(row[0])
 
     def _assign(self, vector, now: float):

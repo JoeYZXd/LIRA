@@ -48,6 +48,7 @@ from lira.llm.prompts import (
 from lira.dev_telemetry import safe_add_event
 from lira.audio.voice_metrics import current_trace, mark
 from lira.voice_log import VOICE_LOG
+from lira.llm.timing_log import ModelTiming
 
 __all__ = [
     "LlmClient",
@@ -75,8 +76,10 @@ class _ModelObserve:
     - 发射异常一律吞并 + debug 留痕：观察永不影响主返回路径。
     """
 
-    def __init__(self, telemetry, *, turn_id, path: str) -> None:
+    def __init__(self, telemetry, *, turn_id, path: str, timing_log=None, voice=True, model='') -> None:
         trace = current_trace.get()
+        self._timing = ModelTiming(timing_log, path=path, voice=voice, model=model,
+                                   turn=turn_id, trace=trace)
         self._metrics_trace = trace.bind(turn_id=turn_id) if trace else None
         self._content_seen = False
         self._tel = telemetry
@@ -102,6 +105,7 @@ class _ModelObserve:
         首个非空 delta 落 llm_first_delta；此后按 ≤0.5s 或 ≥200 字符节奏落
         llm_text 累计快照（幂等可追赶，不发增量）。
         """
+        self._timing.delta(content)
         if content and content.strip() and not self._content_seen:
             self._content_seen = True
             mark(self._metrics_trace, "llm_content")
@@ -121,15 +125,18 @@ class _ModelObserve:
 
     def done(self, text: str) -> None:
         """完成：完整回复快照（超长截断注明），供观察端追赶。"""
+        self._timing.finish('ok')
         if text:
             self._text = text
         self._emit("llm_done", self._snapshot())
 
     def fail(self, category: str) -> None:
         """失败：只记错误类别，不含任何对话内容。"""
+        self._timing.finish(category)
         self._emit("llm_fail", category)
 
     def cancel(self) -> None:
+        self._timing.finish('cancelled')
         self._emit("llm_cancel", "客户端取消")
 
     def _snapshot(self) -> str:
@@ -173,6 +180,7 @@ class LlmClient:
         #: 模型显示观察器（U3/KTD7）：运行时装配 `llm.telemetry = ...`（鸭子
         #: 类型，公开 add_event 面即可）；默认 None = 零事件零开销。
         self.telemetry = None
+        self.timing_log = None
         self.voice_member_provider = lambda: None
         self.voice_context_provider = lambda: ''
         self._web_search_enabled = cfg.web_search_enabled
@@ -254,7 +262,8 @@ class LlmClient:
         # 分离的只读旁路；voice_log=False（首页文字聊天）零观察事件。
         use_search = self._web_search_enabled and system != PLAIN_SPEAK_SYSTEM_PROMPT
         observe = _ModelObserve(self.telemetry if voice_log else None, turn_id=turn_id,
-                                path="search" if use_search else "stream")
+                                path="search" if use_search else "stream",
+                                timing_log=self.timing_log, voice=voice_log, model=self._model)
         observe.request(len(prompt))
         # A single turn timer owns conversational feedback, including tool waits.
         # First real content silences it even before a sentence is ready for TTS.
@@ -304,6 +313,9 @@ class LlmClient:
             if voice_log:
                 VOICE_LOG.log("llm_fail", f"大模型返回错误（HTTP {exc.status_code}），已降级")
             raise LlmError("远程服务返回错误") from exc
+        except Exception:
+            observe.fail('error')
+            raise
         finally:
             if feedback_task is not None:
                 feedback_task.cancel()

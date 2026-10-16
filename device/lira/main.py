@@ -754,7 +754,16 @@ class DeviceRuntime:
         # 结构化遥测（U2）：唯一输入旁路的音频包络 + VOICE_LOG 文本镜像。
         # RouteDispatch.feed 经 getattr(streams, "telemetry") 取用，先于装配
         # （下方 personal_memory 分支的候选事件面 event_sink 也引用它）。
-        self.voice_metrics = VoiceMetrics(enabled=os.environ.get("LIRA_VOICE_METRICS") == "1")
+        from lira.llm.timing_log import TimingLog
+        self.timing_log = None
+        try:
+            self.timing_log = TimingLog(cfg.db_path.parent / 'timing' / 'interaction.jsonl')
+            self.timing_log.apply_privacy(self.privacy.is_on)
+        except OSError:
+            logging.warning('timing event=journal_unavailable')
+        llm.timing_log = self.timing_log
+        self.voice_metrics = VoiceMetrics(enabled=True,
+            sink=self.timing_log.voice if self.timing_log else None)
         self.telemetry = DevTelemetry()
         VOICE_LOG.register_sink(self.telemetry)
         if os.environ.get("LIRA_PERSONAL_MEMORY", "0") == "1":
@@ -823,6 +832,8 @@ class DeviceRuntime:
         # 遥测联锁紧随音频门（AE5）：先关音频门，再清遥测缓冲并进入拒收态
         self.privacy.subscribe(self.telemetry.apply_privacy)
         self.privacy.subscribe(self.voice_metrics.apply_privacy)
+        if self.timing_log:
+            self.privacy.subscribe(self.timing_log.apply_privacy)
         self.privacy.subscribe(self.dispatcher.apply_privacy)
         self.privacy.subscribe(self.engine.apply_privacy)
         self.privacy.subscribe(self.clear_voice_identity)
@@ -1346,6 +1357,8 @@ class DeviceRuntime:
         if self.personal_memory is not None:
             await self.personal_memory.close()
         await stack.aclose()
+        if self.timing_log:
+            await asyncio.to_thread(self.timing_log.close)
         logging.info("LIRA 已退出，HAL 资源已释放。")
 
 

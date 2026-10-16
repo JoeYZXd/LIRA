@@ -42,8 +42,9 @@ class VoiceTrace:
 
 
 class VoiceMetrics:
-    def __init__(self, *, enabled=False, capacity=2048, clock=time.monotonic):
+    def __init__(self, *, enabled=False, capacity=2048, clock=time.monotonic, sink=None):
         self.enabled = enabled
+        self._sink = sink
         self._events = deque(maxlen=max(1, capacity))
         self._clock = clock
         self._epoch = 0
@@ -64,9 +65,15 @@ class VoiceMetrics:
         try:
             if self._privacy or trace.epoch != self._epoch:
                 return
-            self._events.append(dict(event=event, at=self._clock() if at is None else at,
+            row = dict(stage=event, at=self._clock() if at is None else at,
                                      utterance_id=trace.utterance_id, turn_id=trace.turn_id,
-                                     owner=trace.owner, **values))
+                                     owner=trace.owner, **values)
+            self._events.append(dict(row, event=event))
+            if self._sink is not None:
+                try:
+                    self._sink(row)
+                except Exception:
+                    pass
         finally:
             self._lock.release()
 

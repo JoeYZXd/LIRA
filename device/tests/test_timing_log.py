@@ -46,3 +46,13 @@ def test_rotation_is_bounded(tmp_path):
         log.emit('test')
     log._queue.join()
     assert len(list(tmp_path.glob('interaction.jsonl*'))) <= 5
+
+
+def test_logging_reconfiguration_does_not_disable_recording(tmp_path):
+    log = TimingLog(tmp_path / 'interaction.jsonl')
+    # Uvicorn's logging configuration closes pre-existing logging handlers.
+    log._handler.close()
+    log.emit('after_logging_configuration')
+    log.close()
+    rows = [json.loads(line) for line in (tmp_path / 'interaction.jsonl').read_text().splitlines()]
+    assert rows[0]['event'] == 'after_logging_configuration'

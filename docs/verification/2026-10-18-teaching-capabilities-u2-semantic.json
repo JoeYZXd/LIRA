@@ -1,0 +1,173 @@
+{
+  "model": "kimi-k3",
+  "rows": [
+    {
+      "repeat": 1,
+      "case": "direct",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "assent",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "refusal",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "ambiguous",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "undelivered",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "unrelated",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "direct",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "assent",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "refusal",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "ambiguous",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "undelivered",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "unrelated",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "direct",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "assent",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "refusal",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "ambiguous",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "undelivered",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "unrelated",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    }
+  ]
+}

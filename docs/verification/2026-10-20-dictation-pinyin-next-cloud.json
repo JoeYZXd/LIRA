@@ -1,0 +1,535 @@
+{
+  "fixture": true,
+  "model": "1.2.6.1",
+  "production_pid_before": "60961",
+  "extended_capabilities_flag": "false",
+  "scope": "real cloud audio, deployed default instructions/tools, real TV tools and published textbook reads; silent playback; no household identity/memory loaded",
+  "turns": [
+    {
+      "index": 1,
+      "input": "给开心默写第七课的二会字。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "北开心默写第 7 课的二会字。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "电视已经打开了吗？"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "check_dictation_tv",
+          "arguments": {},
+          "result": {
+            "status": "needs_input",
+            "receiver": {
+              "status": "unavailable",
+              "reason": "Receiver unavailable; no wake or launch attempted."
+            },
+            "question": "电视已经打开了吗？",
+            "instructions": "等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。"
+          },
+          "seconds": 3.043
+        }
+      ],
+      "tv_status": {
+        "status": "idle"
+      }
+    },
+    {
+      "index": 2,
+      "input": "家里的电视机已经打开了。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "家里的电视机已经打开了。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "电视上是否已经显示准备开始默写第17课的画面？"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "show_dictation_ready",
+          "arguments": {
+            "lesson": 17
+          },
+          "result": {
+            "status": "displaying",
+            "lesson": 17,
+            "question": "电视上是否已经显示准备开始默写第17课的画面？",
+            "instructions": "查询get_tv_display_status核实发送结果，并等待用户确认画面。失败不能称已显示。"
+          },
+          "seconds": 0.0
+        },
+        {
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displaying"
+          },
+          "seconds": 0.0
+        }
+      ],
+      "tv_status": {
+        "status": "failed",
+        "reason": "电视展示未成功。请确认电视已开机、网络正常；未尝试唤醒或关机。"
+      }
+    },
+    {
+      "index": 3,
+      "input": "电视没有显示，先继续。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "电视没有显示，先继续。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "不好意思，目前已核对的语文课本里只有第7课可以默写，没有第17课，要不要换成第7课的二会字？"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "list_practice_textbooks",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "books": [
+              {
+                "book_id": "77b8071a95f1479fa5742bbc31c56823",
+                "title": "合成测试语文课本",
+                "subject": "chinese",
+                "source": "review_draft",
+                "imported_at": 1792428909.2314816,
+                "lessons": [
+                  {
+                    "number": 7,
+                    "unit": 2,
+                    "title": "合成第七课",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 8,
+                    "unit": 2,
+                    "title": "未核对课次",
+                    "reviewed": false
+                  }
+                ]
+              }
+            ],
+            "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+          },
+          "seconds": 0.002
+        }
+      ],
+      "tv_status": {
+        "status": "failed",
+        "reason": "电视展示未成功。请确认电视已开机、网络正常；未尝试唤醒或关机。"
+      }
+    },
+    {
+      "index": 4,
+      "input": "好的，可以。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "好的。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "可以把这页拼音显示到客厅电视上吗？"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "get_dictation_material",
+          "arguments": {
+            "lesson": 7
+          },
+          "result": {
+            "status": "ready",
+            "material_id": "24818a483a7a",
+            "book_id": "77b8071a95f1479fa5742bbc31c56823",
+            "book_title": "合成测试语文课本",
+            "lesson": 7,
+            "unit": 2,
+            "four": [
+              "日",
+              "水"
+            ],
+            "two": [
+              "日",
+              "水",
+              "山",
+              "田",
+              "禾",
+              "米",
+              "口",
+              "云",
+              "牛",
+              "天"
+            ]
+          },
+          "seconds": 0.002
+        },
+        {
+          "name": "present_dictation_item",
+          "arguments": {
+            "group": "two",
+            "material_id": "24818a483a7a",
+            "offset": 0
+          },
+          "result": {
+            "status": "awaiting_consent",
+            "request_id": "b0816a2783164473a87f964ffda7603a",
+            "question": "可以把这页拼音显示到客厅电视上吗？",
+            "preview": "rì    shuǐ    shān    tián    hé    mǐ    kǒu    yún",
+            "instructions": "逐字问出 question，等待下一轮明确同意。不能现在调用确认。",
+            "item_count": 8,
+            "has_more": true,
+            "next_offset": 8
+          },
+          "seconds": 0.003
+        }
+      ],
+      "tv_status": {
+        "status": "awaiting_consent"
+      }
+    },
+    {
+      "index": 5,
+      "input": "好的。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "好的。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "正在发送这页拼音到电视，等显示出来就可以开始啦，写完说“下一条”就能看后面的。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "confirm_tv_display",
+          "arguments": {
+            "request_id": "b0816a2783164473a87f964ffda7603a"
+          },
+          "result": {
+            "status": "displaying",
+            "instructions": "正在发送，稍后查询 get_tv_display_status；尚不能说已显示。"
+          },
+          "seconds": 0.0
+        },
+        {
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displaying",
+            "instructions": "正在发送，稍后查询 get_tv_display_status；尚不能说已显示。"
+          },
+          "seconds": 0.0
+        }
+      ],
+      "tv_status": {
+        "status": "failed",
+        "reason": "电视展示未成功。请确认电视已开机、网络正常；未尝试唤醒或关机。"
+      }
+    },
+    {
+      "index": 6,
+      "input": "请继续尝试投屏，显示下一页拼音。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "请继续尝试投屏解释下页的拼音。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "可以把这页拼音显示到客厅电视上吗？"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "present_dictation_item",
+          "arguments": {
+            "group": "two",
+            "material_id": "24818a483a7a",
+            "offset": 8
+          },
+          "result": {
+            "status": "awaiting_consent",
+            "request_id": "95b7203a77a74287931c780df4bb6054",
+            "question": "可以把这页拼音显示到客厅电视上吗？",
+            "preview": "niú    tiān",
+            "instructions": "逐字问出 question，等待下一轮明确同意。不能现在调用确认。",
+            "item_count": 2,
+            "has_more": false,
+            "next_offset": 16
+          },
+          "seconds": 0.004
+        }
+      ],
+      "tv_status": {
+        "status": "awaiting_consent"
+      }
+    },
+    {
+      "index": 7,
+      "input": "好的，可以。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "好的。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "正在发送最后两个拼音到电视，分别是niú和tiān，等显示出来就完成这部分二会字默写啦。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "confirm_tv_display",
+          "arguments": {
+            "request_id": "95b7203a77a74287931c780df4bb6054"
+          },
+          "result": {
+            "status": "displaying",
+            "instructions": "正在发送，稍后查询 get_tv_display_status；尚不能说已显示。"
+          },
+          "seconds": 0.0
+        },
+        {
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displaying",
+            "instructions": "正在发送，稍后查询 get_tv_display_status；尚不能说已显示。"
+          },
+          "seconds": 0.0
+        }
+      ],
+      "tv_status": {
+        "status": "failed",
+        "reason": "电视展示未成功。请确认电视已开机、网络正常；未尝试唤醒或关机。"
+      }
+    },
+    {
+      "index": 8,
+      "input": "好的。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "好的。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "要是电视还是没显示，也可以直接口头报拼音，需要换成语音的话跟我说就行。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [],
+      "tv_status": {
+        "status": "failed",
+        "reason": "电视展示未成功。请确认电视已开机、网络正常；未尝试唤醒或关机。"
+      }
+    }
+  ],
+  "tool_names": [
+    "get_device_status",
+    "end_conversation",
+    "list_infrared_devices",
+    "prepare_infrared_learning",
+    "start_infrared_learning",
+    "get_infrared_learning_status",
+    "cancel_infrared_learning",
+    "control_infrared_device",
+    "start_voice_enrollment",
+    "set_voice_enrollment_details",
+    "start_voice_sample",
+    "check_voice_sample",
+    "get_voice_enrollment_status",
+    "save_voice_enrollment",
+    "cancel_voice_enrollment",
+    "reset_voice_samples",
+    "identify_current_speaker",
+    "get_speaker_continuity_context",
+    "report_speaker_continuity",
+    "request_identity_confirmation",
+    "submit_identity_feedback",
+    "get_recent_device_conversation",
+    "get_personal_memory",
+    "prepare_tv_display",
+    "list_practice_textbooks",
+    "prepare_pinyin_practice",
+    "list_tv_images",
+    "confirm_tv_display",
+    "cancel_tv_display",
+    "get_tv_display_status",
+    "check_dictation_tv",
+    "show_dictation_ready",
+    "get_dictation_material",
+    "present_dictation_item",
+    "cancel_dictation",
+    "get_dictation_status",
+    "get_dictation_book_choice",
+    "confirm_dictation_book_choice"
+  ],
+  "textbooks": {
+    "status": "ok",
+    "books": [
+      {
+        "book_id": "77b8071a95f1479fa5742bbc31c56823",
+        "title": "合成测试语文课本",
+        "subject": "chinese",
+        "source": "review_draft",
+        "imported_at": 1792428909.2314816,
+        "lessons": [
+          {
+            "number": 7,
+            "unit": 2,
+            "title": "合成第七课",
+            "reviewed": true
+          },
+          {
+            "number": 8,
+            "unit": 2,
+            "title": "未核对课次",
+            "reviewed": false
+          }
+        ]
+      }
+    ],
+    "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+  },
+  "draft_inventory": [
+    {
+      "id": "77b8071a95f1479fa5742bbc31c56823",
+      "status": "review",
+      "pages": 0
+    }
+  ],
+  "lesson7_inventory": [],
+  "independent_tv_probe": {
+    "status": "unavailable",
+    "error_type": "ConnectError"
+  },
+  "output_audio_bytes": 2043288,
+  "production_pid_after": "60961",
+  "service_unchanged": true
+}

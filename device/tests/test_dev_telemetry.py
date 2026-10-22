@@ -660,3 +660,33 @@ class TestVoiceLogMirror:
         assert [e.text for e in events] == ["待机：持续等待唤醒中"]
         assert all(e.instance_id == rig.runtime.telemetry.instance_id
                    for e in events)
+
+
+async def test_wake_ack_has_one_tts_request_and_one_owned_observation():
+    from types import SimpleNamespace
+    from collections import deque
+    from lira.main import DeviceCallbacks
+
+    spoken, tones = [], []
+    owner = SimpleNamespace(epoch=1, operation_id=1)
+    tel = DevTelemetry()
+    tts = SimpleNamespace(
+        speak=lambda text, **kwargs: spoken.append((text, kwargs)),
+        chime=lambda **kwargs: tones.append(kwargs),
+    )
+    rt = SimpleNamespace(tts=tts, telemetry=tel, recent_speaks=deque(),
+                         settings=SimpleNamespace(tts_speed=1., volume=.5),
+                         engine=SimpleNamespace(dnd=False, is_current=lambda x: x is owner))
+    VOICE_LOG.register_sink(tel)
+    cb = DeviceCallbacks(rt)
+    cb.chime(owner=owner)
+    assert len(tones) == 1
+    assert [text for text, _ in spoken] == ['我在。']
+    events = [e for e in _events(tel) if e.kind == 'speak']
+    assert len(events) == 1
+    assert events[0].operation_owner == '1.1'
+    assert len([e for e in VOICE_LOG.snapshot() if e.kind == 'speak']) == 1
+    # A second actual request must remain visible, even with identical text.
+    cb.speak('我在。', owner=owner)
+    assert len(spoken) == 2
+    assert len([e for e in _events(tel) if e.kind == 'speak']) == 2

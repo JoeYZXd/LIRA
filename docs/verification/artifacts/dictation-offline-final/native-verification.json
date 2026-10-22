@@ -1,0 +1,47 @@
+[
+  {
+    "test": "DictationCompletionTest",
+    "output": "Dictation per-lesson partial count, skipped item, interrupted task passed",
+    "exit": 0
+  },
+  {
+    "test": "DictationEngineTest",
+    "output": "DictationEngine timing, drain, history, retry, restart stable epoch, terminal outbox passed",
+    "exit": 0
+  },
+  {
+    "test": "DictationEngineV2Test",
+    "output": "v2 explicit start, drain intervals, replay, failure, pause fence, lease, reboot, durable ACK, safe UI and adaptive pages passed",
+    "exit": 0
+  },
+  {
+    "test": "DictationKeyGateTest",
+    "output": "Remote held key and double confirm do not advance multiple pages",
+    "exit": 0
+  },
+  {
+    "test": "DictationPoliciesTest",
+    "output": "Dictation timer anchors, resume policies, repeats, manual, audio failure, stale controls passed",
+    "exit": 0
+  },
+  {
+    "test": "DictationSpecTest",
+    "output": "DictationSpec: shared fixture and rejection cases passed",
+    "exit": 0
+  },
+  {
+    "test": "TaskAssetStoreTest",
+    "output": "TaskAssetStore: scoped bytes, digest and traversal checks passed",
+    "exit": 0
+  },
+  {
+    "test": "TaskAudioPlayerTest",
+    "output": "TaskAudioPlayer receipt: route, mute, volume, ownership and playback head passed (hardware not simulated)",
+    "exit": 0
+  },
+  {
+    "test": "WordPageLayoutTest",
+    "output": "WordPageLayout whole-word, short and final pages across resolutions passed",
+    "exit": 0
+  }
+]

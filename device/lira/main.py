@@ -435,6 +435,9 @@ class DeviceCallbacks:
         return self._rt.engine.dnd
 
     def speak(self, text: str, *, owner=None, exempt=False):
+        paths = getattr(self._rt, 'conversation_paths', None)
+        if paths is not None and (paths.session is not None or paths.external_test):
+            return None  # Cloud output owns the speaker for this conversation.
         if owner is not None and not self._rt.engine.is_current(owner):
             return None
         # 勿扰谓词门（R8/R9，2026-10-06 计划 U5）：豁免集 = 老人主动问询的直接
@@ -461,7 +464,9 @@ class DeviceCallbacks:
         # 语音交互日志（内存展示区，可含话术片段；logging 行纪律不变）
         preview = text if len(text) <= 40 else text[:40] + "…"
         speak_line = f"语音输出中（{len(text)} 字）：{preview}"
-        VOICE_LOG.log("speak", speak_line)
+        # The owned event below is the telemetry record; keep this legacy ring
+        # entry without mirroring it into the same sink a second time.
+        VOICE_LOG.log("speak", speak_line, mirror=False)
         trace = current_trace.get()
         if trace is not None:
             current_trace.set(trace.bind(turn_id=getattr(self._rt.engine, "_turn_open", None),
@@ -720,6 +725,9 @@ class DeviceRuntime:
         self.asr = audio.asr
         #: 相机/OCR 公开别名（dev 控制台视觉测试用；与管线共享实例，互斥锁防并发）
         self.camera = hal["camera"]
+        from lira.realtime_vision import shared_ocr
+        ocr = shared_ocr(ocr, enabled=os.environ.get(
+            "LIRA_REALTIME_CAPABILITIES", "false").lower() in ("true", "1", "yes", "on"))
         self.ocr = ocr
         self.wake_stream = audio.wake_kws.create_stream()
         self.asr_stream = audio.asr.create_stream()
@@ -823,6 +831,11 @@ class DeviceRuntime:
             text_polisher=make_text_polisher(self._llm),
         )
         self.dispatcher = RouteDispatch(streams=self, wakeword=self.wakeword, spawn=self.spawn)
+        from lira.conversation_paths import ConversationPaths
+        self.conversation_paths = ConversationPaths(self)
+        from lira.dictation_classic import ClassicDictation
+        self.classic_dictation = ClassicDictation(self)
+        llm.dictation_context_provider = self.conversation_paths.dictation.coordinator.model_instructions
         self._gate = PrivacyGatedSink(
             self.dispatcher,
             self.privacy,
@@ -836,6 +849,8 @@ class DeviceRuntime:
             self.privacy.subscribe(self.timing_log.apply_privacy)
         self.privacy.subscribe(self.dispatcher.apply_privacy)
         self.privacy.subscribe(self.engine.apply_privacy)
+        self.privacy.subscribe(self.conversation_paths.apply_privacy)
+        self.privacy.subscribe(self.classic_dictation.apply_privacy)
         self.privacy.subscribe(self.clear_voice_identity)
         # Hardware stop can fail: clear sensitive state and invalidate owners first.
         # Keep failures visible and prevent the announcer from claiming success.
@@ -914,6 +929,9 @@ class DeviceRuntime:
             self.engine._history.clear()
             self.engine._speak_answer('好，以前的聊天记忆已经清掉了。',owner=self.engine._owner,user_text=text,record=False)
             return
+        classic_dictation = getattr(self, 'classic_dictation', None)
+        if classic_dictation is not None and await classic_dictation.handle(text, utterance_id=utterance_id):
+            return
         await self.engine.on_asr_text(text,generation=generation,wake_prefixed=wake_prefixed,utterance_id=utterance_id)
 
     def clear_voice_identity(self, enabled):
@@ -976,6 +994,7 @@ class DeviceRuntime:
             # U8 效率审查：模型就绪是启动期事实（语音栈/OCR 引擎装配即定型），
             # 缓存一次——observe 250ms 轮询下原先每拍 8 次文件系统 stat
             "models": self._models_status,
+            "conversation_path": self.conversation_paths.snapshot(),
         }
 
     def sync_pull(self) -> str:
@@ -998,6 +1017,8 @@ class DeviceRuntime:
         """
         if self._mic_paused:
             return
+        if self.conversation_paths.mode == 'doubao_realtime':
+            await self.conversation_paths.stop()
         self.dispatcher.clear()
         # U2 遥测：暂停期 feed 完全停摆，generation 自动 gap 要到恢复后首块
         # 音频才落（时间戳会错记成恢复时刻），此处显式落暂停的可读边界
@@ -1113,6 +1134,11 @@ class DeviceRuntime:
             try:
                 chunk = await self._read_mic_chunk(source)
             except AudioInputError:
+                guided = getattr(self, 'guided_voice_capture', None)
+                if guided is not None:
+                    guided.interrupt()
+                if self.conversation_paths.mode == 'doubao_realtime':
+                    await self.conversation_paths.stop()
                 self.dispatcher.clear()
                 # U2 遥测：输入中断落可读边界（AE3 真实状态）；恢复后首块音频
                 # 的 generation 自动 gap 与本条原因不同，不算重复标记
@@ -1133,6 +1159,10 @@ class DeviceRuntime:
                 break
             samples = np.frombuffer(chunk, dtype=np.int16)
             samples = samples.astype(np.float32) / 32768.0
+            guided = getattr(self, 'guided_voice_capture', None)
+            if guided is not None:
+                guided.feed(samples)
+                continue
             self._gate.feed(samples)
             self.engine.tick(self._clock())
 
@@ -1269,6 +1299,7 @@ class DeviceRuntime:
                 remote_available=self._llm.is_available,
                 network_ok=self._network_ok,
                 status_provider=self.status,
+                member_deleted=self.conversation_paths.forget_member,
                 dev=self._dev_handle(),
                 chat=chat_service,
             )
@@ -1328,6 +1359,8 @@ class DeviceRuntime:
     async def _shutdown(self, stack) -> None:
         """优雅停机：UI 先退（should_exit -> serve 自然返回）->
         取消引擎在途任务与伴随任务 -> 释放 HAL。幂等。"""
+        await self.classic_dictation.close()
+        await self.conversation_paths.close()
         self.engine.close()
         self.pipeline.playback_pause()
         # REL-002/ADV-05：音量持久化去抖定时器不在任务取消扫描内——停机前

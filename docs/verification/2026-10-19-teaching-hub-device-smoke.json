@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "checks": {
+    "no_plus": true,
+    "textbooks_in_card": true,
+    "editor_in_card": true,
+    "unsaved_retained": true,
+    "printing_not_executable": true,
+    "english_planning_visible": true,
+    "extensions_still_off": true,
+    "mobile_no_horizontal_overflow": true,
+    "no_javascript_errors": true
+  },
+  "javascript_errors": [],
+  "device": "192.168.101.26",
+  "household_data_mutated": false,
+  "screenshot_scope": "subject home only"
+}

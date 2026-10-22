@@ -1,0 +1,10 @@
+{
+  "head": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+  "branch": "feat/home-console-chat",
+  "canonical_index_sha256": "8c9459982c7c376803e52ba000ec482e06b66ef6ef78fb959a10dbaee3725fd0",
+  "plan_markdown_sha256": "5293659489a0b48dbb51d610f652fd5ad4edf9e26430bdc83b5883ec006f8c76",
+  "plan_html_sha256": "97e5bd6cd1bd9be3d1f6403543c311310fa50ea267284f24cac5a245773f6973",
+  "committed": false,
+  "deployed": false,
+  "service_restarted": false
+}

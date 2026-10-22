@@ -1,0 +1,113 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "scope": {
+    "base": "tmp/dictation-vivi-manual/before snapshots",
+    "diff": "tmp/dictation-vivi-manual/review.diff",
+    "branch": "feat/home-console-chat",
+    "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "pr_url": null,
+    "files_changed": 19,
+    "verification_only_context": [
+      "device/tests/test_dictation_dialogue.py"
+    ]
+  },
+  "intent": "Add optional pinned Doubao Vivi cloud TTS (seed-tts-2.0, zh_female_vv_uranus_bigtts, pitch0 speed-20 volume30 and accepted reading instruction), and manual one-play navigation: left previous/clamp, right next/finalcomplete, center replay. Preserve pause/Q&A audio gates, old task compatibility, privacy, and unchanged KIMI scheduling.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security",
+    "testing",
+    "maintainability",
+    "agent-native",
+    "api-contract",
+    "reliability",
+    "adversarial",
+    "julik-frontend-races"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Live Doubao streaming compatibility and actual approved Vivi prosody were not exercised by this read-only review."
+  ],
+  "testing_gaps": [],
+  "coverage": {
+    "reviewers_selected": [
+      "correctness",
+      "security",
+      "testing",
+      "maintainability",
+      "agent-native",
+      "api-contract",
+      "reliability",
+      "adversarial",
+      "julik-frontend-races"
+    ],
+    "reviewers_completed": 9,
+    "failed_reviewers": [],
+    "foreground_batch_capacity": 2,
+    "scope_limits": [
+      "Caller supplied exact before/current snapshot diff; whole-repository git diff was forbidden and never reviewed.",
+      "The git-endpoint scope helper cannot express this bounded snapshot selection without including unrelated dirty work; full risk roster used, no lite shortcut.",
+      "Caller changed source during review to resolve raised issues; independent validation inspected final frozen current source and targeted regression code."
+    ],
+    "standards": "Successful scoped discovery found no applicable criteria files.",
+    "cross_model": {
+      "policy": "auto",
+      "installed_route": "claude",
+      "allowlist": "unset",
+      "job_started": false,
+      "egress": false,
+      "reason": "The fixed peer worker uses git diff base against the local tree and cannot safely represent the caller-exact snapshot scope in this heavily dirty checkout.",
+      "local_adversarial_fallback": "completed"
+    },
+    "mechanics": {
+      "helper_runs": 2,
+      "initial_candidates": 6,
+      "malformed_returns": 0,
+      "malformed_findings": 0,
+      "suppressed_by_confidence": {},
+      "scope_or_preference_rejections": 2,
+      "testing_advisories_resolved": 2
+    },
+    "validator": {
+      "batch_count": 1,
+      "selected": 2,
+      "terminal_verdicts": 2,
+      "retained": 0,
+      "dropped_as_resolved": [
+        {
+          "#": 1,
+          "validated": false,
+          "reason": "Current intent handling recognizes previous-word navigation and next-word child acknowledgment; pending explanation gates block navigation, with targeted regressions."
+        },
+        {
+          "#": 2,
+          "validated": false,
+          "reason": "Current model instructions, task status and dialogue system expose playback from the frozen task; regression keeps it pinned after latest settings change."
+        }
+      ],
+      "infrastructure_failures": [],
+      "cross_model_skips": 0
+    },
+    "fixed_during_review_by_caller": [
+      "Previous/next spoken intent classification and pending explanation navigation gate.",
+      "Frozen playback configuration in live model instructions, task status and dialogue system.",
+      "Mid-stream cloud privacy revocation regression and manual active-playback/stale callback regressions."
+    ],
+    "rejected_claims": [
+      "Making all backend Vivi parameters permanently read-only contradicts the authorized editable/versioned configuration; pinned means each prepared task keeps its revision.",
+      "Spoken next-word interruption during active playback is outside this explicit remote navigation change; voice confirmation remains after playback by caller instruction."
+    ],
+    "verification": "Reviewed source and test assertions without live cloud, model or household-service calls. Caller reports 118+272 Python test sets, 9 browser cases, 10 native entries and subsequent 44 focused tools tests passed; suites overlap and were not rerun by this reviewer. No commits, branch changes, production-code edits or deployment were performed by this review agent.",
+    "live_limits": "Cloud protocol interoperability, actual Vivi prosody and physical remote/speaker behavior require the separate authorized live demonstration; this review does not claim them verified."
+  },
+  "artifact_path": "D:/Projects/LIRA/docs/reviews/ce-code-review/20261021-231401-3f466d37",
+  "run_id": "20261021-231401-3f466d37"
+}

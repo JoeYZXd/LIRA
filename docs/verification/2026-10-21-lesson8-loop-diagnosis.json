@@ -1,0 +1,87 @@
+{
+  "session_id": "dae7f3ec152d49b69e8486da337483bb",
+  "tool_counts": {
+    "tool.check_dictation_tv": 1,
+    "tool.show_dictation_ready": 1,
+    "tool.get_tv_display_status": 1,
+    "tool.present_dictation_item": 12,
+    "tool.list_practice_textbooks": 85,
+    "tool.get_dictation_material": 84
+  },
+  "status_counts": {
+    "ready": 85,
+    "displaying": 1,
+    "displayed": 1,
+    "stale_material": 1,
+    "ok": 85,
+    "queued": 1,
+    "awaiting_user": 10
+  },
+  "selected_events": [
+    {
+      "id": 717,
+      "kind": "tool.check_dictation_tv",
+      "status": "ready"
+    },
+    {
+      "id": 721,
+      "kind": "tool.show_dictation_ready",
+      "status": "displaying"
+    },
+    {
+      "id": 724,
+      "kind": "tool.get_tv_display_status",
+      "status": "displayed"
+    },
+    {
+      "id": 745,
+      "kind": "tool.present_dictation_item",
+      "status": "stale_material"
+    },
+    {
+      "id": 748,
+      "kind": "tool.list_practice_textbooks",
+      "status": "ok"
+    },
+    {
+      "id": 751,
+      "kind": "tool.get_dictation_material",
+      "status": "ready"
+    },
+    {
+      "id": 754,
+      "kind": "tool.present_dictation_item",
+      "status": "queued"
+    },
+    {
+      "id": 757,
+      "kind": "tool.list_practice_textbooks",
+      "status": "ok"
+    },
+    {
+      "id": 760,
+      "kind": "tool.get_dictation_material",
+      "status": "ready"
+    },
+    {
+      "id": 763,
+      "kind": "tool.list_practice_textbooks",
+      "status": "ok"
+    },
+    {
+      "id": 766,
+      "kind": "tool.get_dictation_material",
+      "status": "ready"
+    },
+    {
+      "id": 769,
+      "kind": "tool.list_practice_textbooks",
+      "status": "ok"
+    }
+  ],
+  "source": "authenticated live voice-history read; content-minimized diagnostics",
+  "production_session_stopped_to_end_loop": true,
+  "cause_of_repeated_queries": "not yet established",
+  "production_code_modified_for_loop": false,
+  "missing_reproduction_input": "user utterance immediately before repeated queries"
+}

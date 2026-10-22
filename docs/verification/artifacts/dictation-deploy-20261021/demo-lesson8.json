@@ -1,0 +1,21 @@
+{
+  "task_id": "d0d54e86d14f4e49a6d68a94ae275dea",
+  "lesson": "第4单元第8课 黄山奇石",
+  "model": "kimi-k3",
+  "tasks_created": 1,
+  "final_state": "cancelled",
+  "completed": false,
+  "last_sequence": 36,
+  "recognition_pages_confirmed": 2,
+  "dictation_item": "d0",
+  "actual_repeats": 3,
+  "replays": 1,
+  "cancellation_command_id": null,
+  "cancellation_origin": "TV local event; exact human/remote source not established",
+  "review_status": "unreviewed",
+  "note": "Assistant-operated demonstration; no child answer or mastery evidence",
+  "device_evidence": "/home/orangepi/lira/deploy-backups/dictation-v2-20261021-183313/demo-lesson8",
+  "initial_failure": "KIMI preparation timeout; no task created in that request",
+  "temporary_timeout_seconds": 180,
+  "timeout_override": "removed after demonstration"
+}

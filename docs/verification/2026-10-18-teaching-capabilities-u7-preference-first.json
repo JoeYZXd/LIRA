@@ -1,0 +1,194 @@
+{
+  "model": "kimi-k3",
+  "rows": [
+    {
+      "repeat": 1,
+      "case": "explicit",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "natural",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "once",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "negation",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "third_person",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 1,
+      "case": "mastery",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "explicit",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "natural",
+      "expected": true,
+      "actual": false,
+      "passed": false
+    },
+    {
+      "repeat": 2,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "once",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "negation",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "third_person",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 2,
+      "case": "mastery",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "explicit",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "natural",
+      "expected": true,
+      "actual": true,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "once",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "negation",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "third_person",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    },
+    {
+      "repeat": 3,
+      "case": "mastery",
+      "expected": false,
+      "actual": false,
+      "passed": true
+    }
+  ]
+}

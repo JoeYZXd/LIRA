@@ -1,0 +1,931 @@
+{
+  "test": "unit7 literal request real cloud split audio continuation audit",
+  "started_utc": "2026-10-20T14:28:31Z",
+  "model": "1.2.6.1",
+  "service_before": {
+    "MainPID": "100735",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "capabilities_flag": "false",
+  "tool_names": [
+    "get_device_status",
+    "end_conversation",
+    "list_infrared_devices",
+    "prepare_infrared_learning",
+    "start_infrared_learning",
+    "get_infrared_learning_status",
+    "cancel_infrared_learning",
+    "control_infrared_device",
+    "start_voice_enrollment",
+    "set_voice_enrollment_details",
+    "start_voice_sample",
+    "check_voice_sample",
+    "get_voice_enrollment_status",
+    "save_voice_enrollment",
+    "cancel_voice_enrollment",
+    "reset_voice_samples",
+    "identify_current_speaker",
+    "get_speaker_continuity_context",
+    "report_speaker_continuity",
+    "request_identity_confirmation",
+    "submit_identity_feedback",
+    "get_recent_device_conversation",
+    "get_personal_memory",
+    "prepare_tv_display",
+    "list_practice_textbooks",
+    "prepare_pinyin_practice",
+    "list_tv_images",
+    "confirm_tv_display",
+    "cancel_tv_display",
+    "get_tv_display_status",
+    "check_dictation_tv",
+    "show_dictation_ready",
+    "get_dictation_material",
+    "present_dictation_item",
+    "cancel_dictation",
+    "get_dictation_status",
+    "get_dictation_book_choice",
+    "confirm_dictation_book_choice"
+  ],
+  "catalog": {
+    "status": "ok",
+    "books": [
+      {
+        "book_id": "4e28c92b626b4f29ae3affe194525579",
+        "title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+        "subject": "chinese",
+        "source": "review_draft",
+        "imported_at": 1792425490.5359643,
+        "lessons": [
+          {
+            "number": 1,
+            "unit": 1,
+            "title": "小蝌蚪找妈妈",
+            "reviewed": true
+          },
+          {
+            "number": 2,
+            "unit": 1,
+            "title": "我是什么",
+            "reviewed": true
+          },
+          {
+            "number": 3,
+            "unit": 1,
+            "title": "植物妈妈有办法",
+            "reviewed": false
+          },
+          {
+            "number": 1,
+            "unit": 2,
+            "title": "场景歌",
+            "reviewed": false
+          },
+          {
+            "number": 2,
+            "unit": 2,
+            "title": "树之歌",
+            "reviewed": false
+          },
+          {
+            "number": 3,
+            "unit": 2,
+            "title": "拍手歌",
+            "reviewed": false
+          },
+          {
+            "number": 4,
+            "unit": 2,
+            "title": "田家四季歌",
+            "reviewed": false
+          },
+          {
+            "number": 4,
+            "unit": 3,
+            "title": "彩虹",
+            "reviewed": false
+          },
+          {
+            "number": 5,
+            "unit": 3,
+            "title": "去外婆家",
+            "reviewed": false
+          },
+          {
+            "number": 6,
+            "unit": 3,
+            "title": "数星星的孩子",
+            "reviewed": false
+          },
+          {
+            "number": 7,
+            "unit": 4,
+            "title": "古诗二首",
+            "reviewed": true
+          },
+          {
+            "number": 8,
+            "unit": 4,
+            "title": "黄山奇石",
+            "reviewed": true
+          },
+          {
+            "number": 9,
+            "unit": 4,
+            "title": "日月潭",
+            "reviewed": false
+          },
+          {
+            "number": 10,
+            "unit": 4,
+            "title": "葡萄沟",
+            "reviewed": false
+          },
+          {
+            "number": 11,
+            "unit": 5,
+            "title": "坐井观天",
+            "reviewed": false
+          },
+          {
+            "number": 12,
+            "unit": 5,
+            "title": "寒号鸟",
+            "reviewed": false
+          },
+          {
+            "number": 13,
+            "unit": 5,
+            "title": "我要的是葫芦",
+            "reviewed": false
+          },
+          {
+            "number": 14,
+            "unit": 6,
+            "title": "八角楼上",
+            "reviewed": false
+          },
+          {
+            "number": 15,
+            "unit": 6,
+            "title": "朱德的扁担",
+            "reviewed": false
+          },
+          {
+            "number": 16,
+            "unit": 6,
+            "title": "难忘的泼水节",
+            "reviewed": false
+          },
+          {
+            "number": 17,
+            "unit": 6,
+            "title": "刘胡兰",
+            "reviewed": false
+          },
+          {
+            "number": 18,
+            "unit": 7,
+            "title": "古诗二首",
+            "reviewed": false
+          },
+          {
+            "number": 19,
+            "unit": 7,
+            "title": "雾在哪里",
+            "reviewed": false
+          },
+          {
+            "number": 20,
+            "unit": 7,
+            "title": "雪孩子",
+            "reviewed": false
+          },
+          {
+            "number": 21,
+            "unit": 8,
+            "title": "称赞",
+            "reviewed": false
+          },
+          {
+            "number": 22,
+            "unit": 8,
+            "title": "纸船和风筝",
+            "reviewed": false
+          },
+          {
+            "number": 23,
+            "unit": 8,
+            "title": "快乐的小河",
+            "reviewed": false
+          }
+        ]
+      }
+    ],
+    "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+  },
+  "turns": [
+    {
+      "index": 1,
+      "input": "默写第7单元。",
+      "participant_reason": "literal requested utterance, no lesson substitution",
+      "at": 9.377,
+      "events": [
+        {
+          "at": 10.164,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 11.766,
+          "kind": "user_text",
+          "text": "我写第 7 单元。"
+        },
+        {
+          "at": 13.023,
+          "kind": "assistant_text",
+          "text": "电视已经打开了吗？"
+        },
+        {
+          "at": 13.35,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 15.645,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 12.147,
+          "returned_at": 12.281,
+          "name": "check_dictation_tv",
+          "arguments": {},
+          "result": {
+            "status": "needs_input",
+            "receiver": {
+              "version": "0.3",
+              "capabilities": [
+                "clear_content_id",
+                "pcm_audio_v1"
+              ],
+              "interactive": true,
+              "foreground": true,
+              "rendered_id": "",
+              "instance": "5d4c880d-17ef-49df-94d4-b1c736bebbea",
+              "audio": {
+                "status": "completed",
+                "music_volume": 4,
+                "music_muted": false,
+                "id": "37ff510d495e4ff58cc7a8d1b9d0a355",
+                "written_frames": 72208,
+                "played_frames": 72208,
+                "audio_session_id": 31,
+                "routed_device_type": 2,
+                "received_bytes": 144416,
+                "next_sequence": 156,
+                "error": ""
+              },
+              "status": "ok",
+              "clear_supported": true
+            },
+            "requested_lesson": null,
+            "question": "电视已经打开了吗？",
+            "instructions": "等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "at": 15.645,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "idle"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "input": "电视已打开。",
+      "participant_reason": "simulated acknowledgement backed by live receiver interactive and foreground status",
+      "at": 16.538,
+      "events": [
+        {
+          "at": 17.471,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 18.618,
+          "kind": "user_text",
+          "text": "电视已打开。"
+        },
+        {
+          "at": 23.63,
+          "kind": "assistant_text",
+          "text": "第七单元对应第18到21课，目前只有第7、8课核对完成，第七单元的课还没核对好，暂时没法直接默写哦。"
+        },
+        {
+          "at": 24.757,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 33.853,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 18.954,
+          "returned_at": 18.958,
+          "name": "list_practice_textbooks",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "books": [
+              {
+                "book_id": "4e28c92b626b4f29ae3affe194525579",
+                "title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+                "subject": "chinese",
+                "source": "review_draft",
+                "imported_at": 1792425490.5359643,
+                "lessons": [
+                  {
+                    "number": 1,
+                    "unit": 1,
+                    "title": "小蝌蚪找妈妈",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 2,
+                    "unit": 1,
+                    "title": "我是什么",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 3,
+                    "unit": 1,
+                    "title": "植物妈妈有办法",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 1,
+                    "unit": 2,
+                    "title": "场景歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 2,
+                    "unit": 2,
+                    "title": "树之歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 3,
+                    "unit": 2,
+                    "title": "拍手歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 4,
+                    "unit": 2,
+                    "title": "田家四季歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 4,
+                    "unit": 3,
+                    "title": "彩虹",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 5,
+                    "unit": 3,
+                    "title": "去外婆家",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 6,
+                    "unit": 3,
+                    "title": "数星星的孩子",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 7,
+                    "unit": 4,
+                    "title": "古诗二首",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 8,
+                    "unit": 4,
+                    "title": "黄山奇石",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 9,
+                    "unit": 4,
+                    "title": "日月潭",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 10,
+                    "unit": 4,
+                    "title": "葡萄沟",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 11,
+                    "unit": 5,
+                    "title": "坐井观天",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 12,
+                    "unit": 5,
+                    "title": "寒号鸟",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 13,
+                    "unit": 5,
+                    "title": "我要的是葫芦",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 14,
+                    "unit": 6,
+                    "title": "八角楼上",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 15,
+                    "unit": 6,
+                    "title": "朱德的扁担",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 16,
+                    "unit": 6,
+                    "title": "难忘的泼水节",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 17,
+                    "unit": 6,
+                    "title": "刘胡兰",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 18,
+                    "unit": 7,
+                    "title": "古诗二首",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 19,
+                    "unit": 7,
+                    "title": "雾在哪里",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 20,
+                    "unit": 7,
+                    "title": "雪孩子",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 21,
+                    "unit": 8,
+                    "title": "称赞",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 22,
+                    "unit": 8,
+                    "title": "纸船和风筝",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 23,
+                    "unit": 8,
+                    "title": "快乐的小河",
+                    "reviewed": false
+                  }
+                ]
+              }
+            ],
+            "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+          }
+        },
+        {
+          "at": 19.982,
+          "returned_at": 19.982,
+          "name": "show_dictation_ready",
+          "arguments": {
+            "lesson": 18
+          },
+          "result": {
+            "status": "displaying",
+            "lesson": 18,
+            "question": "电视上是否已经显示准备开始默写第18课的画面？",
+            "instructions": "查询get_tv_display_status核实发送结果，并等待用户确认画面。失败不能称已显示。"
+          }
+        },
+        {
+          "at": 20.771,
+          "returned_at": 20.771,
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displayed",
+            "content_id": "630852edb4e04cef95dce108b300285e"
+          }
+        },
+        {
+          "at": 21.638,
+          "returned_at": 21.64,
+          "name": "list_practice_textbooks",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "books": [
+              {
+                "book_id": "4e28c92b626b4f29ae3affe194525579",
+                "title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+                "subject": "chinese",
+                "source": "review_draft",
+                "imported_at": 1792425490.5359643,
+                "lessons": [
+                  {
+                    "number": 1,
+                    "unit": 1,
+                    "title": "小蝌蚪找妈妈",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 2,
+                    "unit": 1,
+                    "title": "我是什么",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 3,
+                    "unit": 1,
+                    "title": "植物妈妈有办法",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 1,
+                    "unit": 2,
+                    "title": "场景歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 2,
+                    "unit": 2,
+                    "title": "树之歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 3,
+                    "unit": 2,
+                    "title": "拍手歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 4,
+                    "unit": 2,
+                    "title": "田家四季歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 4,
+                    "unit": 3,
+                    "title": "彩虹",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 5,
+                    "unit": 3,
+                    "title": "去外婆家",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 6,
+                    "unit": 3,
+                    "title": "数星星的孩子",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 7,
+                    "unit": 4,
+                    "title": "古诗二首",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 8,
+                    "unit": 4,
+                    "title": "黄山奇石",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 9,
+                    "unit": 4,
+                    "title": "日月潭",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 10,
+                    "unit": 4,
+                    "title": "葡萄沟",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 11,
+                    "unit": 5,
+                    "title": "坐井观天",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 12,
+                    "unit": 5,
+                    "title": "寒号鸟",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 13,
+                    "unit": 5,
+                    "title": "我要的是葫芦",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 14,
+                    "unit": 6,
+                    "title": "八角楼上",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 15,
+                    "unit": 6,
+                    "title": "朱德的扁担",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 16,
+                    "unit": 6,
+                    "title": "难忘的泼水节",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 17,
+                    "unit": 6,
+                    "title": "刘胡兰",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 18,
+                    "unit": 7,
+                    "title": "古诗二首",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 19,
+                    "unit": 7,
+                    "title": "雾在哪里",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 20,
+                    "unit": 7,
+                    "title": "雪孩子",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 21,
+                    "unit": 8,
+                    "title": "称赞",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 22,
+                    "unit": 8,
+                    "title": "纸船和风筝",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 23,
+                    "unit": 8,
+                    "title": "快乐的小河",
+                    "reviewed": false
+                  }
+                ]
+              }
+            ],
+            "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "at": 33.855,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "displayed",
+          "content_id": "630852edb4e04cef95dce108b300285e"
+        }
+      }
+    }
+  ],
+  "quiet_windows": [],
+  "limits": [
+    "synthetic TTS user input through actual cloud ASR",
+    "normal real cloud PCM to LIRA speaker; explicit dictation PCM to paired television",
+    "TV-on reply is simulated and backed by receiver status; no fabricated household content choices",
+    "real deployed TV/material handlers; no live household identity/memory or IR loaded",
+    "observer reads and quiet windows are not model function calls",
+    "no service restart/config change/classic-chain change"
+  ],
+  "source_code_hashes": {
+    "lira/dictation.py": "99bb968370346cd0d398becaa4cc5221c64717c004da14698daa57b65593670b",
+    "lira/tv_voice.py": "8bc2cc21ec2a178fba7044dcf359c0c7141be80146b73908a1bc090a7d1b5b59",
+    "lira/textbook_practice.py": "e599b20ffd86e75343d107e0a9a1ffe44c0742442da7eec549c2588fac2a1026",
+    "lira/audio/doubao_realtime.py": "68ba3f468aa6ddf7346da340f438a214b4c4ff0f63e7d79bd49fdbfc0356279b",
+    "lira/conversation_paths.py": "d724d9ed9952cd78391ff2b30c2d4ed958b59a598d8a8821ed01e41a6466e48e",
+    "lira/tv_audio.py": "7043e0f30a189b05e5acd4ce766df73a8e9ea186bda0b1eb5745e8db06680f82"
+  },
+  "lesson7": [
+    {
+      "book_id": "4e28c92b626b4f29ae3affe194525579",
+      "source": "review_draft",
+      "lessons": [
+        {
+          "unit": 4,
+          "number": 7,
+          "title": "古诗二首",
+          "reviewed": true,
+          "four_count": 10,
+          "two_count": 13
+        }
+      ]
+    }
+  ],
+  "tv_payloads": [
+    {
+      "at": 19.983,
+      "payload": {
+        "type": "text",
+        "text": "准备开始默写第18课",
+        "id": "630852edb4e04cef95dce108b300285e",
+        "approved": true
+      },
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "5d4c880d-17ef-49df-94d4-b1c736bebbea",
+        "rendered_id": "630852edb4e04cef95dce108b300285e",
+        "version": "0.3",
+        "audio": {
+          "status": "completed",
+          "music_volume": 4,
+          "music_muted": false,
+          "id": "37ff510d495e4ff58cc7a8d1b9d0a355",
+          "written_frames": 72208,
+          "played_frames": 72208,
+          "audio_session_id": 31,
+          "routed_device_type": 2,
+          "received_bytes": 144416,
+          "next_sequence": 156,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    }
+  ],
+  "wire_tool_results": [
+    {
+      "at": 12.282,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "f736b964-6bf1-47be-ade2-106e9be9b051",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"needs_input\", \"receiver\": {\"version\": \"0.3\", \"capabilities\": [\"clear_content_id\", \"pcm_audio_v1\"], \"interactive\": true, \"foreground\": true, \"rendered_id\": \"\", \"instance\": \"5d4c880d-17ef-49df-94d4-b1c736bebbea\", \"audio\": {\"status\": \"completed\", \"music_volume\": 4, \"music_muted\": false, \"id\": \"37ff510d495e4ff58cc7a8d1b9d0a355\", \"written_frames\": 72208, \"played_frames\": 72208, \"audio_session_id\": 31, \"routed_device_type\": 2, \"received_bytes\": 144416, \"next_sequence\": 156, \"error\": \"\"}, \"status\": \"ok\", \"clear_supported\": true}, \"requested_lesson\": null, \"question\": \"电视已经打开了吗？\", \"instructions\": \"等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 18.96,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "3b559294-79d2-4be7-a9cb-2e4639a61c0e",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"ok\", \"books\": [{\"book_id\": \"4e28c92b626b4f29ae3affe194525579\", \"title\": \"人教版语文二年级上册（官方当前电子版，字表待补全）\", \"subject\": \"chinese\", \"source\": \"review_draft\", \"imported_at\": 1792425490.5359643, \"lessons\": [{\"number\": 1, \"unit\": 1, \"title\": \"小蝌蚪找妈妈\", \"reviewed\": true}, {\"number\": 2, \"unit\": 1, \"title\": \"我是什么\", \"reviewed\": true}, {\"number\": 3, \"unit\": 1, \"title\": \"植物妈妈有办法\", \"reviewed\": false}, {\"number\": 1, \"unit\": 2, \"title\": \"场景歌\", \"reviewed\": false}, {\"number\": 2, \"unit\": 2, \"title\": \"树之歌\", \"reviewed\": false}, {\"number\": 3, \"unit\": 2, \"title\": \"拍手歌\", \"reviewed\": false}, {\"number\": 4, \"unit\": 2, \"title\": \"田家四季歌\", \"reviewed\": false}, {\"number\": 4, \"unit\": 3, \"title\": \"彩虹\", \"reviewed\": false}, {\"number\": 5, \"unit\": 3, \"title\": \"去外婆家\", \"reviewed\": false}, {\"number\": 6, \"unit\": 3, \"title\": \"数星星的孩子\", \"reviewed\": false}, {\"number\": 7, \"unit\": 4, \"title\": \"古诗二首\", \"reviewed\": true}, {\"number\": 8, \"unit\": 4, \"title\": \"黄山奇石\", \"reviewed\": true}, {\"number\": 9, \"unit\": 4, \"title\": \"日月潭\", \"reviewed\": false}, {\"number\": 10, \"unit\": 4, \"title\": \"葡萄沟\", \"reviewed\": false}, {\"number\": 11, \"unit\": 5, \"title\": \"坐井观天\", \"reviewed\": false}, {\"number\": 12, \"unit\": 5, \"title\": \"寒号鸟\", \"reviewed\": false}, {\"number\": 13, \"unit\": 5, \"title\": \"我要的是葫芦\", \"reviewed\": false}, {\"number\": 14, \"unit\": 6, \"title\": \"八角楼上\", \"reviewed\": false}, {\"number\": 15, \"unit\": 6, \"title\": \"朱德的扁担\", \"reviewed\": false}, {\"number\": 16, \"unit\": 6, \"title\": \"难忘的泼水节\", \"reviewed\": false}, {\"number\": 17, \"unit\": 6, \"title\": \"刘胡兰\", \"reviewed\": false}, {\"number\": 18, \"unit\": 7, \"title\": \"古诗二首\", \"reviewed\": false}, {\"number\": 19, \"unit\": 7, \"title\": \"雾在哪里\", \"reviewed\": false}, {\"number\": 20, \"unit\": 7, \"title\": \"雪孩子\", \"reviewed\": false}, {\"number\": 21, \"unit\": 8, \"title\": \"称赞\", \"reviewed\": false}, {\"number\": 22, \"unit\": 8, \"title\": \"纸船和风筝\", \"reviewed\": false}, {\"number\": 23, \"unit\": 8, \"title\": \"快乐的小河\", \"reviewed\": false}]}], \"instructions\": \"只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 20.036,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "a1bc92c7-d89e-4751-bfc4-bf6ef35728ae",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displaying\", \"lesson\": 18, \"question\": \"电视上是否已经显示准备开始默写第18课的画面？\", \"instructions\": \"查询get_tv_display_status核实发送结果，并等待用户确认画面。失败不能称已显示。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 20.772,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "df4c5db7-5d54-4b2c-9cfd-9e007a0047bc",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displayed\", \"content_id\": \"630852edb4e04cef95dce108b300285e\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 21.64,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "dd36ae2d-8ad1-45e8-8066-7f543e5bf3b7",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"ok\", \"books\": [{\"book_id\": \"4e28c92b626b4f29ae3affe194525579\", \"title\": \"人教版语文二年级上册（官方当前电子版，字表待补全）\", \"subject\": \"chinese\", \"source\": \"review_draft\", \"imported_at\": 1792425490.5359643, \"lessons\": [{\"number\": 1, \"unit\": 1, \"title\": \"小蝌蚪找妈妈\", \"reviewed\": true}, {\"number\": 2, \"unit\": 1, \"title\": \"我是什么\", \"reviewed\": true}, {\"number\": 3, \"unit\": 1, \"title\": \"植物妈妈有办法\", \"reviewed\": false}, {\"number\": 1, \"unit\": 2, \"title\": \"场景歌\", \"reviewed\": false}, {\"number\": 2, \"unit\": 2, \"title\": \"树之歌\", \"reviewed\": false}, {\"number\": 3, \"unit\": 2, \"title\": \"拍手歌\", \"reviewed\": false}, {\"number\": 4, \"unit\": 2, \"title\": \"田家四季歌\", \"reviewed\": false}, {\"number\": 4, \"unit\": 3, \"title\": \"彩虹\", \"reviewed\": false}, {\"number\": 5, \"unit\": 3, \"title\": \"去外婆家\", \"reviewed\": false}, {\"number\": 6, \"unit\": 3, \"title\": \"数星星的孩子\", \"reviewed\": false}, {\"number\": 7, \"unit\": 4, \"title\": \"古诗二首\", \"reviewed\": true}, {\"number\": 8, \"unit\": 4, \"title\": \"黄山奇石\", \"reviewed\": true}, {\"number\": 9, \"unit\": 4, \"title\": \"日月潭\", \"reviewed\": false}, {\"number\": 10, \"unit\": 4, \"title\": \"葡萄沟\", \"reviewed\": false}, {\"number\": 11, \"unit\": 5, \"title\": \"坐井观天\", \"reviewed\": false}, {\"number\": 12, \"unit\": 5, \"title\": \"寒号鸟\", \"reviewed\": false}, {\"number\": 13, \"unit\": 5, \"title\": \"我要的是葫芦\", \"reviewed\": false}, {\"number\": 14, \"unit\": 6, \"title\": \"八角楼上\", \"reviewed\": false}, {\"number\": 15, \"unit\": 6, \"title\": \"朱德的扁担\", \"reviewed\": false}, {\"number\": 16, \"unit\": 6, \"title\": \"难忘的泼水节\", \"reviewed\": false}, {\"number\": 17, \"unit\": 6, \"title\": \"刘胡兰\", \"reviewed\": false}, {\"number\": 18, \"unit\": 7, \"title\": \"古诗二首\", \"reviewed\": false}, {\"number\": 19, \"unit\": 7, \"title\": \"雾在哪里\", \"reviewed\": false}, {\"number\": 20, \"unit\": 7, \"title\": \"雪孩子\", \"reviewed\": false}, {\"number\": 21, \"unit\": 8, \"title\": \"称赞\", \"reviewed\": false}, {\"number\": 22, \"unit\": 8, \"title\": \"纸船和风筝\", \"reviewed\": false}, {\"number\": 23, \"unit\": 8, \"title\": \"快乐的小河\", \"reviewed\": false}]}], \"instructions\": \"只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。\"}"
+          }
+        ]
+      }
+    }
+  ],
+  "wire_speech_requests": [],
+  "continuation_receiver": {
+    "version": "0.3",
+    "capabilities": [
+      "clear_content_id",
+      "pcm_audio_v1"
+    ],
+    "interactive": true,
+    "foreground": true,
+    "rendered_id": "",
+    "instance": "5d4c880d-17ef-49df-94d4-b1c736bebbea",
+    "audio": {
+      "status": "completed",
+      "music_volume": 4,
+      "music_muted": false,
+      "id": "37ff510d495e4ff58cc7a8d1b9d0a355",
+      "written_frames": 72208,
+      "played_frames": 72208,
+      "audio_session_id": 31,
+      "routed_device_type": 2,
+      "received_bytes": 144416,
+      "next_sequence": 156,
+      "error": ""
+    }
+  },
+  "stopped_reason": "Lesson-only dictation tool invoked for unit request; do not confirm wrong lesson or start content.",
+  "service_after": {
+    "MainPID": "100735",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "service_unchanged": true,
+  "textbook_files_unchanged": true,
+  "tv_audio_frames": 0,
+  "local_audio_frames": 302100,
+  "audio_receipts": [],
+  "ended_at": 33.962
+}

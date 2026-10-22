@@ -1,0 +1,646 @@
+{
+  "status": "complete",
+  "verdict": "Not ready",
+  "scope": {
+    "base": "075cadf0c91e25a3e8b2b10d06d15ee1d1ab5225",
+    "branch": "codex/dictation-review",
+    "head_sha": "075cadf0c91e25a3e8b2b10d06d15ee1d1ab5225",
+    "pr_url": null,
+    "files_changed": 77
+  },
+  "intent": "Implement editable versioned Chinese dictation skill, structured child facts, model-led preparation, immutable v2 PCM tasks, explicit child advancement, actual pause and answer-drain resume, and parent photo review. Preserve child/session identity, version references and factual result boundaries.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security",
+    "testing",
+    "maintainability",
+    "agent-native",
+    "performance",
+    "api-contract",
+    "reliability",
+    "adversarial",
+    "julik-frontend-races"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/dictation_service.py",
+      "first_evidence": "device/lira/dictation_service.py:109 --             context=self.get_context(args,owner_id=owner_id,session_id=session_id) if 'scope_type' in args else session.get('context')",
+      "independent_reviewers": [],
+      "line": 109,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "orchestrator"
+      ],
+      "severity": "P1",
+      "suggested_fix": "At the model-facing handle_tool boundary, require a prior successful get_dictation_context for the current session and matching requested scope before accepting prepare_dictation_task; preserve trusted backend prepare_task API behavior.",
+      "title": "Require model-visible context before preparing a task",
+      "why_it_matters": "A model can call prepare_dictation_task as its first tool and receive ready without having seen the actual child facts or textbook context. The service internally reads context after the model has already selected its words, so that read cannot ground the selection. A clean in-memory fixture reproduced ready with zero get_dictation_context tool calls.",
+      "evidence": [
+        "device/lira/dictation_service.py:109 --             context=self.get_context(args,owner_id=owner_id,session_id=session_id) if 'scope_type' in args else session.get('context')",
+        "Offline reproduction: actual parent session registration -> sole handle_tool prepare_dictation_task(scope,proposals) -> ready and task_created True; prior get_context tool calls 0."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/dictation_tools.py",
+      "first_evidence": "device/lira/dictation_tools.py:56 --   return bool(s['state']=='paused' and now and old[:3]==now[:3] and old[4:]==now[4:] and",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 56,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P1",
+      "suggested_fix": "After identity and privacy checks, release terminal-task speech gating and clear stale question, pause-command and answer state; test question -> pause -> cancel -> ordinary conversation.",
+      "title": "Release the speech gate after task cancellation",
+      "why_it_matters": "After a child asks a question and then cancels dictation, ordinary conversation remains silent for the rest of that binding. The cancellation path retains question, subsequent user turns return immediately for cancelled tasks, and allow_output still requires paused state. Both realtime speech output paths consult this gate. Clear the task-specific explanation state or bypass that gate once the bound task is terminal, while retaining privacy and identity checks.",
+      "evidence": [
+        "device/lira/dictation_tools.py:56 --   return bool(s['state']=='paused' and now and old[:3]==now[:3] and old[4:]==now[4:] and",
+        "device/lira/dictation_tools.py:41 --   if not s or s['state'] in ('completed','cancelled','ready'):return",
+        "device/lira/audio/doubao_realtime.py:450 --         if self.closed or (coordinator and not coordinator.allow_output()):",
+        "Read-only Python trace with actual DictationCoordinator and a minimal repository stub: observe question while playing; set state cancelled; observe ordinary next turn → {'question_retained': True, 'allow_output': False}."
+      ]
+    },
+    {
+      "#": 4,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/ui/static/dictation.js",
+      "first_evidence": "device/lira/ui/static/dictation.js:16 -- async function tasks(){const data=await api('/member/'+member());profile=data.profile;const p=profile?.progress||{};if(!dirty.has('profile-form')){$('book').value=profile?.book_id||'';$('unit').value=p.unit||'';$('lesson').value=p.lesson||'';}$('tasks').replaceChildren();for(const t of data.tasks){const b=document.createElement('button');b.textContent=t.task_id+' · '+t.state;b.addEventListener('click',()=>{if(leave())run(()=>load(t.task_id));});$('tasks').append(b);}}",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 16,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "After the user accepts a task switch, clear review-form from dirty before load(t.task_id), so load renders B's review. Verify editing A, switching to B, and checking B's controls.",
+      "title": "Switching tasks retains the previous task's review form",
+      "why_it_matters": "After a parent edits review A and accepts the discard prompt to open task B, review A's controls remain visible. Saving sends A's values with B's task ID and revision; the server may reject mismatched item IDs or store a stale note and matching item selections against B.",
+      "evidence": [
+        "device/lira/ui/static/dictation.js:16 -- async function tasks(){const data=await api('/member/'+member());profile=data.profile;const p=profile?.progress||{};if(!dirty.has('profile-form')){$('book').value=profile?.book_id||'';$('unit').value=p.unit||'';$('lesson').value=p.lesson||'';}$('tasks').replaceChildren();for(const t of data.tasks){const b=document.createElement('button');b.textContent=t.task_id+' · '+t.state;b.addEventListener('click',()=>{if(leave())run(()=>load(t.task_id));});$('tasks').append(b);}}",
+        "device/lira/ui/static/dictation.js:7: leave() confirms discarding edits but leaves dirty set unchanged.",
+        "device/lira/ui/static/dictation.js:30: load() rebuilds review controls only when review-form is not dirty.",
+        "device/lira/ui/static/dictation.js:24: Submit reads old DOM controls but sends new global tid and detail.review.revision."
+      ]
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/audio/doubao_realtime.py",
+      "first_evidence": "device/lira/audio/doubao_realtime.py:270 --         instructions += '\\n'+INSTRUCTIONS",
+      "independent_reviewers": [
+        "agent-native"
+      ],
+      "line": 270,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "agent-native"
+      ],
+      "severity": "P2",
+      "suggested_fix": "When a task is bound or adopted, expose its stored skill_revision content to the live voice model, preferably in a refreshed session instruction or in get_dictation_task_status plus an explicit instruction to read that tool before child dialogue. Read the revision recorded on the task rather than the latest skill. Verify parent-prepared task adoption after a subsequent skill edit.",
+      "title": "Live voice lacks the active task's pinned skill",
+      "why_it_matters": "A task prepared through the parent page can be adopted by the child's live voice session, but that model receives only the fixed dictation instructions. It cannot see the business skill revision frozen into the task, so edited teaching guidance can be ignored during child questions and task control. The separate dialogue harness does load that revision, making its behavior different from production voice.",
+      "evidence": [
+        "device/lira/audio/doubao_realtime.py:270 --         instructions += '\\n'+INSTRUCTIONS",
+        "device/lira/dictation_tools.py:193:    state['current_item']=next((dict(i,phase_type=p['type']) for p in task['phases'] for i in p['items'] if i['item_id']==state['actual'].get('item_id')),None)",
+        "device/lira/dictation_tools.py:287:   skill=tools.service.skills.get(task['skill_revision'] if task else None)['content']"
+      ]
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/ui/static/dictation.js",
+      "first_evidence": "device/lira/ui/static/dictation.js:21 -- if(id==='config'){state.config=(await post('config',{expected_revision:state.config.revision,parameters:{phases:$('phase-order').value.split(','),playback:{repeat_count:Number($('repeat').value),interval_ms:Number($('interval').value),speech_rate:Number($('rate').value)}}})).config;renderConfig();}",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 21,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Capture a per-form edit generation at submit and clear dirty only if unchanged after success; skip renderConfig if a newer local edit exists. Alternatively disable the submitting form's controls during its request. Verify using a delayed response and an intervening edit.",
+      "title": "Edits made during a save are silently discarded",
+      "why_it_matters": "Flow configuration fields stay editable while POST is pending. A value changed during that wait is absent from the already sent request; the response calls renderConfig() to overwrite it, then marks the form clean. An edit during skill or review save can likewise be marked clean despite remaining unsaved.",
+      "evidence": [
+        "device/lira/ui/static/dictation.js:21 -- if(id==='config'){state.config=(await post('config',{expected_revision:state.config.revision,parameters:{phases:$('phase-order').value.split(','),playback:{repeat_count:Number($('repeat').value),interval_ms:Number($('interval').value),speech_rate:Number($('rate').value)}}})).config;renderConfig();}",
+        "device/lira/ui/static/dictation.js:11: run() disables buttons only; inputs stay editable.",
+        "device/lira/ui/static/dictation.js:25: dirty.delete(id+'-form') runs after the response regardless of later input events.",
+        "device/lira/ui/static/dictation.js:14: renderConfig() assigns every config field from the server response."
+      ]
+    },
+    {
+      "#": 7,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/ui/static/dictation.js",
+      "first_evidence": "device/lira/ui/static/dictation.js:29 -- async function load(id){detail=await api('/member/'+member()+'/task/'+id);tid=id;$('task-detail').hidden=false;const t=detail.task;$('task-summary').textContent='任务 '+id+' · '+detail.state.state+' · 当前项 '+(detail.state.actual?.item_id||'尚未开始');$('task-json').textContent=json({task:t,provenance:detail.provenance});$('event-log').textContent=json(detail.events);$('review-status').textContent='照片 '+detail.photos.length+' 张；核对状态：'+detail.review.status+'。照片上传与家长核对分别记录。';",
+      "independent_reviewers": [
+        "api-contract"
+      ],
+      "line": 29,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "api-contract"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Read detail.state.item_id in the task summary, matching DictationRepository.status; alternatively add a documented nested actual field to the response and update consumers consistently.",
+      "title": "Expose the current item in the management status shape",
+      "why_it_matters": "The parent task detail always displays the fallback 尚未开始 after the TV has sent receipts, because it reads state.actual.item_id while repository.status flattens item_id directly into state. This hides the current item from the management consumer throughout execution.",
+      "evidence": [
+        "device/lira/ui/static/dictation.js:29 -- async function load(id){detail=await api('/member/'+member()+'/task/'+id);tid=id;$('task-detail').hidden=false;const t=detail.task;$('task-summary').textContent='任务 '+id+' · '+detail.state.state+' · 当前项 '+(detail.state.actual?.item_id||'尚未开始');$('task-json').textContent=json({task:t,provenance:detail.provenance});$('event-log').textContent=json(detail.events);$('review-status').textContent='照片 '+detail.photos.length+' 张；核对状态：'+detail.review.status+'。照片上传与家长核对分别记录。';",
+        "device/lira/dictation_repository.py:67:   if row:result.update(json.loads(row[0]))",
+        "device/lira/dictation_repository.py:210:      actual={k:e[k] for k in ('phase_id','item_id','actual_repeats','boot_id','session_id','occurred_at','action')}"
+      ]
+    },
+    {
+      "#": 8,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "file": "tv-receiver/src/ReceiverService.java",
+      "first_evidence": "tv-receiver/src/ReceiverService.java:135 --         if(dictation!=null&&dictation.active()){error(socket,409,\"dictation owns display and audio\");return;}",
+      "independent_reviewers": [
+        "adversarial"
+      ],
+      "line": 135,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Route assistance to the device speaker while a dictation task is active, or implement a native paused-task assistance channel. Preserve remote pause ownership and block local/remote advancement until actual assistance audio drain; keep display mutations exclusive. Test the real TvAudioPlayer/ReceiverService policy boundary.",
+      "title": "Paused dictation rejects explanations on the supported TV audio route",
+      "why_it_matters": "With LIRA_REALTIME_AUDIO_OUTPUT=tv, a child can successfully pause dictation to ask a question, but the ensuing spoken explanation cannot play. The TV treats paused v2 tasks as active and rejects /audio/start with HTTP 409. No answer drain is recorded, so the explanation gate also prevents resuming after the failed answer.",
+      "evidence": [
+        "tv-receiver/src/ReceiverService.java:135 --         if(dictation!=null&&dictation.active()){error(socket,409,\"dictation owns display and audio\");return;}",
+        "conversation_paths.py:44-45 accepts tv, and :536-538 selects TvAudioPlayer; tv-receiver/README.md:82 documents that option.",
+        "DictationEngineV2.java:10 active() excludes only completed and cancelled; a successful pause retains active=true.",
+        "TvAudioPlayer.play_stream sends /audio/start and raises for this 409; audio/doubao_realtime.py:490-497 only calls answer_drained after successful, drained playback. DictationCoordinator.control refuses resume while answer_pending remains true.",
+        "run_dictation_h5_regression.py's speak adapter invokes window.tv.answer directly, bypassing ReceiverService's audio ownership rejection, so its assistance sequence cannot detect this native composition failure."
+      ]
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/dictation_service.py",
+      "first_evidence": "device/lira/dictation_service.py:109 --             context=self.get_context(args,owner_id=owner_id,session_id=session_id) if 'scope_type' in args else session.get('context')",
+      "independent_reviewers": [],
+      "line": 109,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "orchestrator"
+      ],
+      "severity": "P1",
+      "suggested_fix": "At the model-facing handle_tool boundary, require a prior successful get_dictation_context for the current session and matching requested scope before accepting prepare_dictation_task; preserve trusted backend prepare_task API behavior.",
+      "title": "Require model-visible context before preparing a task",
+      "why_it_matters": "A model can call prepare_dictation_task as its first tool and receive ready without having seen the actual child facts or textbook context. The service internally reads context after the model has already selected its words, so that read cannot ground the selection. A clean in-memory fixture reproduced ready with zero get_dictation_context tool calls.",
+      "evidence": [
+        "device/lira/dictation_service.py:109 --             context=self.get_context(args,owner_id=owner_id,session_id=session_id) if 'scope_type' in args else session.get('context')",
+        "Offline reproduction: actual parent session registration -> sole handle_tool prepare_dictation_task(scope,proposals) -> ready and task_created True; prior get_context tool calls 0."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/dictation_tools.py",
+      "first_evidence": "device/lira/dictation_tools.py:56 --   return bool(s['state']=='paused' and now and old[:3]==now[:3] and old[4:]==now[4:] and",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 56,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P1",
+      "suggested_fix": "After identity and privacy checks, release terminal-task speech gating and clear stale question, pause-command and answer state; test question -> pause -> cancel -> ordinary conversation.",
+      "title": "Release the speech gate after task cancellation",
+      "why_it_matters": "After a child asks a question and then cancels dictation, ordinary conversation remains silent for the rest of that binding. The cancellation path retains question, subsequent user turns return immediately for cancelled tasks, and allow_output still requires paused state. Both realtime speech output paths consult this gate. Clear the task-specific explanation state or bypass that gate once the bound task is terminal, while retaining privacy and identity checks.",
+      "evidence": [
+        "device/lira/dictation_tools.py:56 --   return bool(s['state']=='paused' and now and old[:3]==now[:3] and old[4:]==now[4:] and",
+        "device/lira/dictation_tools.py:41 --   if not s or s['state'] in ('completed','cancelled','ready'):return",
+        "device/lira/audio/doubao_realtime.py:450 --         if self.closed or (coordinator and not coordinator.allow_output()):",
+        "Read-only Python trace with actual DictationCoordinator and a minimal repository stub: observe question while playing; set state cancelled; observe ordinary next turn → {'question_retained': True, 'allow_output': False}."
+      ]
+    },
+    {
+      "#": 4,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/ui/static/dictation.js",
+      "first_evidence": "device/lira/ui/static/dictation.js:16 -- async function tasks(){const data=await api('/member/'+member());profile=data.profile;const p=profile?.progress||{};if(!dirty.has('profile-form')){$('book').value=profile?.book_id||'';$('unit').value=p.unit||'';$('lesson').value=p.lesson||'';}$('tasks').replaceChildren();for(const t of data.tasks){const b=document.createElement('button');b.textContent=t.task_id+' · '+t.state;b.addEventListener('click',()=>{if(leave())run(()=>load(t.task_id));});$('tasks').append(b);}}",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 16,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "After the user accepts a task switch, clear review-form from dirty before load(t.task_id), so load renders B's review. Verify editing A, switching to B, and checking B's controls.",
+      "title": "Switching tasks retains the previous task's review form",
+      "why_it_matters": "After a parent edits review A and accepts the discard prompt to open task B, review A's controls remain visible. Saving sends A's values with B's task ID and revision; the server may reject mismatched item IDs or store a stale note and matching item selections against B.",
+      "evidence": [
+        "device/lira/ui/static/dictation.js:16 -- async function tasks(){const data=await api('/member/'+member());profile=data.profile;const p=profile?.progress||{};if(!dirty.has('profile-form')){$('book').value=profile?.book_id||'';$('unit').value=p.unit||'';$('lesson').value=p.lesson||'';}$('tasks').replaceChildren();for(const t of data.tasks){const b=document.createElement('button');b.textContent=t.task_id+' · '+t.state;b.addEventListener('click',()=>{if(leave())run(()=>load(t.task_id));});$('tasks').append(b);}}",
+        "device/lira/ui/static/dictation.js:7: leave() confirms discarding edits but leaves dirty set unchanged.",
+        "device/lira/ui/static/dictation.js:30: load() rebuilds review controls only when review-form is not dirty.",
+        "device/lira/ui/static/dictation.js:24: Submit reads old DOM controls but sends new global tid and detail.review.revision."
+      ]
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/audio/doubao_realtime.py",
+      "first_evidence": "device/lira/audio/doubao_realtime.py:270 --         instructions += '\\n'+INSTRUCTIONS",
+      "independent_reviewers": [
+        "agent-native"
+      ],
+      "line": 270,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "agent-native"
+      ],
+      "severity": "P2",
+      "suggested_fix": "When a task is bound or adopted, expose its stored skill_revision content to the live voice model, preferably in a refreshed session instruction or in get_dictation_task_status plus an explicit instruction to read that tool before child dialogue. Read the revision recorded on the task rather than the latest skill. Verify parent-prepared task adoption after a subsequent skill edit.",
+      "title": "Live voice lacks the active task's pinned skill",
+      "why_it_matters": "A task prepared through the parent page can be adopted by the child's live voice session, but that model receives only the fixed dictation instructions. It cannot see the business skill revision frozen into the task, so edited teaching guidance can be ignored during child questions and task control. The separate dialogue harness does load that revision, making its behavior different from production voice.",
+      "evidence": [
+        "device/lira/audio/doubao_realtime.py:270 --         instructions += '\\n'+INSTRUCTIONS",
+        "device/lira/dictation_tools.py:193:    state['current_item']=next((dict(i,phase_type=p['type']) for p in task['phases'] for i in p['items'] if i['item_id']==state['actual'].get('item_id')),None)",
+        "device/lira/dictation_tools.py:287:   skill=tools.service.skills.get(task['skill_revision'] if task else None)['content']"
+      ]
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/ui/static/dictation.js",
+      "first_evidence": "device/lira/ui/static/dictation.js:21 -- if(id==='config'){state.config=(await post('config',{expected_revision:state.config.revision,parameters:{phases:$('phase-order').value.split(','),playback:{repeat_count:Number($('repeat').value),interval_ms:Number($('interval').value),speech_rate:Number($('rate').value)}}})).config;renderConfig();}",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 21,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Capture a per-form edit generation at submit and clear dirty only if unchanged after success; skip renderConfig if a newer local edit exists. Alternatively disable the submitting form's controls during its request. Verify using a delayed response and an intervening edit.",
+      "title": "Edits made during a save are silently discarded",
+      "why_it_matters": "Flow configuration fields stay editable while POST is pending. A value changed during that wait is absent from the already sent request; the response calls renderConfig() to overwrite it, then marks the form clean. An edit during skill or review save can likewise be marked clean despite remaining unsaved.",
+      "evidence": [
+        "device/lira/ui/static/dictation.js:21 -- if(id==='config'){state.config=(await post('config',{expected_revision:state.config.revision,parameters:{phases:$('phase-order').value.split(','),playback:{repeat_count:Number($('repeat').value),interval_ms:Number($('interval').value),speech_rate:Number($('rate').value)}}})).config;renderConfig();}",
+        "device/lira/ui/static/dictation.js:11: run() disables buttons only; inputs stay editable.",
+        "device/lira/ui/static/dictation.js:25: dirty.delete(id+'-form') runs after the response regardless of later input events.",
+        "device/lira/ui/static/dictation.js:14: renderConfig() assigns every config field from the server response."
+      ]
+    },
+    {
+      "#": 7,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/ui/static/dictation.js",
+      "first_evidence": "device/lira/ui/static/dictation.js:29 -- async function load(id){detail=await api('/member/'+member()+'/task/'+id);tid=id;$('task-detail').hidden=false;const t=detail.task;$('task-summary').textContent='任务 '+id+' · '+detail.state.state+' · 当前项 '+(detail.state.actual?.item_id||'尚未开始');$('task-json').textContent=json({task:t,provenance:detail.provenance});$('event-log').textContent=json(detail.events);$('review-status').textContent='照片 '+detail.photos.length+' 张；核对状态：'+detail.review.status+'。照片上传与家长核对分别记录。';",
+      "independent_reviewers": [
+        "api-contract"
+      ],
+      "line": 29,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "api-contract"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Read detail.state.item_id in the task summary, matching DictationRepository.status; alternatively add a documented nested actual field to the response and update consumers consistently.",
+      "title": "Expose the current item in the management status shape",
+      "why_it_matters": "The parent task detail always displays the fallback 尚未开始 after the TV has sent receipts, because it reads state.actual.item_id while repository.status flattens item_id directly into state. This hides the current item from the management consumer throughout execution.",
+      "evidence": [
+        "device/lira/ui/static/dictation.js:29 -- async function load(id){detail=await api('/member/'+member()+'/task/'+id);tid=id;$('task-detail').hidden=false;const t=detail.task;$('task-summary').textContent='任务 '+id+' · '+detail.state.state+' · 当前项 '+(detail.state.actual?.item_id||'尚未开始');$('task-json').textContent=json({task:t,provenance:detail.provenance});$('event-log').textContent=json(detail.events);$('review-status').textContent='照片 '+detail.photos.length+' 张；核对状态：'+detail.review.status+'。照片上传与家长核对分别记录。';",
+        "device/lira/dictation_repository.py:67:   if row:result.update(json.loads(row[0]))",
+        "device/lira/dictation_repository.py:210:      actual={k:e[k] for k in ('phase_id','item_id','actual_repeats','boot_id','session_id','occurred_at','action')}"
+      ]
+    },
+    {
+      "#": 8,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "file": "tv-receiver/src/ReceiverService.java",
+      "first_evidence": "tv-receiver/src/ReceiverService.java:135 --         if(dictation!=null&&dictation.active()){error(socket,409,\"dictation owns display and audio\");return;}",
+      "independent_reviewers": [
+        "adversarial"
+      ],
+      "line": 135,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Route assistance to the device speaker while a dictation task is active, or implement a native paused-task assistance channel. Preserve remote pause ownership and block local/remote advancement until actual assistance audio drain; keep display mutations exclusive. Test the real TvAudioPlayer/ReceiverService policy boundary.",
+      "title": "Paused dictation rejects explanations on the supported TV audio route",
+      "why_it_matters": "With LIRA_REALTIME_AUDIO_OUTPUT=tv, a child can successfully pause dictation to ask a question, but the ensuing spoken explanation cannot play. The TV treats paused v2 tasks as active and rejects /audio/start with HTTP 409. No answer drain is recorded, so the explanation gate also prevents resuming after the failed answer.",
+      "evidence": [
+        "tv-receiver/src/ReceiverService.java:135 --         if(dictation!=null&&dictation.active()){error(socket,409,\"dictation owns display and audio\");return;}",
+        "conversation_paths.py:44-45 accepts tv, and :536-538 selects TvAudioPlayer; tv-receiver/README.md:82 documents that option.",
+        "DictationEngineV2.java:10 active() excludes only completed and cancelled; a successful pause retains active=true.",
+        "TvAudioPlayer.play_stream sends /audio/start and raises for this 409; audio/doubao_realtime.py:490-497 only calls answer_drained after successful, drained playback. DictationCoordinator.control refuses resume while answer_pending remains true.",
+        "run_dictation_h5_regression.py's speak adapter invokes window.tv.answer directly, bypassing ReceiverService's audio ownership rejection, so its assistance sequence cannot detect this native composition failure."
+      ]
+    }
+  ],
+  "triage_groups": [
+    {
+      "title": "Grounding and speech lifecycle",
+      "findings": [
+        1,
+        2,
+        5
+      ],
+      "context": "The model must see actual facts and the frozen skill; terminal tasks must release ordinary speech.",
+      "preferred_resolution": "Fix #1 context-tool ordering, #2 terminal state, then #5 pinned skill exposure with targeted regressions.",
+      "why": "These changes preserve the agreed model-led teaching flow and prevent silent output."
+    },
+    {
+      "title": "Parent management consistency",
+      "findings": [
+        4,
+        6,
+        7
+      ],
+      "context": "Task navigation and pending saves must preserve the correct task and edit generation.",
+      "preferred_resolution": "Fix #4 task-switch review ownership and #6 save/edit ownership, then #7 status rendering.",
+      "why": "This prevents cross-task review contamination and silent edit loss."
+    },
+    {
+      "title": "Native assistance audio",
+      "findings": [
+        8
+      ],
+      "context": "The supported TV audio route rejects assistance while v2 is paused.",
+      "preferred_resolution": "Resolve #8 through safe device routing or an explicit native assistance ownership gate.",
+      "why": "Pausing must allow assistance without permitting overlapping task playback."
+    }
+  ],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan": "docs/plans/2026-10-21-1206-feat-chinese-dictation-baseline-plan.md",
+    "plan_source": "explicit",
+    "artifact_readiness": "implementation-ready",
+    "requirements": [
+      {
+        "id": "R1",
+        "status": "met",
+        "evidence": "teaching_profile.py; ui/teaching.py; existing textbook services"
+      },
+      {
+        "id": "R2",
+        "status": "partially addressed",
+        "evidence": "teaching_skills.py; business skill; pending finding #5"
+      },
+      {
+        "id": "R3",
+        "status": "met",
+        "evidence": "dictation_settings.py; immutable config revisions"
+      },
+      {
+        "id": "R4",
+        "status": "met",
+        "evidence": "dictation_agent.py; trusted management and voice session inputs"
+      },
+      {
+        "id": "R5",
+        "status": "met",
+        "evidence": "dictation_service.py; coverage/proposals/confirmation"
+      },
+      {
+        "id": "R6",
+        "status": "partially addressed",
+        "evidence": "dictation_service.py; context/snapshot; pending finding #1"
+      },
+      {
+        "id": "R7",
+        "status": "met",
+        "evidence": "DictationEngineV2.java; recognition pages and acknowledgements"
+      },
+      {
+        "id": "R8",
+        "status": "met",
+        "evidence": "DictationEngineV2.java; drained playback and explicit confirmation"
+      },
+      {
+        "id": "R9",
+        "status": "partially addressed",
+        "evidence": "DictationCoordinator; speech barriers; pending findings #2/#8"
+      },
+      {
+        "id": "R10",
+        "status": "partially addressed",
+        "evidence": "safe native logs; parent task detail; pending finding #7"
+      },
+      {
+        "id": "R11",
+        "status": "met",
+        "evidence": "dictation_transport.py; persistent inbox/outbox; leases"
+      },
+      {
+        "id": "R12",
+        "status": "met",
+        "evidence": "native/H5 checkpoint/lease/playback-failure handling"
+      },
+      {
+        "id": "R13",
+        "status": "partially addressed",
+        "evidence": "dictation_results.py; photos/reviews; pending findings #4/#6"
+      },
+      {
+        "id": "R14",
+        "status": "met",
+        "evidence": "dictation_context.py; latest review/assistance/word facts"
+      },
+      {
+        "id": "R15",
+        "status": "met",
+        "evidence": "unreviewed states and explicit factual metric boundaries"
+      },
+      {
+        "id": "R16",
+        "status": "met",
+        "evidence": "v2 phases restricted to recognition/dictation; no OCR"
+      }
+    ],
+    "implementation_units": [
+      {
+        "id": "U1",
+        "status": "met",
+        "evidence": "Corresponding implementation and test files appear in the reviewed diff."
+      },
+      {
+        "id": "U2",
+        "status": "met",
+        "evidence": "Corresponding implementation and test files appear in the reviewed diff."
+      },
+      {
+        "id": "U3",
+        "status": "partially addressed",
+        "evidence": "Corresponding changed production modules and focused tests are present; retained findings identify remaining defects."
+      },
+      {
+        "id": "U4",
+        "status": "met",
+        "evidence": "Corresponding implementation and test files appear in the reviewed diff."
+      },
+      {
+        "id": "U5",
+        "status": "met",
+        "evidence": "Corresponding implementation and test files appear in the reviewed diff."
+      },
+      {
+        "id": "U6",
+        "status": "partially addressed",
+        "evidence": "Corresponding changed production modules and focused tests are present; retained findings identify remaining defects."
+      },
+      {
+        "id": "U7",
+        "status": "partially addressed",
+        "evidence": "Corresponding changed production modules and focused tests are present; retained findings identify remaining defects."
+      },
+      {
+        "id": "U8",
+        "status": "partially addressed",
+        "evidence": "Corresponding changed production modules and focused tests are present; retained findings identify remaining defects."
+      },
+      {
+        "id": "U9",
+        "status": "partially addressed",
+        "evidence": "Implementation exists; real-model TC1 and physical acceptance remain unmet, intentionally not rerun."
+      },
+      {
+        "id": "U10",
+        "status": "partially addressed",
+        "evidence": "Implementation exists; real-model TC1 and physical acceptance remain unmet, intentionally not rerun."
+      }
+    ],
+    "completion_limit": "The unique real-model TC1 receipt remains failed after one clarification/model call, zero tasks and zero completions. Offline success does not satisfy DOD1. No real-model rerun was performed or authorized."
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "The unique real-model TC1 run failed; DOD1 remains unmet and must not be claimed complete from offline evidence. No rerun occurred.",
+    "The background worker renews the TV lease before receipt polling; repeated polling failures can keep renewing a task whose current receipts are unavailable.",
+    "Prepared PCM folders can remain orphaned when file writing or repository submission fails; explicit reclamation is needed to recover disk space."
+  ],
+  "testing_gaps": [
+    "Successful real-model TC1 and physical TV/remote/speaker ordering remain unverified; offline H5 synthetic responses and audio provide a separate evidence tier."
+  ],
+  "coverage": {
+    "scope": "local-aligned isolated review checkout; 77 staged files; context-only source outside the selection excluded",
+    "reviewer_roster": [
+      "correctness",
+      "security",
+      "testing",
+      "maintainability",
+      "agent-native",
+      "performance",
+      "api-contract",
+      "reliability",
+      "adversarial",
+      "julik-frontend-races"
+    ],
+    "reviewers_completed": 10,
+    "failed_reviewers": [],
+    "foreground_batch_capacity": 2,
+    "project_standards": "not run: successful search found no applicable criteria files",
+    "learnings": "not run: no matching corpus or declared packs",
+    "data_migration": "not selected: no changed migration/schema/backfill artifacts; verification scripts alone do not meet the gate",
+    "previous_comments": "not selected: no PR metadata",
+    "swift_ios": "not selected: no applicable source",
+    "cross_model": {
+      "policy": "auto",
+      "host_harness": "codex",
+      "host_family": "codex",
+      "installed_sanctioned_route": "claude",
+      "allowlist": "unset",
+      "start_attempts": 2,
+      "job_started": false,
+      "failure": "peer-job-runner could not harden Windows jobs-root ACL with icacls; identical bounded recovery failed again before any job id",
+      "egress": false,
+      "local_adversarial_fallback_completed": true,
+      "independence_verified": false
+    },
+    "validator": {
+      "batch_count": 1,
+      "selected": 8,
+      "completed": 8,
+      "validated": 7,
+      "dropped": [
+        {
+          "#": 3,
+          "reason": "Actual local org.json numberToString/toString removes integral decimal suffix before contentHash deep clone."
+        }
+      ],
+      "cross_model_skips": 0,
+      "infrastructure_failures": [],
+      "validation_degraded_blockers": []
+    },
+    "mechanics": {
+      "helper_runs": 2,
+      "malformed_findings": 0,
+      "malformed_returns": 0,
+      "suppressed_by_confidence": {},
+      "soft_bucket_demotions": 2,
+      "judgment_rejections": 2,
+      "quote_gate_demotions": 0
+    },
+    "verification": "Independent read-only persona review and one validator batch; offline minimal reproductions confirmed #1 and #2. Caller reports 369 Python tests, 9 Java entries, APK and 5 Edge checks passed; these full suites were not rerun by this review. No live services, real-model TC1, production DB, push or deployment used.",
+    "artifact_encoding": "Final quoted anchors re-read from UTF-8 source to correct shell transport encoding in preliminary compact artifacts."
+  },
+  "artifact_path": "C:/Users/Joey/AppData/Local/Temp/compound-engineering-197609/ce-code-review/20261021-152733-ba62daf9",
+  "run_id": "20261021-152733-ba62daf9"
+}

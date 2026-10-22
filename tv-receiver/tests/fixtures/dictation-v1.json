@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "task_id": "example-task",
+  "content_hash": "b3b9d3f382065c3797d11809194de03ad1187f1388c3f249a206efc5e90de7ae",
+  "config_revision": 1,
+  "lessons": [
+    {
+      "lesson_id": "book-1.unit-4.lesson-7",
+      "source": {
+        "book_id": "book-1",
+        "unit": 4,
+        "number": 7,
+        "revision": 3
+      },
+      "four_targets": [
+        "依"
+      ],
+      "expanded_words": [
+        {
+          "text": "依靠",
+          "covers": [
+            "依"
+          ],
+          "audio_asset_id": "asset-yi",
+          "pinyin_required_for": []
+        }
+      ],
+      "two_targets": [
+        "登"
+      ],
+      "recognition_words": [
+        {
+          "text": "登山",
+          "covers": [
+            "登"
+          ]
+        }
+      ],
+      "recitation": null,
+      "focus_targets": []
+    }
+  ],
+  "parameters": {
+    "advance_mode": "automatic",
+    "expanded_word_seconds": 30,
+    "expanded_repeat_count": 3,
+    "expanded_timer_anchor": "after_playback",
+    "recognition_seconds_per_character": 30,
+    "resume_timer_policy": "restart_current",
+    "recitation_end_mode": "observed_user_signal"
+  },
+  "callback_registration_id": "paired-lira"
+}

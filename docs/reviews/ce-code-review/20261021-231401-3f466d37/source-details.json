@@ -1,0 +1,110 @@
+{
+  "correctness|上一词请求被误记为未回答的提问": {
+    "title": "上一词请求被误记为未回答的提问",
+    "severity": "P2",
+    "file": "device/lira/dictation_tools.py",
+    "line": 11,
+    "why_it_matters": "新支持的正常语音请求“上一词”经 observe_user 时未命中控制短语白名单，被设置为 question 和 answer_pending。随后 previous 可以成功切换当前词，但 question 仍绑定旧词；allow_output 无法匹配当前项目，后续 pause 又以旧 question 项目为 target 返回 context_changed，resume 因 answer_pending 返回 answer_not_drained。一次正常上一词请求会污染后续辅导和恢复流程，通常只能结束任务清除。新提示的“下一词”也未被识别为 child_ack，confirm 会被拒绝。",
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "suggested_fix": "把新增的上一词/上一个和下一词请求纳入可信输入分类：上一词作为非提问控制请求处理；下一词与下一个一样设置 child_ack。增加 observe_user 后成功 previous 再提问暂停并恢复的回归用例，确保不会残留 question/answer_pending。",
+    "confidence": 75,
+    "evidence": [
+      "device/lira/dictation_tools.py:11:  'pending不是成功，不可用pause_agent_task代替电视暂停。写好了或下一词用confirm，重播用replay，上一词用previous，结束用cancel。手动模式每次只播报一遍，等待用户控制，不自行重播或推进。')",
+      "device/lira/dictation_tools.py:56-59: waiting_child 的确认短语仅包含下一个等，不包含下一词；控制白名单不包含上一词，随后执行 self.question=(self.stamp(),turn);self.pause_command=None;self.answer_pending=True。",
+      "device/lira/dictation_tools.py:110: target=self.question[0] if action=='pause' and self.question else self.stamp(); previous 完成后项目已经变化，same_item 校验与旧 question 不符。",
+      "device/lira/dictation_tools.py:106: if self.speaking or self.answer_pending:return dict(status='answer_not_drained')"
+    ],
+    "pre_existing": false
+  },
+  "testing|Test privacy revocation during cloud streaming": {
+    "title": "Test privacy revocation during cloud streaming",
+    "severity": "P2",
+    "file": "device/tests/test_dictation_cloud_tts.py",
+    "line": 24,
+    "why_it_matters": "The new stream checks privacy after each response line, but the only privacy test starts with permission already denied. A regression that removes the in-stream check could continue receiving and storing a child's dictated text/audio after privacy is enabled while the request is active, and the suite would still pass.",
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "suggested_fix": "Add a mock streaming response that yields one valid PCM chunk, flips allowed to false before the next chunk, then asserts synthesis raises the revocation error and yields no completed asset. Keep the existing pre-request denial test.",
+    "confidence": 75,
+    "evidence": [
+      "device/tests/test_dictation_cloud_tts.py:24: async def test_cloud_privacy_blocks_network():",
+      "device/tests/test_dictation_cloud_tts.py:27:         with pytest.raises(ValueError,match='撤销'):await synthesize_cloud('山顶',DEFAULT_TTS,'private-key',allowed=lambda:False,client=client)",
+      "device/lira/dictation_cloud_tts.py:37:                 async for line in response.aiter_lines():",
+      "device/lira/dictation_cloud_tts.py:38:                     guard()"
+    ],
+    "pre_existing": false
+  },
+  "testing|Test manual controls during active playback": {
+    "title": "Test manual controls during active playback",
+    "severity": "P2",
+    "file": "tv-receiver/tests/DictationManualNavigationTest.java",
+    "line": 17,
+    "why_it_matters": "The engine newly accepts previous, confirm, and replay while manual audio is playing, where it must stop the old sound and fence its late completion callback. The navigation test drains every sound before issuing these commands, so an early remote press could play two words or move the cursor after a late callback without failing the suite.",
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "suggested_fix": "Extend the native manual test to issue previous, confirm, and replay before sound.drain(), then invoke each captured old completion callback and assert the cursor, state, and actual_repeats stay on the newly selected item; also assert the old sound was stopped.",
+    "confidence": 75,
+    "evidence": [
+      "tv-receiver/tests/DictationManualNavigationTest.java:17:   engine.control(DictationEngineV2Test.cmd(engine,\"replay\"));sound.drain();check(engine.status().getInt(\"index\")==1,\"center replays current\");",
+      "tv-receiver/tests/DictationManualNavigationTest.java:18:   engine.control(DictationEngineV2Test.cmd(engine,\"confirm\"));sound.drain();check(engine.status().getInt(\"index\")==2,\"right advances and plays\");",
+      "tv-receiver/src/DictationEngineV2.java:64:   if(!(action.equals(\"start\")&&state.equals(\"waiting_start\")||action.equals(\"confirm\")&&(state.equals(\"waiting_child\")||manual()&&state.equals(\"playing\"))||action.equals(\"pause\")||action.equals(\"resume\")&&state.equals(\"paused\")||action.equals(\"replay\")&&(Arrays.asList(\"waiting_child\",\"failed_item\").contains(state)||manual()&&state.equals(\"playing\"))||action.equals(\"previous\")&&manual()&&Arrays.asList(\"waiting_child\",\"playing\",\"failed_item\").contains(state)||action.equals(\"cancel\")))throw new IllegalArgumentException(\"invalid_action\");"
+    ],
+    "pre_existing": false
+  },
+  "agent-native|Expose the bound manual mode to the agent": {
+    "title": "Expose the bound manual mode to the agent",
+    "severity": "P2",
+    "file": "device/lira/llm/chinese_dictation_skill.md",
+    "line": 15,
+    "why_it_matters": "The new instructions depend on manual_navigation, but subsequent dialogue turns receive only the skill text and a status tool result without the task playback settings. After preparation or task adoption, the agent cannot reliably know whether to apply manual-mode navigation instructions to the bound task.",
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "suggested_fix": "Add the bound task's pinned playback settings, including manual_navigation, to model_instructions and the dialogue agent's system context; include the same setting in get_dictation_task_status so the agent can refresh it after adoption. Read from the task snapshot, not the latest configuration revision.",
+    "confidence": 75,
+    "evidence": [
+      "device/lira/llm/chinese_dictation_skill.md:15: 当绑定流程的 manual_navigation=true 时，四会词每次只播报一次，结束后保持当前词等待遥控操作：左键返回上一词并播放，右键下一词并播放，确认键重播当前词。首词左键重播首词，末词右键结束；不循环、不计时重播或自动跳词。模型不能自行推进；收到孩子明确“下一个／写好了”才调用确认下一项，重播或上一词也须有对应请求。认读仍用确认键翻页；暂停后的确认键恢复当前词，不能绕过提问解释的暂停与继续确认。",
+      "device/lira/dictation_tools.py:45 returns INSTRUCTIONS plus skill content; lines 203-208 add skill and current_item to the status response, but no playback configuration; line 305 builds the dialogue system message without playback configuration."
+    ],
+    "pre_existing": false
+  },
+  "agent-native|Allow spoken next during manual playback": {
+    "title": "Allow spoken next during manual playback",
+    "severity": "P2",
+    "file": "device/lira/dictation_tools.py",
+    "line": 11,
+    "why_it_matters": "The remote's right key advances while a manual word is still playing, but a child saying '下一词' at that point cannot do the same: observe_user only records child_ack in waiting_child, so the agent's confirm tool returns child_confirmation_required even if playback has finished by the time it calls the tool. The child must repeat the request.",
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "suggested_fix": "For bound tasks with manual_navigation enabled, accept an explicit next-word utterance while the current dictation item is playing. Bind the acknowledgement to the task and item identity and permit confirm after the audio completes or while it plays, while preserving the pending-answer and explanation gates.",
+    "confidence": 75,
+    "evidence": [
+      "device/lira/dictation_tools.py:11: 'pending不是成功，不可用pause_agent_task代替电视暂停。写好了或下一词用confirm，重播用replay，上一词用previous，结束用cancel。手动模式每次只播报一遍，等待用户控制，不自行重播或推进。')",
+      "device/lira/dictation_tools.py:56 records child_ack only when s['state']=='waiting_child'; line 103 rejects confirm without that acknowledgement. tv-receiver/src/DictationEngineV2.java:64 accepts manual confirm in playing, and Screen.java:40 maps the right key to confirm in manual mode."
+    ],
+    "pre_existing": false
+  },
+  "api-contract|Pinned Vivi voice settings remain mutable": {
+    "title": "Pinned Vivi voice settings remain mutable",
+    "severity": "P2",
+    "file": "device/lira/dictation_cloud_tts.py",
+    "line": 17,
+    "why_it_matters": "The requested Vivi preset is a fixed task contract, but the config API accepts any valid speaker, pitch, rate, volume, and instruction. A saved config can therefore produce a task with a different voice or reading behavior while still being labeled as the pinned Doubao Vivi option; the UI exposes those changes directly.",
+    "autofix_class": "gated_auto",
+    "owner": "downstream-resolver",
+    "requires_verification": true,
+    "suggested_fix": "Assuming 'pinned' means the specified values must be immutable, make validate_tts require equality with DEFAULT_TTS for every field and show those values as read-only in the UI. Keep the optional tts field itself so older local-TTS configs remain valid.",
+    "confidence": 75,
+    "evidence": [
+      "device/lira/dictation_cloud_tts.py:17:     if type(value['speaker']) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',value['speaker']):raise ValueError('tts: 音色编号无效')",
+      "device/lira/dictation_cloud_tts.py:18-21: pitch, speech_rate, loudness_rate, and instruction are validated by ranges/length rather than against DEFAULT_TTS.",
+      "device/lira/ui/static/dictation.js:14: The config POST serializes editable tts-speaker, tts-pitch, tts-rate, tts-volume, and tts-instruction fields."
+    ],
+    "pre_existing": false
+  }
+}

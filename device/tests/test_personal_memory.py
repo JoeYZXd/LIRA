@@ -13,6 +13,31 @@ def memory(tmp_path, privacy=lambda:False):
     sdk=SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
     return PersonalMemory(tmp_path/'device.db',sdk,'kimi-k2.6',privacy)
 
+
+def test_voice_replacement_and_deletion_require_current_revision_preserve_member(tmp_path):
+    m=memory(tmp_path)
+    member=m.register_voice('原姓名','称呼',[1.,0.])
+    revision=m.voice_revision(member)
+    with pytest.raises(ValueError,match='变化'):
+        m.save_guided_voice('原姓名','称呼',[.9,.4],replace_member_id=member,expected_revision='stale')
+    np.testing.assert_array_equal(m.profiles()[0][1],[1.,0.])
+    m.save_guided_voice('新姓名','新称呼',[.9,.4],replace_member_id=member,expected_revision=revision)
+    with pytest.raises(ValueError,match='变化'): m.delete_voice_profile(member,revision)
+    m.delete_voice_profile(member,m.voice_revision(member))
+    assert not m.profiles() and m.people.get_member(member)['name']=='新姓名'
+
+
+def test_replacement_rejects_another_members_name_or_voice(tmp_path):
+    m=memory(tmp_path)
+    first=m.register_voice('甲','甲',[1.,0.])
+    m.register_voice('乙','乙',[0.,1.])
+    revision=m.voice_revision(first)
+    with pytest.raises(ValueError,match='姓名'):
+        m.save_guided_voice('乙','甲',[1.,0.],replace_member_id=first,expected_revision=revision)
+    with pytest.raises(ValueError,match='声音'):
+        m.save_guided_voice('甲','甲',[0.,1.],replace_member_id=first,expected_revision=revision)
+    assert m.voice_revision(first)==revision
+
 def identity_with_candidates(tmp_path, privacy=lambda:False):
     """U7 生产形态：memory + identity + 候选共享同一 SQLite 连接（main 装配序）。"""
     m=memory(tmp_path,privacy)
@@ -25,6 +50,41 @@ def identity_with_candidates(tmp_path, privacy=lambda:False):
 def voice_samples(seconds=2.0, level=0.2):
     """过质量门的可控假音频（observe 用；内容与向量无关）。"""
     return np.full(int(16000*seconds),level,np.float32)
+
+
+async def test_match_diagnostics_distinguish_threshold_margin_and_empty_profiles(tmp_path):
+    m=memory(tmp_path)
+    s=SpeakerIdentity(m,None,extractor=object(),threshold=.8,margin=.1)
+    query=np.array([1.,0.],np.float32)
+    assert s.match(query) is None
+    assert s.last_match_details['reason']=='empty_profiles'
+    first=m.enroll('甲',np.array([.79,np.sqrt(1-.79**2)],np.float32))
+    assert s.match(query) is None
+    assert s.last_match_details['reason']=='below_threshold'
+    assert s.last_match_details['top_score']==pytest.approx(.79)
+    assert s.last_match_details['threshold']==.8
+    m.db.execute('UPDATE voice_profiles SET vector=? WHERE member_id=?',
+                 (query.tobytes(),first));m.db.commit()
+    assert s.match(query)==first
+    assert s.last_match_details['reason']=='matched' and s.last_match_details['score_gap'] is None
+    m.enroll('乙',np.array([.95,np.sqrt(1-.95**2)],np.float32))
+    assert s.match(query) is None
+    assert s.last_match_details['reason']=='insufficient_margin'
+    assert s.last_match_details['score_gap']==pytest.approx(.05)
+    assert s.last_match_details['required_margin']==.1
+    assert not {'name','member_id','vector'} & s.last_match_details.keys()
+    await m.close()
+
+
+@pytest.mark.parametrize('profile',[np.array([1.,0.,0.],np.float32),np.array([np.nan,0.],np.float32)])
+async def test_incompatible_profiles_report_fault_instead_of_a_match(tmp_path,profile):
+    m=memory(tmp_path)
+    m.enroll('损坏测试档案',profile)
+    s=SpeakerIdentity(m,None,extractor=object())
+    assert s.match(np.array([1.,0.],np.float32)) is None
+    assert s.last_match_details['reason']=='incompatible_profiles'
+    assert s.last_match_details['top_score'] is None
+    await m.close()
 
 async def test_completed_turns_persist_statistics_and_summary(tmp_path):
     m=memory(tmp_path);member=m.people.create_member('爸爸')['id']

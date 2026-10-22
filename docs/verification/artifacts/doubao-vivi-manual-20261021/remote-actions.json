@@ -1,0 +1,152 @@
+[
+  {
+    "at": 1792597062.508836,
+    "label": "确认开始",
+    "key": 23,
+    "before": {
+      "state": "waiting_start",
+      "index": 0,
+      "revision": 1
+    }
+  },
+  {
+    "at": 1792597071.6667507,
+    "label": "认读确认翻页",
+    "key": 23,
+    "before": {
+      "state": "waiting_child",
+      "index": 0,
+      "revision": 3
+    }
+  },
+  {
+    "at": 1792597080.8100243,
+    "label": "认读确认翻页",
+    "key": 23,
+    "before": {
+      "state": "waiting_child",
+      "index": 4,
+      "revision": 9
+    }
+  },
+  {
+    "at": 1792597089.9413064,
+    "label": "认读确认翻页",
+    "key": 23,
+    "before": {
+      "state": "waiting_child",
+      "index": 8,
+      "revision": 15
+    }
+  },
+  {
+    "at": 1792597099.0935807,
+    "label": "认读确认翻页",
+    "key": 23,
+    "before": {
+      "state": "waiting_child",
+      "index": 12,
+      "revision": 21
+    }
+  },
+  {
+    "at": 1792597110.9087417,
+    "label": "确认键重播当前词",
+    "key": 23,
+    "before": {
+      "state": "waiting_child",
+      "index": 16,
+      "revision": 28
+    }
+  },
+  {
+    "at": 1792597114.792545,
+    "label": "右键下一词并播放",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 16,
+      "revision": 32
+    }
+  },
+  {
+    "at": 1792597118.6425908,
+    "label": "左键上一词并播放",
+    "key": 21,
+    "before": {
+      "state": "waiting_child",
+      "index": 17,
+      "revision": 36
+    }
+  },
+  {
+    "at": 1792597127.4756203,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 16,
+      "revision": 40
+    }
+  },
+  {
+    "at": 1792597136.3710625,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 17,
+      "revision": 44
+    }
+  },
+  {
+    "at": 1792597144.6735435,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 18,
+      "revision": 48
+    }
+  },
+  {
+    "at": 1792597153.0220654,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 19,
+      "revision": 52
+    }
+  },
+  {
+    "at": 1792597161.95907,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 20,
+      "revision": 56
+    }
+  },
+  {
+    "at": 1792597170.290874,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 21,
+      "revision": 60
+    }
+  },
+  {
+    "at": 1792597179.1239395,
+    "label": "右键下一词／末词结束",
+    "key": 22,
+    "before": {
+      "state": "waiting_child",
+      "index": 22,
+      "revision": 64
+    }
+  }
+]

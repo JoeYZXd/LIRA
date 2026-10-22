@@ -257,6 +257,8 @@ def mount_chat(app: FastAPI, services, templates: Jinja2Templates) -> None:
             return resp
         try:
             member = _member_or_404(member_id)
+            cleanup=getattr(services, "member_deleted", None)
+            if cleanup is not None:await cleanup(member["id"])
             # 级联删除其全部消息（store FK ON DELETE CASCADE）
             _chat().store.delete_member(member["id"])
         except sqlite3.Error:

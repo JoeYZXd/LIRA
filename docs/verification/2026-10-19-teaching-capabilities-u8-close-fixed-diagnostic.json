@@ -1,0 +1,431 @@
+[
+  {
+    "case": "barge",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 0.991,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.785,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期仅报告事件，不自动推进。请先用任务工具记录并激活这个约定，再创建 12 秒计时，调用等待事件工具。"
+      },
+      {
+        "at": 29.099,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 29.101,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 36.603,
+        "kind": "user_text",
+        "text": "另外问一句，你能听到吗？原来的计时和约定保持不变，不要新建，不要取消。"
+      },
+      {
+        "at": 39.388,
+        "kind": "assistant_text",
+        "text": "能听到，我这边会保持原来的计时和约定不变，不新建也不取消。"
+      },
+      {
+        "at": 39.997,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 40.403,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 40.404,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 52.82,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 58.405,
+        "kind": "assistant_text",
+        "text": "等待任务的事件编号是005bb7baabdd471e86b30a1f85dc4276，事件类型是timer_expired，对应的计时编号是fc52c7d6f29f4201832057dfa098bbba。"
+      },
+      {
+        "at": 60.017,
+        "kind": "audio_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 18.717,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 21.286,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 23.715,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 27.576,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 28.731,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 36.884,
+        "name": "list_task_timers"
+      },
+      {
+        "at": 38.001,
+        "name": "read_agent_task"
+      },
+      {
+        "at": 53.012,
+        "name": "list_capability_operations"
+      },
+      {
+        "at": 55.216,
+        "name": "get_capability_operation"
+      }
+    ],
+    "result_calls": [
+      {
+        "at": 18.718,
+        "name": "propose_agent_task",
+        "args": {
+          "revision": 1,
+          "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具"
+        },
+        "call_id": "358195e3-9961-4556-ba5e-ce43e65f36fb",
+        "result": {
+          "status": "conflict",
+          "revision": 0
+        }
+      },
+      {
+        "at": 21.287,
+        "name": "propose_agent_task",
+        "args": {
+          "revision": 0,
+          "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具"
+        },
+        "call_id": "47549b7a-8fd7-4a4e-9286-b7c4c8125f5c",
+        "result": {
+          "status": "ok",
+          "task": {
+            "status": "proposed",
+            "revision": 1,
+            "generation": "synthetic-timer",
+            "owner": "anonymous-test",
+            "proposal": {
+              "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具",
+              "revision": 1,
+              "delivered_text": null
+            },
+            "agreement": null,
+            "user_turn_id": "db2b7f5c080741fbb781795e8b21f46f"
+          }
+        }
+      },
+      {
+        "at": 23.716,
+        "name": "activate_agent_task",
+        "args": {
+          "revision": 1,
+          "turn_id": "db2b7f5c080741fbb781795e8b21f46f"
+        },
+        "call_id": "dc4fa960-29fb-4adb-ac94-4fae31ce8fb9",
+        "result": {
+          "status": "ok",
+          "task": {
+            "status": "active",
+            "revision": 2,
+            "generation": "synthetic-timer",
+            "owner": "anonymous-test",
+            "proposal": null,
+            "agreement": {
+              "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具",
+              "revision": 2,
+              "source": "observed_user_turn",
+              "turn_id": "db2b7f5c080741fbb781795e8b21f46f",
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test"
+            },
+            "user_turn_id": "db2b7f5c080741fbb781795e8b21f46f"
+          }
+        }
+      },
+      {
+        "at": 27.577,
+        "name": "create_task_timer",
+        "args": {
+          "duration_seconds": 12,
+          "revision": 2
+        },
+        "call_id": "87bbae4b-e506-4f31-8d88-0a5b4c99243a",
+        "result": {
+          "timer_id": "fc52c7d6f29f4201832057dfa098bbba",
+          "timer_revision": 1,
+          "revision": 2,
+          "status": "ok",
+          "deadline": 56417.513441551,
+          "timer_status": "pending",
+          "event_delivery": "queue_until_wait_or_poll",
+          "waiting": false
+        }
+      },
+      {
+        "at": 28.731,
+        "name": "wait_for_task_event",
+        "args": {
+          "revision": 2,
+          "timeout_seconds": 40
+        },
+        "call_id": "4db9e0cc-baa9-448b-95ba-b4828240579f",
+        "result": {
+          "status": "ok",
+          "event": {
+            "event_id": "005bb7baabdd471e86b30a1f85dc4276",
+            "type": "timer_expired",
+            "timer_id": "fc52c7d6f29f4201832057dfa098bbba",
+            "timer_revision": 1,
+            "revision": 2,
+            "deadline": 56417.513441551
+          },
+          "timed_out": false
+        }
+      },
+      {
+        "at": 36.884,
+        "name": "list_task_timers",
+        "args": {
+          "revision": 1
+        },
+        "call_id": "f9f6cb21-d6bd-44fc-b617-def07a762605",
+        "result": {
+          "status": "conflict",
+          "revision": 2
+        }
+      },
+      {
+        "at": 38.002,
+        "name": "read_agent_task",
+        "args": {},
+        "call_id": "317cc5bd-e19e-48ae-a766-f14a0422c62b",
+        "result": {
+          "status": "ok",
+          "task": {
+            "status": "active",
+            "revision": 2,
+            "generation": "synthetic-timer",
+            "owner": "anonymous-test",
+            "proposal": null,
+            "agreement": {
+              "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具",
+              "revision": 2,
+              "source": "observed_user_turn",
+              "turn_id": "db2b7f5c080741fbb781795e8b21f46f",
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test"
+            },
+            "user_turn_id": "52a31aa295714f699692bdd2830b3bbe"
+          }
+        }
+      },
+      {
+        "at": 53.012,
+        "name": "list_capability_operations",
+        "args": {},
+        "call_id": "8a6c36fd-14e7-43a4-8595-81f5171ee01c",
+        "result": {
+          "status": "ok",
+          "operations": [
+            {
+              "operation_id": "6f7be5081f4b4bf6abc5fb1cd39d9955",
+              "name": "propose_agent_task",
+              "status": "failed"
+            },
+            {
+              "operation_id": "8f70dcc9d6914e8c8d817d30250004e8",
+              "name": "propose_agent_task",
+              "status": "completed"
+            },
+            {
+              "operation_id": "3e3be56817c04794a65a981e6fa46e82",
+              "name": "activate_agent_task",
+              "status": "completed"
+            },
+            {
+              "operation_id": "7fd77f9103d340d5b270f0f03f418b6f",
+              "name": "create_task_timer",
+              "status": "completed"
+            },
+            {
+              "operation_id": "915dee0e01794880bb320e73007f17a5",
+              "name": "wait_for_task_event",
+              "status": "completed"
+            },
+            {
+              "operation_id": "50cdd88735fb40398fc45455e32354e4",
+              "name": "list_task_timers",
+              "status": "failed"
+            },
+            {
+              "operation_id": "b3c93dbc62af41daa0fc7a0e036ced55",
+              "name": "read_agent_task",
+              "status": "completed"
+            }
+          ]
+        }
+      },
+      {
+        "at": 55.217,
+        "name": "get_capability_operation",
+        "args": {
+          "operation_id": "915dee0e01794880bb320e73007f17a5"
+        },
+        "call_id": "8969f51a-bcd9-4e78-9efd-119c6aac6a51",
+        "result": {
+          "operation_id": "915dee0e01794880bb320e73007f17a5",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "4315fa2f5858bb74140e3930fb3ae25b0cea8bcb9de4ab1308e2857bac041b1f",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "005bb7baabdd471e86b30a1f85dc4276",
+              "type": "timer_expired",
+              "timer_id": "fc52c7d6f29f4201832057dfa098bbba",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 56417.513441551
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "semantic_calls": [
+      {
+        "at": 23.718,
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "duration_seconds": 2.865
+      }
+    ],
+    "source_hashes": {
+      "lira/audio/doubao_realtime.py": "f5354685f06dd93a3a895b433462fc353f942ba9282b2d6a9bc2345061fb8bc4",
+      "lira/realtime_capabilities.py": "24e4f5a097dacfb537a8533751c15161a0b50519fd250a632c87ba5e63dee243",
+      "lira/agent_timers.py": "beef0aa29b8d8120f45e3e9f31c4a28829b3be9f8119090c60680aa35061063e"
+    },
+    "script_hash": "7b467fff6052dd685ffc6ff060d00c4466e18e901ffd433bea7f1ff60cf7bc55",
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "3e3be56817c04794a65a981e6fa46e82",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "858ec94a1a3bec0eedd0e429bc7dc28efeb691c4ad6afc96e689163348cfdfdb",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "db2b7f5c080741fbb781795e8b21f46f",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "db2b7f5c080741fbb781795e8b21f46f"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "7fd77f9103d340d5b270f0f03f418b6f",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "fc52c7d6f29f4201832057dfa098bbba",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 56417.513441551,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "915dee0e01794880bb320e73007f17a5",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "4315fa2f5858bb74140e3930fb3ae25b0cea8bcb9de4ab1308e2857bac041b1f",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "005bb7baabdd471e86b30a1f85dc4276",
+              "type": "timer_expired",
+              "timer_id": "fc52c7d6f29f4201832057dfa098bbba",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 56417.513441551
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "005bb7baabdd471e86b30a1f85dc4276"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，先记录并激活约定，再创建12秒计时并调用等待事件工具",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "db2b7f5c080741fbb781795e8b21f46f",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "eff0943b49d5448894f3a3fc30fad9f7"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 1,
+    "verifier_model": "kimi-k3"
+  }
+]

@@ -1,0 +1,29 @@
+[
+  {
+    "#": 1,
+    "autofix_class": "gated_auto",
+    "confidence": 75,
+    "evidence": [
+      "device/lira/audio/doubao_realtime.py:238-240: await self._stop_output(); await self.player.close(); if self.ws is not None:",
+      "device/lira/audio/doubao_realtime.py:231-233: if self.closed: return; self.closed = True (cleanup cannot subsequently be retried).",
+      "device/lira/audio/doubao_realtime.py:126: await self.player.stop() is executed by _stop_output; device/lira/hal/board/audio.py:_abort_blocking explicitly raises HalError on PortAudio abort failure.",
+      "device/lira/conversation_paths.py:191-196 removes self.session before awaiting session.close(), so the failing session is no longer available to subsequent stop calls."
+    ],
+    "file": "device/lira/audio/doubao_realtime.py",
+    "first_evidence": "device/lira/audio/doubao_realtime.py:238 -- await self._stop_output()",
+    "independent_reviewers": [
+      "reliability"
+    ],
+    "line": 238,
+    "owner": "downstream-resolver",
+    "pre_existing": false,
+    "requires_verification": true,
+    "reviewers": [
+      "reliability"
+    ],
+    "severity": "P2",
+    "suggested_fix": "Run audio stop/player close and WebSocket close/queue erasure in nested try/finally blocks so every cleanup stage runs even if the sound device fails; propagate the original audio error after cleanup. Add a fake-player stop failure regression asserting socket closure and sensitive buffer clearing.",
+    "title": "Audio stop failure prevents cloud session cleanup",
+    "why_it_matters": "When the board output device fails while stopping, close exits before closing the WebSocket or clearing queued microphone data and tool results. ConversationPaths._stop has already removed the session reference, and closed=True suppresses later cleanup attempts, leaving the cloud connection unclosed and aborting route switching/privacy/shutdown cleanup."
+  }
+]

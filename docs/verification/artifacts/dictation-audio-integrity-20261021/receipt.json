@@ -1,0 +1,29 @@
+{
+  "status": "playback startup/tail patch deployed; speech tempo awaiting user preview approval",
+  "apk_sha256": "1094aa4b4c9ba1eee0cdc29aba9b6171d16e8c2705768f13ce680433bb47df4e",
+  "backup_apk": "private local tmp/dictation-audio-integrity/receiver-before.apk",
+  "changed_production_file": "tv-receiver/src/TaskAudioPlayer.java",
+  "startup": "prime one full buffer before play",
+  "tail": "500 ms silence drained before release",
+  "regressions": "8 passed, 3 subtests passed; 9 Java entrypoints; signed APK build",
+  "real_task_id": "8d544e079e91470c8db4a5e1b15d9ed3",
+  "real_task_state": "completed",
+  "event_count": 79,
+  "spoken_playback_completions": 17,
+  "task_completions": 1,
+  "replay": 1,
+  "pause": 1,
+  "resume": 1,
+  "model": "kimi-k3",
+  "review": "unreviewed; assistant-operated demonstration",
+  "evidence_on_device": "/home/orangepi/lira/deploy-backups/dictation-v2-20261021-183313/player-integrity-lesson8",
+  "limits": [
+    "Legacy TV diagnostic instrumentation failed class loading after APK update; failures not counted as passed playback. Temporary diagnostic app removed.",
+    "Microphone capture used echo-cancelled lira_echo_source, so ASR-empty segments cannot prove silent/incomplete TV output.",
+    "Short-word ASR misrecognition does not establish source phonetic integrity. Source checks confirm bytes, hashes, non-silence and sample alignment only.",
+    "User reported pace still too fast. Two speed=0.75 local WAV previews generated; global backend speech rate remains unchanged pending approval."
+  ],
+  "preview_only": true,
+  "no_more_tasks_after_preview_request": true,
+  "quality": "targeted manual review due to pre-existing overlapping WIP; no commit, index mutation or broad refactor"
+}

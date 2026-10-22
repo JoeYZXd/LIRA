@@ -18,6 +18,8 @@ import re
 import logging
 import time
 import itertools
+import threading
+from contextlib import nullcontext
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
@@ -65,6 +67,7 @@ class _PlaybackRequest:
     session: SpeechSession | None = None
     network: asyncio.Task | None = None
     replay: list | None = None
+    cached_samples: object = None
 
 #: 规则 FST 优先级顺序（后挂的先匹配会被前面的覆盖，号码放最前最具体）
 _RULE_FSTS = ("phone.fst", "date.fst", "number.fst")
@@ -154,6 +157,7 @@ class TtsEngine:
                 rule_fsts=rule_fsts,
             )
         self.tts = sherpa_onnx.OfflineTts(config)
+        self._native_lock = threading.Lock()
         self.sample_rate: int = self.tts.sample_rate
         self._player = player
         self._on_occupied = on_occupied
@@ -187,7 +191,9 @@ class TtsEngine:
         cached = self._cached_feedback(text, speed)
         if cached is not None:
             return cached.copy()
-        audio = self.tts.generate(text, sid=self._speaker, speed=speed)
+        # Developer cache prewarming and normal playback share one native model.
+        with getattr(self, '_native_lock', nullcontext()):
+            audio = self.tts.generate(text, sid=self._speaker, speed=speed)
         return np.asarray(audio.samples, dtype=np.float32)
 
     def _cached_feedback(self, text, speed):
@@ -293,6 +299,17 @@ class TtsEngine:
     def chime(self, *, owner: object = None, volume: float = 1.0) -> PlaybackCompletion:
         """Short wake feedback through the same serialized output path."""
         return self._enqueue(None, 1.0, volume, owner)
+
+    def speak_cached(self, samples, *, owner=None, volume=1.0):
+        """Play prevalidated fixed-cue PCM through the ordinary owned output path."""
+        samples = np.asarray(samples, dtype=np.float32)
+        if (samples.ndim != 1 or not samples.size or not np.isfinite(samples).all()
+                or len(samples) > self.sample_rate * 20):
+            raise ValueError('invalid fixed-cue audio')
+        done = self._enqueue(None, 1.0, volume, owner)
+        if not done.is_set():
+            self._queue[-1].cached_samples = samples
+        return done
 
     def _enqueue(self, text, speed, volume, owner) -> PlaybackCompletion:
         done = PlaybackCompletion(owner)
@@ -465,7 +482,10 @@ class TtsEngine:
                     if await self._play_online(request):
                         request.done.finish('cancelled' if request.cancelled else 'success')
                         continue
-                if request.text is None:
+                if request.cached_samples is not None:
+                    samples = request.cached_samples
+                    mark(request.trace, 'pcm_ready', frames=len(samples))
+                elif request.text is None:
                     t = np.arange(int(self.sample_rate * 0.08)) / self.sample_rate
                     samples = (0.18 * np.sin(2 * np.pi * 880 * t)
                                * np.sin(np.pi * np.arange(len(t)) / len(t)) ** 2)

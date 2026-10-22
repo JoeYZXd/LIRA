@@ -268,6 +268,9 @@ class RouteDispatch:
                              else "唤醒 KWS 未装配"))
             self._audio_samples = self._audio_clipped = 0
             self._audio_energy = self._audio_peak = 0.0
+        paths = getattr(rt, 'conversation_paths', None)
+        if paths is not None and paths.feed(samples):
+            return
         if self._tts_was_occupied and not occupied:
             # TTS 释放沿：AEC 清洗后的尾音尚未到齐，开窗吞弃。
             self._discard_until = max(self._discard_until,

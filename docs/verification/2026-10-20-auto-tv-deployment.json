@@ -1,0 +1,22 @@
+{
+  "deployed": true,
+  "backup": "/home/orangepi/lira/deploy-backups/tv-audio-20261020-223155",
+  "before_service": {
+    "MainPID": "100735",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "after_service": {
+    "MainPID": "103265",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "files": {
+    "lira/dictation.py": "fae6396082ccac210fc28cf69108ad75d2a3578a778c58b0e0f5bedc6ba98149"
+  },
+  "protected_files_unchanged": true,
+  "textbook_data_unchanged": true,
+  "mode_unchanged": true,
+  "realtime_audio_output": "device_with_tv_dictation",
+  "capabilities_flag": "false"
+}

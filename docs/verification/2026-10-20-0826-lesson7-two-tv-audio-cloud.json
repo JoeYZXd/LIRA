@@ -1,0 +1,1846 @@
+{
+  "test": "deployed lesson7 two-character real TV and physical speaker audit",
+  "started_utc": "2026-10-20T00:26:40Z",
+  "model": "1.2.6.1",
+  "service_before": {
+    "MainPID": "91082",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "capabilities_flag": "false",
+  "tool_names": [
+    "get_device_status",
+    "end_conversation",
+    "list_infrared_devices",
+    "prepare_infrared_learning",
+    "start_infrared_learning",
+    "get_infrared_learning_status",
+    "cancel_infrared_learning",
+    "control_infrared_device",
+    "start_voice_enrollment",
+    "set_voice_enrollment_details",
+    "start_voice_sample",
+    "check_voice_sample",
+    "get_voice_enrollment_status",
+    "save_voice_enrollment",
+    "cancel_voice_enrollment",
+    "reset_voice_samples",
+    "identify_current_speaker",
+    "get_speaker_continuity_context",
+    "report_speaker_continuity",
+    "request_identity_confirmation",
+    "submit_identity_feedback",
+    "get_recent_device_conversation",
+    "get_personal_memory",
+    "prepare_tv_display",
+    "list_practice_textbooks",
+    "prepare_pinyin_practice",
+    "list_tv_images",
+    "confirm_tv_display",
+    "cancel_tv_display",
+    "get_tv_display_status",
+    "check_dictation_tv",
+    "show_dictation_ready",
+    "get_dictation_material",
+    "present_dictation_item",
+    "cancel_dictation",
+    "get_dictation_status",
+    "get_dictation_book_choice",
+    "confirm_dictation_book_choice"
+  ],
+  "catalog": {
+    "status": "ok",
+    "books": [
+      {
+        "book_id": "4e28c92b626b4f29ae3affe194525579",
+        "title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+        "subject": "chinese",
+        "source": "review_draft",
+        "imported_at": 1792425490.5359643,
+        "lessons": [
+          {
+            "number": 1,
+            "unit": 1,
+            "title": "小蝌蚪找妈妈",
+            "reviewed": true
+          },
+          {
+            "number": 2,
+            "unit": 1,
+            "title": "我是什么",
+            "reviewed": true
+          },
+          {
+            "number": 3,
+            "unit": 1,
+            "title": "植物妈妈有办法",
+            "reviewed": false
+          },
+          {
+            "number": 1,
+            "unit": 2,
+            "title": "场景歌",
+            "reviewed": false
+          },
+          {
+            "number": 2,
+            "unit": 2,
+            "title": "树之歌",
+            "reviewed": false
+          },
+          {
+            "number": 3,
+            "unit": 2,
+            "title": "拍手歌",
+            "reviewed": false
+          },
+          {
+            "number": 4,
+            "unit": 2,
+            "title": "田家四季歌",
+            "reviewed": false
+          },
+          {
+            "number": 4,
+            "unit": 3,
+            "title": "彩虹",
+            "reviewed": false
+          },
+          {
+            "number": 5,
+            "unit": 3,
+            "title": "去外婆家",
+            "reviewed": false
+          },
+          {
+            "number": 6,
+            "unit": 3,
+            "title": "数星星的孩子",
+            "reviewed": false
+          },
+          {
+            "number": 7,
+            "unit": 4,
+            "title": "古诗二首",
+            "reviewed": true
+          },
+          {
+            "number": 8,
+            "unit": 4,
+            "title": "黄山奇石",
+            "reviewed": true
+          },
+          {
+            "number": 9,
+            "unit": 4,
+            "title": "日月潭",
+            "reviewed": false
+          },
+          {
+            "number": 10,
+            "unit": 4,
+            "title": "葡萄沟",
+            "reviewed": false
+          },
+          {
+            "number": 11,
+            "unit": 5,
+            "title": "坐井观天",
+            "reviewed": false
+          },
+          {
+            "number": 12,
+            "unit": 5,
+            "title": "寒号鸟",
+            "reviewed": false
+          },
+          {
+            "number": 13,
+            "unit": 5,
+            "title": "我要的是葫芦",
+            "reviewed": false
+          },
+          {
+            "number": 14,
+            "unit": 6,
+            "title": "八角楼上",
+            "reviewed": false
+          },
+          {
+            "number": 15,
+            "unit": 6,
+            "title": "朱德的扁担",
+            "reviewed": false
+          },
+          {
+            "number": 16,
+            "unit": 6,
+            "title": "难忘的泼水节",
+            "reviewed": false
+          },
+          {
+            "number": 17,
+            "unit": 6,
+            "title": "刘胡兰",
+            "reviewed": false
+          },
+          {
+            "number": 18,
+            "unit": 7,
+            "title": "古诗二首",
+            "reviewed": false
+          },
+          {
+            "number": 19,
+            "unit": 7,
+            "title": "雾在哪里",
+            "reviewed": false
+          },
+          {
+            "number": 20,
+            "unit": 7,
+            "title": "雪孩子",
+            "reviewed": false
+          },
+          {
+            "number": 21,
+            "unit": 8,
+            "title": "称赞",
+            "reviewed": false
+          },
+          {
+            "number": 22,
+            "unit": 8,
+            "title": "纸船和风筝",
+            "reviewed": false
+          },
+          {
+            "number": 23,
+            "unit": 8,
+            "title": "快乐的小河",
+            "reviewed": false
+          }
+        ]
+      }
+    ],
+    "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+  },
+  "turns": [
+    {
+      "index": 1,
+      "input": "给开心默写第七课。",
+      "participant_reason": "requested starting utterance",
+      "at": 9.122,
+      "events": [
+        {
+          "at": 9.969,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 12.181,
+          "kind": "user_text",
+          "text": "你开心默写力气课。"
+        },
+        {
+          "at": 12.779,
+          "kind": "assistant_text",
+          "text": "电视已经打开了吗？"
+        },
+        {
+          "at": 12.999,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 14.802,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 12.182,
+          "returned_at": 12.241,
+          "name": "check_dictation_tv",
+          "arguments": {},
+          "result": {
+            "status": "needs_input",
+            "receiver": {
+              "version": "0.3",
+              "capabilities": [
+                "clear_content_id",
+                "pcm_audio_v1"
+              ],
+              "interactive": true,
+              "foreground": true,
+              "rendered_id": "1829178001704e1da6ac987d3b1f58b9",
+              "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+              "audio": {
+                "status": "completed",
+                "music_volume": 6,
+                "music_muted": false,
+                "id": "cd4762a0db9d42338a170408c4f6113a",
+                "written_frames": 139069,
+                "played_frames": 139069,
+                "audio_session_id": 57,
+                "routed_device_type": 2,
+                "received_bytes": 278138,
+                "next_sequence": 301,
+                "error": ""
+              },
+              "status": "ok",
+              "clear_supported": true
+            },
+            "requested_lesson": null,
+            "question": "电视已经打开了吗？",
+            "instructions": "等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。"
+          }
+        }
+      ],
+      "audio_receipts": [
+        {
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "status": "completed",
+          "pcm_bytes": 86628,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "cf8f51b4f60549b8ae9563959692104c",
+            "written_frames": 43314,
+            "played_frames": 43314,
+            "audio_session_id": 59,
+            "routed_device_type": 2,
+            "received_bytes": 86628,
+            "next_sequence": 94,
+            "error": ""
+          },
+          "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+        }
+      ],
+      "observer": {
+        "at": 15.184,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "idle"
+        }
+      }
+    },
+    {
+      "index": 2,
+      "input": "已经打开了。",
+      "participant_reason": "simulated participant TV-on answer; receiver independently reports actual status",
+      "at": 16.447,
+      "events": [
+        {
+          "at": 17.108,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 18.43,
+          "kind": "user_text",
+          "text": "已经打开了。"
+        },
+        {
+          "at": 20.597,
+          "kind": "assistant_text",
+          "text": "电视上已经显示准备开始默写第7课的画面了，你看看能看到吗？"
+        },
+        {
+          "at": 21.189,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 26.282,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 18.738,
+          "returned_at": 18.738,
+          "name": "show_dictation_ready",
+          "arguments": {
+            "lesson": 7
+          },
+          "result": {
+            "status": "displaying",
+            "lesson": 7,
+            "question": "电视上是否已经显示准备开始默写第7课的画面？",
+            "instructions": "查询get_tv_display_status核实发送结果，并等待用户确认画面。失败不能称已显示。"
+          }
+        },
+        {
+          "at": 19.491,
+          "returned_at": 19.491,
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displayed",
+            "content_id": "380a815883094c38adc1c1131105596b"
+          }
+        }
+      ],
+      "audio_receipts": [
+        {
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "status": "completed",
+          "pcm_bytes": 86628,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "cf8f51b4f60549b8ae9563959692104c",
+            "written_frames": 43314,
+            "played_frames": 43314,
+            "audio_session_id": 59,
+            "routed_device_type": 2,
+            "received_bytes": 86628,
+            "next_sequence": 94,
+            "error": ""
+          },
+          "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+        },
+        {
+          "id": "a122797f3f2849f99bb4b5d65479bb79",
+          "status": "completed",
+          "pcm_bytes": 259960,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "a122797f3f2849f99bb4b5d65479bb79",
+            "written_frames": 129980,
+            "played_frames": 129980,
+            "audio_session_id": 61,
+            "routed_device_type": 2,
+            "received_bytes": 259960,
+            "next_sequence": 282,
+            "error": ""
+          },
+          "pcm_sha256": "b54d51454e5f7ae5154f29ab705996f7fc09c64aaa6bf4718cc250494944af08"
+        }
+      ],
+      "observer": {
+        "at": 26.283,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "displayed",
+          "content_id": "380a815883094c38adc1c1131105596b"
+        }
+      }
+    },
+    {
+      "index": 3,
+      "input": "准备画面已经显示了，这次默写二会字，把拼音显示在电视上。",
+      "participant_reason": "synthetic confirmation backed by actual receiver ready-display acknowledgement",
+      "at": 30.721,
+      "events": [
+        {
+          "at": 31.404,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 36.69,
+          "kind": "user_text",
+          "text": "准备，画面已经显示了，这次默写 2 会字拼音显示在电视上。"
+        },
+        {
+          "at": 42.426,
+          "kind": "assistant_text",
+          "text": "可以把这页拼音显示到客厅电视上吗？"
+        },
+        {
+          "at": 42.896,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 46.063,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 37.015,
+          "returned_at": 37.02,
+          "name": "list_practice_textbooks",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "books": [
+              {
+                "book_id": "4e28c92b626b4f29ae3affe194525579",
+                "title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+                "subject": "chinese",
+                "source": "review_draft",
+                "imported_at": 1792425490.5359643,
+                "lessons": [
+                  {
+                    "number": 1,
+                    "unit": 1,
+                    "title": "小蝌蚪找妈妈",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 2,
+                    "unit": 1,
+                    "title": "我是什么",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 3,
+                    "unit": 1,
+                    "title": "植物妈妈有办法",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 1,
+                    "unit": 2,
+                    "title": "场景歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 2,
+                    "unit": 2,
+                    "title": "树之歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 3,
+                    "unit": 2,
+                    "title": "拍手歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 4,
+                    "unit": 2,
+                    "title": "田家四季歌",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 4,
+                    "unit": 3,
+                    "title": "彩虹",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 5,
+                    "unit": 3,
+                    "title": "去外婆家",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 6,
+                    "unit": 3,
+                    "title": "数星星的孩子",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 7,
+                    "unit": 4,
+                    "title": "古诗二首",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 8,
+                    "unit": 4,
+                    "title": "黄山奇石",
+                    "reviewed": true
+                  },
+                  {
+                    "number": 9,
+                    "unit": 4,
+                    "title": "日月潭",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 10,
+                    "unit": 4,
+                    "title": "葡萄沟",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 11,
+                    "unit": 5,
+                    "title": "坐井观天",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 12,
+                    "unit": 5,
+                    "title": "寒号鸟",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 13,
+                    "unit": 5,
+                    "title": "我要的是葫芦",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 14,
+                    "unit": 6,
+                    "title": "八角楼上",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 15,
+                    "unit": 6,
+                    "title": "朱德的扁担",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 16,
+                    "unit": 6,
+                    "title": "难忘的泼水节",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 17,
+                    "unit": 6,
+                    "title": "刘胡兰",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 18,
+                    "unit": 7,
+                    "title": "古诗二首",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 19,
+                    "unit": 7,
+                    "title": "雾在哪里",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 20,
+                    "unit": 7,
+                    "title": "雪孩子",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 21,
+                    "unit": 8,
+                    "title": "称赞",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 22,
+                    "unit": 8,
+                    "title": "纸船和风筝",
+                    "reviewed": false
+                  },
+                  {
+                    "number": 23,
+                    "unit": 8,
+                    "title": "快乐的小河",
+                    "reviewed": false
+                  }
+                ]
+              }
+            ],
+            "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+          }
+        },
+        {
+          "at": 37.984,
+          "returned_at": 37.99,
+          "name": "get_dictation_material",
+          "arguments": {
+            "lesson": 7
+          },
+          "result": {
+            "status": "ready",
+            "material_id": "cc2c6871a189",
+            "book_id": "4e28c92b626b4f29ae3affe194525579",
+            "book_title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+            "lesson": 7,
+            "unit": 4,
+            "lesson_title": "古诗二首",
+            "pronunciation_context": "登鹳雀楼\n[唐]王之焕\n白日依山尽，黄河入海流。欲穷千里目，更上一层楼。\n\n望庐山瀑布\n[唐]李白\n日照香炉生紫烟，遥看瀑布挂前川。飞流直下三千尺，疑是银河落九天。\n穷尽 山穷水尽 层叠 层林叠翠 烟云 烟消云散 山川 名山大川",
+            "four": [
+              "依",
+              "尽",
+              "穷",
+              "层",
+              "照",
+              "炉",
+              "烟",
+              "川",
+              "直",
+              "银"
+            ],
+            "two": [
+              "登",
+              "唐",
+              "依",
+              "尽",
+              "欲",
+              "穷",
+              "层",
+              "瀑",
+              "布",
+              "炉",
+              "紫",
+              "烟",
+              "遥"
+            ]
+          }
+        },
+        {
+          "at": 40.856,
+          "returned_at": 40.863,
+          "name": "present_dictation_item",
+          "arguments": {
+            "group": "two",
+            "material_id": "cc2c6871a189",
+            "offset": 0,
+            "pinyin": "dēng|táng|yī|jìn|yù|qióng|céng|pù"
+          },
+          "result": {
+            "status": "awaiting_consent",
+            "request_id": "8bb97859144e40dcb4c8148c7fe520b8",
+            "question": "可以把这页拼音显示到客厅电视上吗？",
+            "preview": "dēng    táng    yī    jìn    yù    qióng    céng    pù",
+            "instructions": "逐字问出 question，等待下一轮明确同意。不能现在调用确认。",
+            "item_count": 8,
+            "has_more": true,
+            "next_offset": 8
+          }
+        }
+      ],
+      "audio_receipts": [
+        {
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "status": "completed",
+          "pcm_bytes": 86628,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "cf8f51b4f60549b8ae9563959692104c",
+            "written_frames": 43314,
+            "played_frames": 43314,
+            "audio_session_id": 59,
+            "routed_device_type": 2,
+            "received_bytes": 86628,
+            "next_sequence": 94,
+            "error": ""
+          },
+          "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+        },
+        {
+          "id": "a122797f3f2849f99bb4b5d65479bb79",
+          "status": "completed",
+          "pcm_bytes": 259960,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "a122797f3f2849f99bb4b5d65479bb79",
+            "written_frames": 129980,
+            "played_frames": 129980,
+            "audio_session_id": 61,
+            "routed_device_type": 2,
+            "received_bytes": 259960,
+            "next_sequence": 282,
+            "error": ""
+          },
+          "pcm_sha256": "b54d51454e5f7ae5154f29ab705996f7fc09c64aaa6bf4718cc250494944af08"
+        },
+        {
+          "id": "9925a83370384743ac0469baa873893e",
+          "status": "completed",
+          "pcm_bytes": 152900,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "9925a83370384743ac0469baa873893e",
+            "written_frames": 76450,
+            "played_frames": 76450,
+            "audio_session_id": 63,
+            "routed_device_type": 2,
+            "received_bytes": 152900,
+            "next_sequence": 166,
+            "error": ""
+          },
+          "pcm_sha256": "4d3cbe2ed9d4330d1fe25f163e63bbcf97e00c94a7f9520c92943470e170db26"
+        }
+      ],
+      "observer": {
+        "at": 46.092,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "awaiting_consent"
+        }
+      }
+    },
+    {
+      "index": 4,
+      "input": "可以，请把拼音显示在电视上。",
+      "participant_reason": "simulated display-consent response to actual model question",
+      "at": 48.611,
+      "events": [
+        {
+          "at": 49.557,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 51.866,
+          "kind": "user_text",
+          "text": "可以，你把拼音显示在电视上。"
+        },
+        {
+          "at": 55.66,
+          "kind": "assistant_text",
+          "text": "已经把这页二会字的拼音显示在电视上了，写完说“下一条”就出下一页。"
+        },
+        {
+          "at": 56.334,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 61.264,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 53.275,
+          "returned_at": 53.275,
+          "name": "confirm_tv_display",
+          "arguments": {
+            "request_id": "8bb97859144e40dcb4c8148c7fe520b8"
+          },
+          "result": {
+            "status": "displaying",
+            "instructions": "正在发送，稍后查询 get_tv_display_status；尚不能说已显示。"
+          }
+        },
+        {
+          "at": 54.207,
+          "returned_at": 54.207,
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displayed",
+            "content_id": "8bb97859144e40dcb4c8148c7fe520b8"
+          }
+        }
+      ],
+      "audio_receipts": [
+        {
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "status": "completed",
+          "pcm_bytes": 86628,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "cf8f51b4f60549b8ae9563959692104c",
+            "written_frames": 43314,
+            "played_frames": 43314,
+            "audio_session_id": 59,
+            "routed_device_type": 2,
+            "received_bytes": 86628,
+            "next_sequence": 94,
+            "error": ""
+          },
+          "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+        },
+        {
+          "id": "a122797f3f2849f99bb4b5d65479bb79",
+          "status": "completed",
+          "pcm_bytes": 259960,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "a122797f3f2849f99bb4b5d65479bb79",
+            "written_frames": 129980,
+            "played_frames": 129980,
+            "audio_session_id": 61,
+            "routed_device_type": 2,
+            "received_bytes": 259960,
+            "next_sequence": 282,
+            "error": ""
+          },
+          "pcm_sha256": "b54d51454e5f7ae5154f29ab705996f7fc09c64aaa6bf4718cc250494944af08"
+        },
+        {
+          "id": "9925a83370384743ac0469baa873893e",
+          "status": "completed",
+          "pcm_bytes": 152900,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "9925a83370384743ac0469baa873893e",
+            "written_frames": 76450,
+            "played_frames": 76450,
+            "audio_session_id": 63,
+            "routed_device_type": 2,
+            "received_bytes": 152900,
+            "next_sequence": 166,
+            "error": ""
+          },
+          "pcm_sha256": "4d3cbe2ed9d4330d1fe25f163e63bbcf97e00c94a7f9520c92943470e170db26"
+        },
+        {
+          "id": "e1a767de79ed47c1b2d76455f6c522a3",
+          "status": "completed",
+          "pcm_bytes": 268504,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "e1a767de79ed47c1b2d76455f6c522a3",
+            "written_frames": 134252,
+            "played_frames": 134252,
+            "audio_session_id": 65,
+            "routed_device_type": 2,
+            "received_bytes": 268504,
+            "next_sequence": 291,
+            "error": ""
+          },
+          "pcm_sha256": "926cd3540c7e6c240b6c716655879a70a83b70aa979286f1a9014a63ba222a13"
+        }
+      ],
+      "observer": {
+        "at": 61.54,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "displayed",
+          "content_id": "8bb97859144e40dcb4c8148c7fe520b8"
+        }
+      }
+    },
+    {
+      "index": 5,
+      "input": "更多。",
+      "participant_reason": "explicit more instruction only after first real TV page and twenty-second quiet window",
+      "at": 82.295,
+      "events": [
+        {
+          "at": 83.26,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 83.678,
+          "kind": "user_text",
+          "text": "更多。"
+        },
+        {
+          "at": 86.427,
+          "kind": "assistant_text",
+          "text": "可以把这页拼音显示到客厅电视上吗？"
+        },
+        {
+          "at": 86.901,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 90.186,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 85.361,
+          "returned_at": 85.366,
+          "name": "present_dictation_item",
+          "arguments": {
+            "group": "two",
+            "material_id": "cc2c6871a189",
+            "offset": 8,
+            "pinyin": "bù|lú|zǐ|yān|yáo"
+          },
+          "result": {
+            "status": "awaiting_consent",
+            "request_id": "807bda1791ce43eebf3c8683471aebf6",
+            "question": "可以把这页拼音显示到客厅电视上吗？",
+            "preview": "bù    lú    zǐ    yān    yáo",
+            "instructions": "逐字问出 question，等待下一轮明确同意。不能现在调用确认。",
+            "item_count": 5,
+            "has_more": false,
+            "next_offset": 16
+          }
+        }
+      ],
+      "audio_receipts": [
+        {
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "status": "completed",
+          "pcm_bytes": 86628,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "cf8f51b4f60549b8ae9563959692104c",
+            "written_frames": 43314,
+            "played_frames": 43314,
+            "audio_session_id": 59,
+            "routed_device_type": 2,
+            "received_bytes": 86628,
+            "next_sequence": 94,
+            "error": ""
+          },
+          "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+        },
+        {
+          "id": "a122797f3f2849f99bb4b5d65479bb79",
+          "status": "completed",
+          "pcm_bytes": 259960,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "a122797f3f2849f99bb4b5d65479bb79",
+            "written_frames": 129980,
+            "played_frames": 129980,
+            "audio_session_id": 61,
+            "routed_device_type": 2,
+            "received_bytes": 259960,
+            "next_sequence": 282,
+            "error": ""
+          },
+          "pcm_sha256": "b54d51454e5f7ae5154f29ab705996f7fc09c64aaa6bf4718cc250494944af08"
+        },
+        {
+          "id": "9925a83370384743ac0469baa873893e",
+          "status": "completed",
+          "pcm_bytes": 152900,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "9925a83370384743ac0469baa873893e",
+            "written_frames": 76450,
+            "played_frames": 76450,
+            "audio_session_id": 63,
+            "routed_device_type": 2,
+            "received_bytes": 152900,
+            "next_sequence": 166,
+            "error": ""
+          },
+          "pcm_sha256": "4d3cbe2ed9d4330d1fe25f163e63bbcf97e00c94a7f9520c92943470e170db26"
+        },
+        {
+          "id": "e1a767de79ed47c1b2d76455f6c522a3",
+          "status": "completed",
+          "pcm_bytes": 268504,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "e1a767de79ed47c1b2d76455f6c522a3",
+            "written_frames": 134252,
+            "played_frames": 134252,
+            "audio_session_id": 65,
+            "routed_device_type": 2,
+            "received_bytes": 268504,
+            "next_sequence": 291,
+            "error": ""
+          },
+          "pcm_sha256": "926cd3540c7e6c240b6c716655879a70a83b70aa979286f1a9014a63ba222a13"
+        },
+        {
+          "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+          "status": "completed",
+          "pcm_bytes": 152500,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+            "written_frames": 76250,
+            "played_frames": 76250,
+            "audio_session_id": 67,
+            "routed_device_type": 2,
+            "received_bytes": 152500,
+            "next_sequence": 166,
+            "error": ""
+          },
+          "pcm_sha256": "6d2247bb8b1a8b2c38d8484c8fea942eb413256411d43a7a583a73c670dc70d7"
+        }
+      ],
+      "observer": {
+        "at": 90.187,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "awaiting_consent"
+        }
+      }
+    },
+    {
+      "index": 6,
+      "input": "可以，请把拼音显示在电视上。",
+      "participant_reason": "simulated display-consent response to actual model question",
+      "at": 92.692,
+      "events": [
+        {
+          "at": 93.527,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 95.964,
+          "kind": "user_text",
+          "text": "可以，你把拼音显示在电视上。"
+        },
+        {
+          "at": 99.595,
+          "kind": "assistant_text",
+          "text": "这页拼音也已经显示在电视上了，第7课的二会字拼音都展示完啦。"
+        },
+        {
+          "at": 100.337,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 105.344,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 97.29,
+          "returned_at": 97.29,
+          "name": "confirm_tv_display",
+          "arguments": {
+            "request_id": "807bda1791ce43eebf3c8683471aebf6"
+          },
+          "result": {
+            "status": "displaying",
+            "instructions": "正在发送，稍后查询 get_tv_display_status；尚不能说已显示。"
+          }
+        },
+        {
+          "at": 98.309,
+          "returned_at": 98.309,
+          "name": "get_tv_display_status",
+          "arguments": {},
+          "result": {
+            "status": "displayed",
+            "content_id": "807bda1791ce43eebf3c8683471aebf6"
+          }
+        }
+      ],
+      "audio_receipts": [
+        {
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "status": "completed",
+          "pcm_bytes": 86628,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "cf8f51b4f60549b8ae9563959692104c",
+            "written_frames": 43314,
+            "played_frames": 43314,
+            "audio_session_id": 59,
+            "routed_device_type": 2,
+            "received_bytes": 86628,
+            "next_sequence": 94,
+            "error": ""
+          },
+          "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+        },
+        {
+          "id": "a122797f3f2849f99bb4b5d65479bb79",
+          "status": "completed",
+          "pcm_bytes": 259960,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "a122797f3f2849f99bb4b5d65479bb79",
+            "written_frames": 129980,
+            "played_frames": 129980,
+            "audio_session_id": 61,
+            "routed_device_type": 2,
+            "received_bytes": 259960,
+            "next_sequence": 282,
+            "error": ""
+          },
+          "pcm_sha256": "b54d51454e5f7ae5154f29ab705996f7fc09c64aaa6bf4718cc250494944af08"
+        },
+        {
+          "id": "9925a83370384743ac0469baa873893e",
+          "status": "completed",
+          "pcm_bytes": 152900,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "9925a83370384743ac0469baa873893e",
+            "written_frames": 76450,
+            "played_frames": 76450,
+            "audio_session_id": 63,
+            "routed_device_type": 2,
+            "received_bytes": 152900,
+            "next_sequence": 166,
+            "error": ""
+          },
+          "pcm_sha256": "4d3cbe2ed9d4330d1fe25f163e63bbcf97e00c94a7f9520c92943470e170db26"
+        },
+        {
+          "id": "e1a767de79ed47c1b2d76455f6c522a3",
+          "status": "completed",
+          "pcm_bytes": 268504,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "e1a767de79ed47c1b2d76455f6c522a3",
+            "written_frames": 134252,
+            "played_frames": 134252,
+            "audio_session_id": 65,
+            "routed_device_type": 2,
+            "received_bytes": 268504,
+            "next_sequence": 291,
+            "error": ""
+          },
+          "pcm_sha256": "926cd3540c7e6c240b6c716655879a70a83b70aa979286f1a9014a63ba222a13"
+        },
+        {
+          "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+          "status": "completed",
+          "pcm_bytes": 152500,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+            "written_frames": 76250,
+            "played_frames": 76250,
+            "audio_session_id": 67,
+            "routed_device_type": 2,
+            "received_bytes": 152500,
+            "next_sequence": 166,
+            "error": ""
+          },
+          "pcm_sha256": "6d2247bb8b1a8b2c38d8484c8fea942eb413256411d43a7a583a73c670dc70d7"
+        },
+        {
+          "id": "9f8aeea2a7a64a2c98a07a0466e47b9f",
+          "status": "completed",
+          "pcm_bytes": 285540,
+          "receiver": {
+            "status": "completed",
+            "music_volume": 6,
+            "music_muted": false,
+            "id": "9f8aeea2a7a64a2c98a07a0466e47b9f",
+            "written_frames": 142770,
+            "played_frames": 142770,
+            "audio_session_id": 69,
+            "routed_device_type": 2,
+            "received_bytes": 285540,
+            "next_sequence": 309,
+            "error": ""
+          },
+          "pcm_sha256": "676dad8554d42d8db5e54a5b553424e5df593bf711acc3e04698b06c6bbc8fbe"
+        }
+      ],
+      "observer": {
+        "at": 105.52,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "displayed",
+          "content_id": "807bda1791ce43eebf3c8683471aebf6"
+        }
+      }
+    }
+  ],
+  "quiet_windows": [
+    {
+      "label": "after_pinyin_page_1",
+      "start": 61.549,
+      "end": 81.651,
+      "seconds": 20,
+      "input_muted": true,
+      "new_tool_calls": 0,
+      "new_exact_deliveries": 0,
+      "receiver_before": {
+        "version": "0.3",
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ],
+        "interactive": true,
+        "foreground": true,
+        "rendered_id": "8bb97859144e40dcb4c8148c7fe520b8",
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "e1a767de79ed47c1b2d76455f6c522a3",
+          "written_frames": 134252,
+          "played_frames": 134252,
+          "audio_session_id": 65,
+          "routed_device_type": 2,
+          "received_bytes": 268504,
+          "next_sequence": 291,
+          "error": ""
+        }
+      },
+      "receiver_after": {
+        "version": "0.3",
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ],
+        "interactive": true,
+        "foreground": true,
+        "rendered_id": "8bb97859144e40dcb4c8148c7fe520b8",
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "e1a767de79ed47c1b2d76455f6c522a3",
+          "written_frames": 134252,
+          "played_frames": 134252,
+          "audio_session_id": 65,
+          "routed_device_type": 2,
+          "received_bytes": 268504,
+          "next_sequence": 291,
+          "error": ""
+        }
+      },
+      "tv_before": {
+        "status": "displayed",
+        "content_id": "8bb97859144e40dcb4c8148c7fe520b8"
+      },
+      "tv_after": {
+        "status": "displayed",
+        "content_id": "8bb97859144e40dcb4c8148c7fe520b8"
+      },
+      "new_tv_payloads": 0
+    },
+    {
+      "label": "after_pinyin_page_2",
+      "start": 105.533,
+      "end": 125.628,
+      "seconds": 20,
+      "input_muted": true,
+      "new_tool_calls": 0,
+      "new_exact_deliveries": 0,
+      "receiver_before": {
+        "version": "0.3",
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ],
+        "interactive": true,
+        "foreground": true,
+        "rendered_id": "807bda1791ce43eebf3c8683471aebf6",
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "9f8aeea2a7a64a2c98a07a0466e47b9f",
+          "written_frames": 142770,
+          "played_frames": 142770,
+          "audio_session_id": 69,
+          "routed_device_type": 2,
+          "received_bytes": 285540,
+          "next_sequence": 309,
+          "error": ""
+        }
+      },
+      "receiver_after": {
+        "version": "0.3",
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ],
+        "interactive": true,
+        "foreground": true,
+        "rendered_id": "807bda1791ce43eebf3c8683471aebf6",
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "9f8aeea2a7a64a2c98a07a0466e47b9f",
+          "written_frames": 142770,
+          "played_frames": 142770,
+          "audio_session_id": 69,
+          "routed_device_type": 2,
+          "received_bytes": 285540,
+          "next_sequence": 309,
+          "error": ""
+        }
+      },
+      "tv_before": {
+        "status": "displayed",
+        "content_id": "807bda1791ce43eebf3c8683471aebf6"
+      },
+      "tv_after": {
+        "status": "displayed",
+        "content_id": "807bda1791ce43eebf3c8683471aebf6"
+      },
+      "new_tv_payloads": 0
+    }
+  ],
+  "limits": [
+    "synthetic TTS user input through actual cloud ASR",
+    "actual cloud PCM streamed to paired television AudioTrack; no LIRA speaker output",
+    "TV-on statements and pronunciation approvals are synthetic participant replies, not verified household facts",
+    "real deployed TV/material handlers; no live household identity/memory or IR loaded",
+    "observer reads and quiet windows are not model function calls",
+    "no service restart/config change/classic-chain change"
+  ],
+  "source_code_hashes": {
+    "lira/dictation.py": "99bb968370346cd0d398becaa4cc5221c64717c004da14698daa57b65593670b",
+    "lira/tv_voice.py": "8bc2cc21ec2a178fba7044dcf359c0c7141be80146b73908a1bc090a7d1b5b59",
+    "lira/textbook_practice.py": "e599b20ffd86e75343d107e0a9a1ffe44c0742442da7eec549c2588fac2a1026",
+    "lira/audio/doubao_realtime.py": "68ba3f468aa6ddf7346da340f438a214b4c4ff0f63e7d79bd49fdbfc0356279b",
+    "lira/conversation_paths.py": "86913314daec8ddb92b77574d1ab8071173eb582e1345350e81c333fd4e6305f",
+    "lira/tv_audio.py": "7043e0f30a189b05e5acd4ce766df73a8e9ea186bda0b1eb5745e8db06680f82"
+  },
+  "lesson7": [
+    {
+      "book_id": "4e28c92b626b4f29ae3affe194525579",
+      "source": "review_draft",
+      "lessons": [
+        {
+          "unit": 4,
+          "number": 7,
+          "title": "古诗二首",
+          "reviewed": true,
+          "four_count": 10,
+          "two_count": 13
+        }
+      ]
+    }
+  ],
+  "tv_payloads": [
+    {
+      "at": 18.738,
+      "payload": {
+        "type": "text",
+        "text": "准备开始默写第7课",
+        "id": "380a815883094c38adc1c1131105596b",
+        "approved": true
+      },
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "380a815883094c38adc1c1131105596b",
+        "version": "0.3",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "cf8f51b4f60549b8ae9563959692104c",
+          "written_frames": 43314,
+          "played_frames": 43314,
+          "audio_session_id": 59,
+          "routed_device_type": 2,
+          "received_bytes": 86628,
+          "next_sequence": 94,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "at": 53.276,
+      "payload": {
+        "type": "text",
+        "text": "dēng    táng    yī    jìn    yù    qióng    céng    pù",
+        "id": "8bb97859144e40dcb4c8148c7fe520b8",
+        "approved": true
+      },
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "8bb97859144e40dcb4c8148c7fe520b8",
+        "version": "0.3",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "9925a83370384743ac0469baa873893e",
+          "written_frames": 76450,
+          "played_frames": 76450,
+          "audio_session_id": 63,
+          "routed_device_type": 2,
+          "received_bytes": 152900,
+          "next_sequence": 166,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "at": 97.291,
+      "payload": {
+        "type": "text",
+        "text": "bù    lú    zǐ    yān    yáo",
+        "id": "807bda1791ce43eebf3c8683471aebf6",
+        "approved": true
+      },
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "807bda1791ce43eebf3c8683471aebf6",
+        "version": "0.3",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+          "written_frames": 76250,
+          "played_frames": 76250,
+          "audio_session_id": 67,
+          "routed_device_type": 2,
+          "received_bytes": 152500,
+          "next_sequence": 166,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    }
+  ],
+  "wire_tool_results": [
+    {
+      "at": 12.242,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "cf4408cd-6f64-45d0-86df-4aba5d83ae47",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"needs_input\", \"receiver\": {\"version\": \"0.3\", \"capabilities\": [\"clear_content_id\", \"pcm_audio_v1\"], \"interactive\": true, \"foreground\": true, \"rendered_id\": \"1829178001704e1da6ac987d3b1f58b9\", \"instance\": \"ec558114-b4e7-4ab2-a209-e07f1e19a08b\", \"audio\": {\"status\": \"completed\", \"music_volume\": 6, \"music_muted\": false, \"id\": \"cd4762a0db9d42338a170408c4f6113a\", \"written_frames\": 139069, \"played_frames\": 139069, \"audio_session_id\": 57, \"routed_device_type\": 2, \"received_bytes\": 278138, \"next_sequence\": 301, \"error\": \"\"}, \"status\": \"ok\", \"clear_supported\": true}, \"requested_lesson\": null, \"question\": \"电视已经打开了吗？\", \"instructions\": \"等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 18.831,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "997070b1-1ec7-4878-829e-400e693592d8",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displaying\", \"lesson\": 7, \"question\": \"电视上是否已经显示准备开始默写第7课的画面？\", \"instructions\": \"查询get_tv_display_status核实发送结果，并等待用户确认画面。失败不能称已显示。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 19.492,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "b091c0d4-e1f6-4063-8f4a-b65d104f1c16",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displayed\", \"content_id\": \"380a815883094c38adc1c1131105596b\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 37.021,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "3be7395c-568d-45fc-8984-ca944009c7a1",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"ok\", \"books\": [{\"book_id\": \"4e28c92b626b4f29ae3affe194525579\", \"title\": \"人教版语文二年级上册（官方当前电子版，字表待补全）\", \"subject\": \"chinese\", \"source\": \"review_draft\", \"imported_at\": 1792425490.5359643, \"lessons\": [{\"number\": 1, \"unit\": 1, \"title\": \"小蝌蚪找妈妈\", \"reviewed\": true}, {\"number\": 2, \"unit\": 1, \"title\": \"我是什么\", \"reviewed\": true}, {\"number\": 3, \"unit\": 1, \"title\": \"植物妈妈有办法\", \"reviewed\": false}, {\"number\": 1, \"unit\": 2, \"title\": \"场景歌\", \"reviewed\": false}, {\"number\": 2, \"unit\": 2, \"title\": \"树之歌\", \"reviewed\": false}, {\"number\": 3, \"unit\": 2, \"title\": \"拍手歌\", \"reviewed\": false}, {\"number\": 4, \"unit\": 2, \"title\": \"田家四季歌\", \"reviewed\": false}, {\"number\": 4, \"unit\": 3, \"title\": \"彩虹\", \"reviewed\": false}, {\"number\": 5, \"unit\": 3, \"title\": \"去外婆家\", \"reviewed\": false}, {\"number\": 6, \"unit\": 3, \"title\": \"数星星的孩子\", \"reviewed\": false}, {\"number\": 7, \"unit\": 4, \"title\": \"古诗二首\", \"reviewed\": true}, {\"number\": 8, \"unit\": 4, \"title\": \"黄山奇石\", \"reviewed\": true}, {\"number\": 9, \"unit\": 4, \"title\": \"日月潭\", \"reviewed\": false}, {\"number\": 10, \"unit\": 4, \"title\": \"葡萄沟\", \"reviewed\": false}, {\"number\": 11, \"unit\": 5, \"title\": \"坐井观天\", \"reviewed\": false}, {\"number\": 12, \"unit\": 5, \"title\": \"寒号鸟\", \"reviewed\": false}, {\"number\": 13, \"unit\": 5, \"title\": \"我要的是葫芦\", \"reviewed\": false}, {\"number\": 14, \"unit\": 6, \"title\": \"八角楼上\", \"reviewed\": false}, {\"number\": 15, \"unit\": 6, \"title\": \"朱德的扁担\", \"reviewed\": false}, {\"number\": 16, \"unit\": 6, \"title\": \"难忘的泼水节\", \"reviewed\": false}, {\"number\": 17, \"unit\": 6, \"title\": \"刘胡兰\", \"reviewed\": false}, {\"number\": 18, \"unit\": 7, \"title\": \"古诗二首\", \"reviewed\": false}, {\"number\": 19, \"unit\": 7, \"title\": \"雾在哪里\", \"reviewed\": false}, {\"number\": 20, \"unit\": 7, \"title\": \"雪孩子\", \"reviewed\": false}, {\"number\": 21, \"unit\": 8, \"title\": \"称赞\", \"reviewed\": false}, {\"number\": 22, \"unit\": 8, \"title\": \"纸船和风筝\", \"reviewed\": false}, {\"number\": 23, \"unit\": 8, \"title\": \"快乐的小河\", \"reviewed\": false}]}], \"instructions\": \"只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 37.991,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "7309f642-9624-413a-9be7-d8f969019a9f",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"ready\", \"material_id\": \"cc2c6871a189\", \"book_id\": \"4e28c92b626b4f29ae3affe194525579\", \"book_title\": \"人教版语文二年级上册（官方当前电子版，字表待补全）\", \"lesson\": 7, \"unit\": 4, \"lesson_title\": \"古诗二首\", \"pronunciation_context\": \"登鹳雀楼\\n[唐]王之焕\\n白日依山尽，黄河入海流。欲穷千里目，更上一层楼。\\n\\n望庐山瀑布\\n[唐]李白\\n日照香炉生紫烟，遥看瀑布挂前川。飞流直下三千尺，疑是银河落九天。\\n穷尽 山穷水尽 层叠 层林叠翠 烟云 烟消云散 山川 名山大川\", \"four\": [\"依\", \"尽\", \"穷\", \"层\", \"照\", \"炉\", \"烟\", \"川\", \"直\", \"银\"], \"two\": [\"登\", \"唐\", \"依\", \"尽\", \"欲\", \"穷\", \"层\", \"瀑\", \"布\", \"炉\", \"紫\", \"烟\", \"遥\"]}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 40.864,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "9db3a93a-f3fe-41fd-a45b-08b8a00a498f",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"awaiting_consent\", \"request_id\": \"8bb97859144e40dcb4c8148c7fe520b8\", \"question\": \"可以把这页拼音显示到客厅电视上吗？\", \"preview\": \"dēng    táng    yī    jìn    yù    qióng    céng    pù\", \"instructions\": \"逐字问出 question，等待下一轮明确同意。不能现在调用确认。\", \"item_count\": 8, \"has_more\": true, \"next_offset\": 8}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 53.373,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "fb122f39-a22a-4f74-92d3-d0a115f7ae77",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displaying\", \"instructions\": \"正在发送，稍后查询 get_tv_display_status；尚不能说已显示。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 54.207,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "3b1aec21-f13a-44f3-bc0e-07db056eea23",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displayed\", \"content_id\": \"8bb97859144e40dcb4c8148c7fe520b8\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 85.367,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "6ffed767-53ed-43ab-90bf-90f061a7127f",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"awaiting_consent\", \"request_id\": \"807bda1791ce43eebf3c8683471aebf6\", \"question\": \"可以把这页拼音显示到客厅电视上吗？\", \"preview\": \"bù    lú    zǐ    yān    yáo\", \"instructions\": \"逐字问出 question，等待下一轮明确同意。不能现在调用确认。\", \"item_count\": 5, \"has_more\": false, \"next_offset\": 16}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 97.343,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "744472df-80d6-4c50-aa4f-84f38013b7f7",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displaying\", \"instructions\": \"正在发送，稍后查询 get_tv_display_status；尚不能说已显示。\"}"
+          }
+        ]
+      }
+    },
+    {
+      "at": 98.31,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "b61ec411-7a49-4fa7-9779-524cabf3409a",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"displayed\", \"content_id\": \"807bda1791ce43eebf3c8683471aebf6\"}"
+          }
+        ]
+      }
+    }
+  ],
+  "wire_speech_requests": [],
+  "displayed_pinyin_pages": 2,
+  "more_instruction_sent": true,
+  "service_after": {
+    "MainPID": "91082",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "service_unchanged": true,
+  "textbook_files_unchanged": true,
+  "tv_audio_frames": 603016,
+  "audio_receipts": [
+    {
+      "id": "cf8f51b4f60549b8ae9563959692104c",
+      "status": "completed",
+      "pcm_bytes": 86628,
+      "receiver": {
+        "status": "completed",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "cf8f51b4f60549b8ae9563959692104c",
+        "written_frames": 43314,
+        "played_frames": 43314,
+        "audio_session_id": 59,
+        "routed_device_type": 2,
+        "received_bytes": 86628,
+        "next_sequence": 94,
+        "error": ""
+      },
+      "pcm_sha256": "ba0257e6ce2adf1d2a16bda870b39c061245f4c75634cf45581b185f760348b3"
+    },
+    {
+      "id": "a122797f3f2849f99bb4b5d65479bb79",
+      "status": "completed",
+      "pcm_bytes": 259960,
+      "receiver": {
+        "status": "completed",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "a122797f3f2849f99bb4b5d65479bb79",
+        "written_frames": 129980,
+        "played_frames": 129980,
+        "audio_session_id": 61,
+        "routed_device_type": 2,
+        "received_bytes": 259960,
+        "next_sequence": 282,
+        "error": ""
+      },
+      "pcm_sha256": "b54d51454e5f7ae5154f29ab705996f7fc09c64aaa6bf4718cc250494944af08"
+    },
+    {
+      "id": "9925a83370384743ac0469baa873893e",
+      "status": "completed",
+      "pcm_bytes": 152900,
+      "receiver": {
+        "status": "completed",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "9925a83370384743ac0469baa873893e",
+        "written_frames": 76450,
+        "played_frames": 76450,
+        "audio_session_id": 63,
+        "routed_device_type": 2,
+        "received_bytes": 152900,
+        "next_sequence": 166,
+        "error": ""
+      },
+      "pcm_sha256": "4d3cbe2ed9d4330d1fe25f163e63bbcf97e00c94a7f9520c92943470e170db26"
+    },
+    {
+      "id": "e1a767de79ed47c1b2d76455f6c522a3",
+      "status": "completed",
+      "pcm_bytes": 268504,
+      "receiver": {
+        "status": "completed",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "e1a767de79ed47c1b2d76455f6c522a3",
+        "written_frames": 134252,
+        "played_frames": 134252,
+        "audio_session_id": 65,
+        "routed_device_type": 2,
+        "received_bytes": 268504,
+        "next_sequence": 291,
+        "error": ""
+      },
+      "pcm_sha256": "926cd3540c7e6c240b6c716655879a70a83b70aa979286f1a9014a63ba222a13"
+    },
+    {
+      "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+      "status": "completed",
+      "pcm_bytes": 152500,
+      "receiver": {
+        "status": "completed",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "8b0dc780a95b4a70b41fcc3a4c6e7896",
+        "written_frames": 76250,
+        "played_frames": 76250,
+        "audio_session_id": 67,
+        "routed_device_type": 2,
+        "received_bytes": 152500,
+        "next_sequence": 166,
+        "error": ""
+      },
+      "pcm_sha256": "6d2247bb8b1a8b2c38d8484c8fea942eb413256411d43a7a583a73c670dc70d7"
+    },
+    {
+      "id": "9f8aeea2a7a64a2c98a07a0466e47b9f",
+      "status": "completed",
+      "pcm_bytes": 285540,
+      "receiver": {
+        "status": "completed",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "9f8aeea2a7a64a2c98a07a0466e47b9f",
+        "written_frames": 142770,
+        "played_frames": 142770,
+        "audio_session_id": 69,
+        "routed_device_type": 2,
+        "received_bytes": 285540,
+        "next_sequence": 309,
+        "error": ""
+      },
+      "pcm_sha256": "676dad8554d42d8db5e54a5b553424e5df593bf711acc3e04698b06c6bbc8fbe"
+    }
+  ],
+  "ended_at": 125.776
+}

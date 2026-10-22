@@ -1,0 +1,670 @@
+{
+  "status": "complete",
+  "verdict": "Not ready",
+  "scope": {
+    "base": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "branch": "feat/home-console-chat",
+    "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "pr_url": null,
+    "files_changed": 63
+  },
+  "intent": "Extend existing Doubao realtime with actual tools, completion/cancellation, shared state/timers, parent-reviewed versioned source, local OCR, exact speech, TV probe/clear, identity-scoped memory/evidence and parent UI. Keep classic behavior and avoid fixed teaching flow; distinguish autonomy, negotiated agreements and deterministic permission/source/privacy/result boundaries.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "testing",
+    "maintainability",
+    "agent-native",
+    "security",
+    "performance",
+    "api-contract",
+    "reliability",
+    "adversarial",
+    "julik-frontend-races"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "file": "device/lira/realtime_capabilities.py",
+      "first_evidence": "device/lira/realtime_capabilities.py:160:         if len(self.operations) >= self.max_operations:",
+      "independent_reviewers": [
+        "agent-native",
+        "adversarial"
+      ],
+      "line": 160,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "agent-native",
+        "adversarial"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Replace lifetime operation and call counts with limits on in-flight work, and introduce explicit bounded retention for completed results and call-ID deduplication. Preserve the documented cross-turn lookup for background speech, OCR, and wait results; report an expired result explicitly if retention ends. Add a session test that performs more than 64 ordinary calls and then successfully invokes a new capability and a control lookup.",
+      "title": "Completed tool calls permanently exhaust session capacity",
+      "why_it_matters": "After 32 ordinary capability calls in one speaker session, asking to pause, stop, revise an agreement, cancel a timer, or clear displayed content returns busy permanently. Completed reads and waits remain in operations and consume the same capacity needed for these actions, so an active agreement and its timers can remain active when the child requests a pause. Keep a bounded result history separately from the in-flight execution limit and reserve revocation paths so exhausting retained history cannot disable stopping.",
+      "evidence": [
+        "device/lira/realtime_capabilities.py:160:         if len(self.operations) >= self.max_operations:",
+        "device/lira/realtime_capabilities.py:122:         self.max_operations, self.max_calls, self.timeout = max_operations, max_calls, timeout",
+        "device/lira/realtime_capabilities.py:136:         if len(self.calls) >= self.max_calls:",
+        "device/lira/realtime_capabilities.py:163:         self.operations[operation['operation_id']] = operation",
+        "device/lira/realtime_capabilities.py:159:         cap = self.registry.entries[name]",
+        "device/lira/realtime_capabilities.py:225:         self.operations.clear()",
+        "device/lira/realtime_capabilities.py:160 -- if len(self.operations) >= self.max_operations:",
+        "Default max_operations is 32 (line 118); each registered non-control capability, including read_agent_task and pause_agent_task, inserts an operation at line 163. Completion only changes status/result and never removes it (line 200).",
+        "Read-only in-memory reproduction using actual CapabilityRegistry, CapabilityExecutor and AgentTaskState: begin a generation, set an active phase, await 32 read_agent_task calls with distinct IDs, then pause_agent_task(revision=0). Output: {'pause_result': {'status': 'busy'}, 'task_phase': 'active', 'retained_operations': 32}.",
+        "AgentTaskState pauses/stops and notifies timer revocation only inside its handler (agent_task_state.py:94-101); the executor rejects before reaching that handler. Real sessions pass this executor all extended tool calls in audio/doubao_realtime.py:563."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "file": "device/lira/audio/doubao_realtime.py",
+      "first_evidence": "device/lira/audio/doubao_realtime.py:491 --         self.capabilities = CapabilityExecutor(old.registry, on_change=self._capability_context_changed)",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 491,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "On a confirmed speaker ownership change, close and recreate the realtime cloud session before accepting new-owner audio or returning personal teaching data. Recreate the executor/task generation and seed only the new identity context; do not replay previous-owner tool results or transcripts. Keep the existing transport-only reset for changes that do not cross an owner boundary.",
+      "title": "CWE-200: Retire cloud history when speaker ownership changes",
+      "why_it_matters": "After child A reads private teaching preferences or parent-reviewed records, a speaker change to child B clears the local operation cache but leaves A's tool results inside the same cloud conversation. B can ask the assistant to repeat the previous results without calling read_teaching_memory again, bypassing that service's identity guard. Updating identity instructions cannot enforce isolation of data already available to the model; retire the cloud conversation on owner changes.",
+      "evidence": [
+        "device/lira/audio/doubao_realtime.py:491 --         self.capabilities = CapabilityExecutor(old.registry, on_change=self._capability_context_changed)",
+        "device/lira/conversation_paths.py:191-200 detects a changed (epoch, track_generation), starts a fresh local task generation and calls session.reset_capability_owner(), retaining self.session.",
+        "device/lira/audio/doubao_realtime.py:486-504 only clears local calls, operations and tasks then sends a session instruction update; it never closes/recreates the cloud conversation or deletes its old tool messages.",
+        "device/lira/audio/doubao_realtime.py:583-585 sends actual tool results using conversation.item.create; TeachingMemory.read returns the recognized member's preferences and parent records.",
+        "device/lira/teaching_memory.py:137-146 guards retrieval by current owner, but cannot revoke results already sent in the prior cloud conversation."
+      ]
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/agent_timers.py",
+      "first_evidence": "device/lira/agent_timers.py:97:             if timer['status'] != 'pending' and name == 'update_task_timer':",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 97,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Reject both update_task_timer and cancel_task_timer unless timer['status'] == 'pending', returning conflict with the current timer revision and status. Preserve an expiry event that was already queued. Add a focused test that expires a timer, then attempts cancellation before polling.",
+      "title": "Late cancellation erases an already expired timer",
+      "why_it_matters": "If a timer expires before the agent's cancellation arrives, cancellation still changes it to cancelled and removes its queued expiry event. The user then loses the actual elapsed-time result, and later reads falsely suggest the timer never expired.",
+      "evidence": [
+        "device/lira/agent_timers.py:97:             if timer['status'] != 'pending' and name == 'update_task_timer':",
+        "device/lira/agent_timers.py:103-105:             if name=='cancel_task_timer': / timer['status']='cancelled' / self.events = deque(e for e in self.events if e['timer_id'] != timer['timer_id'])",
+        "device/lira/agent_timers.py:35-39: _expire sets status='expired' and appends timer_expired before waking waiters."
+      ]
+    },
+    {
+      "#": 4,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/conversation_paths.py",
+      "first_evidence": "device/lira/conversation_paths.py:474 --             if now - self._last_activity < 60:",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 474,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Before applying the idle timeout, preserve the session while the current active agreement has a pending timer or a pending wait_for_task_event operation. Continue honoring explicit stop, privacy, disconnect, and owner changes; add a clock-controlled integration test with a timer beyond 60 seconds and successive bounded waits.",
+      "title": "Keep negotiated timer waits alive past idle timeout",
+      "why_it_matters": "A child who agrees to wait silently for a timer longer than one minute loses the task before it expires. The watchdog only counts speech/audio activity: extended tool calls and pending timer waits never refresh _last_activity, so at 60 seconds _stop_conversation invalidates the agreement, clears timers, and cancels the active wait. This affects normal multi-minute writing or practice intervals even when the model correctly renews its bounded 40-second waits.",
+      "evidence": [
+        "device/lira/conversation_paths.py:474 --             if now - self._last_activity < 60:",
+        "device/lira/conversation_paths.py:476 --             await self._stop_conversation()",
+        "device/lira/conversation_paths.py:486 --         self.agent_task.invalidate()",
+        "device/lira/agent_timers.py:100 --                    'status':'pending','deadline':self.clock()+args['duration_seconds']}",
+        "device/lira/agent_timers.py:24-31 -- _revoke cancels every timer and clears timer/event state when AgentTaskState changes.",
+        "device/lira/conversation_paths.py:121-145 -- _event refreshes _last_activity for activity, input_started, user_text, interrupted and assistant_text; capability calls run directly through CapabilityExecutor, bypassing the legacy _tool_impl refresh."
+      ]
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/hal/board/camera_isp.py",
+      "first_evidence": "device/lira/hal/board/camera_isp.py:126:         return (await proc.wait()) == 0",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 126,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Apply a bounded asyncio.wait_for to proc.communicate() or proc.wait() in _sensor_set and kill/reap the child on timeout or cancellation, matching _v4l2's cleanup pattern. Exercise a stalled control command and verify the process is reaped and the camera mutex eventually releases.",
+      "title": "Sensor control subprocess has no timeout or cancellation cleanup",
+      "why_it_matters": "The realtime OCR path calls capture(), which awaits _sensor_set before its bounded v4l2 frame commands. A stalled v4l2-ctl control call can hold the camera mutex indefinitely. The capability executor's 60-second cancellation stops its coroutine waiter but _sensor_set leaves the child process alive, so later camera work remains unavailable until that process exits.",
+      "evidence": [
+        "device/lira/hal/board/camera_isp.py:126:         return (await proc.wait()) == 0",
+        "device/lira/hal/board/camera_isp.py:156:         await self._sensor_set(\"analogue_gain\", gain)",
+        "device/lira/realtime_vision.py:134:                 raw = await capture()",
+        "device/lira/hal/board/camera_isp.py:176-185: _v4l2 uses a timeout and kills/reaps its subprocess, unlike _sensor_set."
+      ]
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/realtime_vision.py",
+      "first_evidence": "device/lira/realtime_vision.py:134:                 raw = await capture()",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 134,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Move the CPU-heavy post-capture image merge/filter/encode portion of V4l2IspCamera.capture into asyncio.to_thread, while retaining the realtime camera mutex through completion. Verify that incoming audio and cancellation remain responsive during a real-resolution capture.",
+      "title": "Realtime capture blocks WebSocket receive during image processing",
+      "why_it_matters": "The new capture_text tool invokes the board camera coroutine on the realtime event loop. After frame acquisition, that coroutine synchronously merges three 4224×3136 frames and runs OpenCV filtering and JPEG encoding. While it does so, the same loop cannot drain Doubao's WebSocket receive queue or process interruption, so an ordinary photo can stall speech and make the connection drop under incoming audio.",
+      "evidence": [
+        "device/lira/realtime_vision.py:134:                 raw = await capture()",
+        "device/lira/hal/board/camera_isp.py:110-117: capture() calls _merge_frames, cv2.bilateralFilter, _apply_color_gains, _digital_exposure, and cv2.imencode synchronously after its await.",
+        "device/lira/audio/doubao_realtime.py:670-674: extended tool calls run in tasks on the same event loop as _receive()."
+      ]
+    },
+    {
+      "#": 7,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/ui/static/teaching.js",
+      "first_evidence": "device/lira/ui/static/teaching.js:6: const kinds={paper_review:\"纸面核对\",recitation_evidence:\"待核对的背诵证据\",recitation_annotation:\"家长修正附注\",preference:\"长期偏好\",unverified_note:\"待核实笔记\"};",
+      "independent_reviewers": [
+        "api-contract"
+      ],
+      "line": 6,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "api-contract"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Change the kinds map key from unverified_note to learning_note, and cover a proposed learning note in the parent record rendering test so the visible label says it is unverified.",
+      "title": "Unverified learning notes appear as ordinary records",
+      "why_it_matters": "The tool emits kind=learning_note with state=proposed_unverified, but the parent page only labels unverified_note. A normal learning note falls back to “学习记录”, so the main record list hides that its claim has not been checked.",
+      "evidence": [
+        "device/lira/ui/static/teaching.js:6: const kinds={paper_review:\"纸面核对\",recitation_evidence:\"待核对的背诵证据\",recitation_annotation:\"家长修正附注\",preference:\"长期偏好\",unverified_note:\"待核实笔记\"};",
+        "device/lira/teaching_memory.py:111:         if kind not in ('preference','learning_note') or not isinstance(text,str) or not 1<=len(text)<=1000:",
+        "device/lira/ui/static/teaching.js:36: The list label uses kinds[row.kind]||'学习记录'."
+      ]
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "file": "device/lira/realtime_capabilities.py",
+      "first_evidence": "device/lira/realtime_capabilities.py:160:         if len(self.operations) >= self.max_operations:",
+      "independent_reviewers": [
+        "agent-native",
+        "adversarial"
+      ],
+      "line": 160,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "agent-native",
+        "adversarial"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Replace lifetime operation and call counts with limits on in-flight work, and introduce explicit bounded retention for completed results and call-ID deduplication. Preserve the documented cross-turn lookup for background speech, OCR, and wait results; report an expired result explicitly if retention ends. Add a session test that performs more than 64 ordinary calls and then successfully invokes a new capability and a control lookup.",
+      "title": "Completed tool calls permanently exhaust session capacity",
+      "why_it_matters": "After 32 ordinary capability calls in one speaker session, asking to pause, stop, revise an agreement, cancel a timer, or clear displayed content returns busy permanently. Completed reads and waits remain in operations and consume the same capacity needed for these actions, so an active agreement and its timers can remain active when the child requests a pause. Keep a bounded result history separately from the in-flight execution limit and reserve revocation paths so exhausting retained history cannot disable stopping.",
+      "evidence": [
+        "device/lira/realtime_capabilities.py:160:         if len(self.operations) >= self.max_operations:",
+        "device/lira/realtime_capabilities.py:122:         self.max_operations, self.max_calls, self.timeout = max_operations, max_calls, timeout",
+        "device/lira/realtime_capabilities.py:136:         if len(self.calls) >= self.max_calls:",
+        "device/lira/realtime_capabilities.py:163:         self.operations[operation['operation_id']] = operation",
+        "device/lira/realtime_capabilities.py:159:         cap = self.registry.entries[name]",
+        "device/lira/realtime_capabilities.py:225:         self.operations.clear()",
+        "device/lira/realtime_capabilities.py:160 -- if len(self.operations) >= self.max_operations:",
+        "Default max_operations is 32 (line 118); each registered non-control capability, including read_agent_task and pause_agent_task, inserts an operation at line 163. Completion only changes status/result and never removes it (line 200).",
+        "Read-only in-memory reproduction using actual CapabilityRegistry, CapabilityExecutor and AgentTaskState: begin a generation, set an active phase, await 32 read_agent_task calls with distinct IDs, then pause_agent_task(revision=0). Output: {'pause_result': {'status': 'busy'}, 'task_phase': 'active', 'retained_operations': 32}.",
+        "AgentTaskState pauses/stops and notifies timer revocation only inside its handler (agent_task_state.py:94-101); the executor rejects before reaching that handler. Real sessions pass this executor all extended tool calls in audio/doubao_realtime.py:563."
+      ]
+    },
+    {
+      "#": 2,
+      "autofix_class": "manual",
+      "confidence": 75,
+      "file": "device/lira/audio/doubao_realtime.py",
+      "first_evidence": "device/lira/audio/doubao_realtime.py:491 --         self.capabilities = CapabilityExecutor(old.registry, on_change=self._capability_context_changed)",
+      "independent_reviewers": [
+        "security"
+      ],
+      "line": 491,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "security"
+      ],
+      "severity": "P1",
+      "suggested_fix": "On a confirmed speaker ownership change, close and recreate the realtime cloud session before accepting new-owner audio or returning personal teaching data. Recreate the executor/task generation and seed only the new identity context; do not replay previous-owner tool results or transcripts. Keep the existing transport-only reset for changes that do not cross an owner boundary.",
+      "title": "CWE-200: Retire cloud history when speaker ownership changes",
+      "why_it_matters": "After child A reads private teaching preferences or parent-reviewed records, a speaker change to child B clears the local operation cache but leaves A's tool results inside the same cloud conversation. B can ask the assistant to repeat the previous results without calling read_teaching_memory again, bypassing that service's identity guard. Updating identity instructions cannot enforce isolation of data already available to the model; retire the cloud conversation on owner changes.",
+      "evidence": [
+        "device/lira/audio/doubao_realtime.py:491 --         self.capabilities = CapabilityExecutor(old.registry, on_change=self._capability_context_changed)",
+        "device/lira/conversation_paths.py:191-200 detects a changed (epoch, track_generation), starts a fresh local task generation and calls session.reset_capability_owner(), retaining self.session.",
+        "device/lira/audio/doubao_realtime.py:486-504 only clears local calls, operations and tasks then sends a session instruction update; it never closes/recreates the cloud conversation or deletes its old tool messages.",
+        "device/lira/audio/doubao_realtime.py:583-585 sends actual tool results using conversation.item.create; TeachingMemory.read returns the recognized member's preferences and parent records.",
+        "device/lira/teaching_memory.py:137-146 guards retrieval by current owner, but cannot revoke results already sent in the prior cloud conversation."
+      ]
+    },
+    {
+      "#": 3,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/agent_timers.py",
+      "first_evidence": "device/lira/agent_timers.py:97:             if timer['status'] != 'pending' and name == 'update_task_timer':",
+      "independent_reviewers": [
+        "julik-frontend-races"
+      ],
+      "line": 97,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "julik-frontend-races"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Reject both update_task_timer and cancel_task_timer unless timer['status'] == 'pending', returning conflict with the current timer revision and status. Preserve an expiry event that was already queued. Add a focused test that expires a timer, then attempts cancellation before polling.",
+      "title": "Late cancellation erases an already expired timer",
+      "why_it_matters": "If a timer expires before the agent's cancellation arrives, cancellation still changes it to cancelled and removes its queued expiry event. The user then loses the actual elapsed-time result, and later reads falsely suggest the timer never expired.",
+      "evidence": [
+        "device/lira/agent_timers.py:97:             if timer['status'] != 'pending' and name == 'update_task_timer':",
+        "device/lira/agent_timers.py:103-105:             if name=='cancel_task_timer': / timer['status']='cancelled' / self.events = deque(e for e in self.events if e['timer_id'] != timer['timer_id'])",
+        "device/lira/agent_timers.py:35-39: _expire sets status='expired' and appends timer_expired before waking waiters."
+      ]
+    },
+    {
+      "#": 4,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/conversation_paths.py",
+      "first_evidence": "device/lira/conversation_paths.py:474 --             if now - self._last_activity < 60:",
+      "independent_reviewers": [
+        "correctness"
+      ],
+      "line": 474,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "correctness"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Before applying the idle timeout, preserve the session while the current active agreement has a pending timer or a pending wait_for_task_event operation. Continue honoring explicit stop, privacy, disconnect, and owner changes; add a clock-controlled integration test with a timer beyond 60 seconds and successive bounded waits.",
+      "title": "Keep negotiated timer waits alive past idle timeout",
+      "why_it_matters": "A child who agrees to wait silently for a timer longer than one minute loses the task before it expires. The watchdog only counts speech/audio activity: extended tool calls and pending timer waits never refresh _last_activity, so at 60 seconds _stop_conversation invalidates the agreement, clears timers, and cancels the active wait. This affects normal multi-minute writing or practice intervals even when the model correctly renews its bounded 40-second waits.",
+      "evidence": [
+        "device/lira/conversation_paths.py:474 --             if now - self._last_activity < 60:",
+        "device/lira/conversation_paths.py:476 --             await self._stop_conversation()",
+        "device/lira/conversation_paths.py:486 --         self.agent_task.invalidate()",
+        "device/lira/agent_timers.py:100 --                    'status':'pending','deadline':self.clock()+args['duration_seconds']}",
+        "device/lira/agent_timers.py:24-31 -- _revoke cancels every timer and clears timer/event state when AgentTaskState changes.",
+        "device/lira/conversation_paths.py:121-145 -- _event refreshes _last_activity for activity, input_started, user_text, interrupted and assistant_text; capability calls run directly through CapabilityExecutor, bypassing the legacy _tool_impl refresh."
+      ]
+    },
+    {
+      "#": 5,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/hal/board/camera_isp.py",
+      "first_evidence": "device/lira/hal/board/camera_isp.py:126:         return (await proc.wait()) == 0",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 126,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Apply a bounded asyncio.wait_for to proc.communicate() or proc.wait() in _sensor_set and kill/reap the child on timeout or cancellation, matching _v4l2's cleanup pattern. Exercise a stalled control command and verify the process is reaped and the camera mutex eventually releases.",
+      "title": "Sensor control subprocess has no timeout or cancellation cleanup",
+      "why_it_matters": "The realtime OCR path calls capture(), which awaits _sensor_set before its bounded v4l2 frame commands. A stalled v4l2-ctl control call can hold the camera mutex indefinitely. The capability executor's 60-second cancellation stops its coroutine waiter but _sensor_set leaves the child process alive, so later camera work remains unavailable until that process exits.",
+      "evidence": [
+        "device/lira/hal/board/camera_isp.py:126:         return (await proc.wait()) == 0",
+        "device/lira/hal/board/camera_isp.py:156:         await self._sensor_set(\"analogue_gain\", gain)",
+        "device/lira/realtime_vision.py:134:                 raw = await capture()",
+        "device/lira/hal/board/camera_isp.py:176-185: _v4l2 uses a timeout and kills/reaps its subprocess, unlike _sensor_set."
+      ]
+    },
+    {
+      "#": 6,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/realtime_vision.py",
+      "first_evidence": "device/lira/realtime_vision.py:134:                 raw = await capture()",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 134,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Move the CPU-heavy post-capture image merge/filter/encode portion of V4l2IspCamera.capture into asyncio.to_thread, while retaining the realtime camera mutex through completion. Verify that incoming audio and cancellation remain responsive during a real-resolution capture.",
+      "title": "Realtime capture blocks WebSocket receive during image processing",
+      "why_it_matters": "The new capture_text tool invokes the board camera coroutine on the realtime event loop. After frame acquisition, that coroutine synchronously merges three 4224×3136 frames and runs OpenCV filtering and JPEG encoding. While it does so, the same loop cannot drain Doubao's WebSocket receive queue or process interruption, so an ordinary photo can stall speech and make the connection drop under incoming audio.",
+      "evidence": [
+        "device/lira/realtime_vision.py:134:                 raw = await capture()",
+        "device/lira/hal/board/camera_isp.py:110-117: capture() calls _merge_frames, cv2.bilateralFilter, _apply_color_gains, _digital_exposure, and cv2.imencode synchronously after its await.",
+        "device/lira/audio/doubao_realtime.py:670-674: extended tool calls run in tasks on the same event loop as _receive()."
+      ]
+    },
+    {
+      "#": 7,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "file": "device/lira/ui/static/teaching.js",
+      "first_evidence": "device/lira/ui/static/teaching.js:6: const kinds={paper_review:\"纸面核对\",recitation_evidence:\"待核对的背诵证据\",recitation_annotation:\"家长修正附注\",preference:\"长期偏好\",unverified_note:\"待核实笔记\"};",
+      "independent_reviewers": [
+        "api-contract"
+      ],
+      "line": 6,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "api-contract"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Change the kinds map key from unverified_note to learning_note, and cover a proposed learning note in the parent record rendering test so the visible label says it is unverified.",
+      "title": "Unverified learning notes appear as ordinary records",
+      "why_it_matters": "The tool emits kind=learning_note with state=proposed_unverified, but the parent page only labels unverified_note. A normal learning note falls back to “学习记录”, so the main record list hides that its claim has not been checked.",
+      "evidence": [
+        "device/lira/ui/static/teaching.js:6: const kinds={paper_review:\"纸面核对\",recitation_evidence:\"待核对的背诵证据\",recitation_annotation:\"家长修正附注\",preference:\"长期偏好\",unverified_note:\"待核实笔记\"};",
+        "device/lira/teaching_memory.py:111:         if kind not in ('preference','learning_note') or not isinstance(text,str) or not 1<=len(text)<=1000:",
+        "device/lira/ui/static/teaching.js:36: The list label uses kinds[row.kind]||'学习记录'."
+      ]
+    }
+  ],
+  "triage_groups": [
+    {
+      "title": "Execution and revocation remain available",
+      "findings": [
+        1,
+        3,
+        4
+      ],
+      "context": "Bounded history and timer lifecycle currently block or misstate actual task state.",
+      "preferred_resolution": "Fix capacity (#1), then preserve expired events (#3) and negotiated idle waits (#4).",
+      "why": "Children must be able to pause and observe the actual timer result."
+    },
+    {
+      "title": "Responsive camera ownership",
+      "findings": [
+        5,
+        6
+      ],
+      "context": "New realtime capture reaches unbounded sensor waits and synchronous frame processing.",
+      "preferred_resolution": "Bound and reap transient capture sensor work (#5), then offload its CPU work (#6), preserving classic behavior.",
+      "why": "Capture must release ownership and allow audio/cancellation to continue."
+    }
+  ],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan": "docs/plans/2026-10-18-2115-feat-teaching-management-entry-plan.md",
+    "plan_source": "explicit",
+    "revision": "r5",
+    "artifact_readiness": "implementation-ready",
+    "requirements": [
+      {
+        "id": "R1",
+        "status": "met"
+      },
+      {
+        "id": "R2",
+        "status": "met"
+      },
+      {
+        "id": "R3",
+        "status": "met"
+      },
+      {
+        "id": "R4",
+        "status": "met"
+      },
+      {
+        "id": "R5",
+        "status": "met"
+      },
+      {
+        "id": "R6",
+        "status": "met"
+      },
+      {
+        "id": "R7",
+        "status": "partially addressed"
+      },
+      {
+        "id": "R8",
+        "status": "met"
+      },
+      {
+        "id": "R9",
+        "status": "partially addressed"
+      },
+      {
+        "id": "R10",
+        "status": "partially addressed"
+      },
+      {
+        "id": "R11",
+        "status": "met"
+      },
+      {
+        "id": "R12",
+        "status": "partially addressed"
+      },
+      {
+        "id": "R13",
+        "status": "met"
+      },
+      {
+        "id": "R14",
+        "status": "met"
+      },
+      {
+        "id": "R15",
+        "status": "met"
+      },
+      {
+        "id": "R16",
+        "status": "met"
+      },
+      {
+        "id": "R17",
+        "status": "partially addressed"
+      },
+      {
+        "id": "R18",
+        "status": "partially addressed"
+      },
+      {
+        "id": "R19",
+        "status": "met"
+      },
+      {
+        "id": "R20",
+        "status": "partially addressed"
+      }
+    ],
+    "implementation_units": [
+      {
+        "id": "U1",
+        "status": "partially addressed"
+      },
+      {
+        "id": "U2",
+        "status": "partially addressed"
+      },
+      {
+        "id": "U3",
+        "status": "met"
+      },
+      {
+        "id": "U4",
+        "status": "partially addressed"
+      },
+      {
+        "id": "U5",
+        "status": "met"
+      },
+      {
+        "id": "U6",
+        "status": "met"
+      },
+      {
+        "id": "U7",
+        "status": "partially addressed"
+      },
+      {
+        "id": "U8",
+        "status": "partially addressed"
+      },
+      {
+        "id": "U9",
+        "status": "partially addressed"
+      },
+      {
+        "id": "U10",
+        "status": "partially addressed"
+      }
+    ],
+    "notes": [
+      "All ten units have implementation in the offered diff; partial statuses reflect retained defects and outstanding acceptance, not absent units.",
+      "R7/U4: capture integration has event-loop and stalled-worker defects (#5/#6); real camera/OCR remains unverified.",
+      "R9/R12/R18/R20 and U1/U2/U8: session capacity, owner isolation, timer cancellation and idle wait defects are findings #1-4.",
+      "R17/U7/U9: proposed learning notes lose their visible unverified label (#7).",
+      "U10: required real-model three-repetition matrix and semantic review were still pending at review; bounded playback acknowledgement sample failed on unsupported immediacy wording. Physical audio, real OCR, and TV APK pairing/clear acceptance remain unproven. Default-off and blocked support claims are intentional until these gates pass."
+    ]
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Required real-model support acceptance remains blocked: the bounded initial exact-speech acknowledgement still promised immediacy despite queued_not_started metadata; final 12-scenario x3 matrix and semantic review were pending at review.",
+    "TV receiver APK 0.2 was built but not installed/paired; sender probe timed out. Real clear/foreground behavior is unverified.",
+    "Real camera OCR and physical speaker playback/drain/interruption remain unproven. Controlled sockets, synthetic input and PCM consumption do not establish hardware acceptance."
+  ],
+  "testing_gaps": [
+    "Parent browser coverage does not exercise content confirmation/import/deletion or existing paper/recitation-record correction; add request/visible-state checks for these controls, beyond API tests."
+  ],
+  "coverage": {
+    "roster": "full",
+    "reviewer_terminal_outcomes": 10,
+    "failed_reviewers": [],
+    "fast_pass_findings": 0,
+    "cross_model": {
+      "status": "not started",
+      "reason": "Observed scope failure: the sanctioned worker reads unrestricted git diff <base>; required scope helper proved this includes unrelated tracked USER WIP despite PRIVATE GIT_INDEX_FILE. No reviewed content egressed. Installed Claude route was not started.",
+      "fallback": "local adversarial",
+      "independence_verified": false
+    },
+    "validators": {
+      "selected": 7,
+      "shortcut_skipped": 0,
+      "validated": 7,
+      "dropped": 0,
+      "degraded": false,
+      "verdicts": [
+        {
+          "#": 1,
+          "validated": true,
+          "reason": "Terminal operations/calls remain until close; reproduced 32 completed reads then pause returning busy with the task still active."
+        },
+        {
+          "#": 2,
+          "validated": true,
+          "reason": "Owner change retains the cloud session; local executor reset cannot retract previous personal teaching tool results."
+        },
+        {
+          "#": 3,
+          "validated": true,
+          "reason": "Reproduced cancellation of expired timer changing status and deleting its queued expiry event."
+        },
+        {
+          "#": 4,
+          "validated": true,
+          "reason": "Silent pending timers/waits do not update the 60-second idle watchdog; session stop invalidates their agreement."
+        },
+        {
+          "#": 5,
+          "validated": true,
+          "reason": "New shielded capture worker retains shared mutex while awaiting an unbounded sensor subprocess, including after capability timeout."
+        },
+        {
+          "#": 6,
+          "validated": true,
+          "reason": "New realtime capture awaits synchronous full-resolution merge/filter/JPEG work on the WebSocket event loop."
+        },
+        {
+          "#": 7,
+          "validated": true,
+          "reason": "Actual learning_note/proposed_unverified records fall through unmatched frontend kind to generic learning record without visible uncertainty."
+        }
+      ]
+    },
+    "suppressed_by_confidence": {},
+    "malformed_findings": 0,
+    "malformed_returns": 0,
+    "semantic_duplicates_merged": 1,
+    "mode_aware_demotions": 0,
+    "project_standards": "not run (successful search found no applicable standards files)",
+    "learnings": "not run (no solutions corpus and no declared packs)",
+    "data_migration": "not run (no offered migration/schema/backfill artifact; migration verifier alone does not trigger it)",
+    "excluded_untracked_count": 212,
+    "excluded_untracked_artifact": "excluded-untracked.txt",
+    "scope_helper": "scope.json; complete, 10163 executable lines and 11 uncounted files disqualify lite. Helper sees unrelated tracked WIP; authoritative review is the 63 offered paths in files.txt/full.diff.",
+    "private_index": "private.index; only offered paths added; canonical index hash unchanged",
+    "canonical_index_sha256": "8c9459982c7c376803e52ba000ec482e06b66ef6ef78fb959a10dbaee3725fd0",
+    "reviewed_source_hashes_unchanged": true,
+    "source_manifest": "reviewed-source-sha256.json",
+    "verification": "Caller evidence: specified capability suite 256 passed; full suite 1546 passed and 3 classic audio fixtures failed. Caller reproduced those failures in HEAD due wakeword fixture mismatch. No classic source changes authorized.",
+    "settlement_reconciliation": "No retained finding reverses classic-only scope or adds a fixed teaching flow."
+  },
+  "artifact_path": "C:\\Users\\Joey\\AppData\\Local\\Temp\\compound-engineering-joey\\ce-code-review\\20261019-teaching-48d377da",
+  "run_id": "20261019-teaching-48d377da"
+}

@@ -1,0 +1,1115 @@
+[
+  {
+    "case": "normal",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 1.018,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.784,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期请报告事件，不自动推进。请先用任务工具记录并激活这个约定，在创建 12 秒计时调用等待事件工具。"
+      },
+      {
+        "at": 42.859,
+        "kind": "assistant_text",
+        "text": "12秒计时已经到期，收到了timer_expired事件，按照约定只报告事件，不做自动推进。"
+      },
+      {
+        "at": 43.388,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 43.389,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 54.763,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 58.331,
+        "kind": "assistant_text",
+        "text": "等待任务的真实结果里，事件编号是ddf125e8d50048ff9f1a29627595caf9。"
+      },
+      {
+        "at": 59.837,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 69.669,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 70.107,
+        "kind": "assistant_delivered",
+        "text": "等待任务的真实结果里，事件编号是ddf125e8d50048ff9f1a29627595caf9。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 18.471,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 20.722,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 22.972,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 29.505,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 31.051,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 56.222,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "cdef849fa2934cd0866efd55a1f7c7d0",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "24f4023906f523850974e0b0ef74a8ef91e166af299381dc2d7bc02f949d1490",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "创建12秒计时，到期仅报告事件，不自动推进，按要求使用任务工具完成记录、激活、创建计时、等待事件的流程",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "ac59e0eb75554c8391cfb5d987842194",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "ac59e0eb75554c8391cfb5d987842194"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "537445cbbd8f41b28c5ecf8ce68d17b6",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "f2b610f3fd2d4d2eb89c85e11fc6f153",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 51134.998997668,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "487eac25ea804c5ca6e67942b2e1799e",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "c92e29f5baaf586297388738f1233cb19845e0451a10120d0c1de54d44d94dcf",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "ddf125e8d50048ff9f1a29627595caf9",
+              "type": "timer_expired",
+              "timer_id": "f2b610f3fd2d4d2eb89c85e11fc6f153",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 51134.998997668
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "ddf125e8d50048ff9f1a29627595caf9"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "创建12秒计时，到期仅报告事件，不自动推进，按要求使用任务工具完成记录、激活、创建计时、等待事件的流程",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "ac59e0eb75554c8391cfb5d987842194",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "2e7be4a53ca2429eae893d32532af60d"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 1,
+    "verifier_model": "kimi-k3"
+  },
+  {
+    "case": "barge",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 0.965,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.792,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期请报告事件，不自动推进。请先用任务工具记录并激活这个约定，在创建 12 秒计时调用等待事件工具。"
+      },
+      {
+        "at": 31.341,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 31.341,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 38.491,
+        "kind": "user_text",
+        "text": "另外问一句，你能听到吗？原来的计时和约定保持不变，不要新建，不要取消。"
+      },
+      {
+        "at": 39.822,
+        "kind": "assistant_text",
+        "text": "能听到，我会保持原来的计时和约定不变，不新建也不取消。"
+      },
+      {
+        "at": 40.428,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 42.292,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 42.293,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 55.031,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 59.722,
+        "kind": "assistant_text",
+        "text": "刚才等待任务的事件编号是85f1d8b077774cc5b4d55da57320c89f，事件类型是timer_expired，没有超时。"
+      },
+      {
+        "at": 61.566,
+        "kind": "audio_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 18.763,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 21.318,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 23.627,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 29.838,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 30.803,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 38.689,
+        "name": null
+      },
+      {
+        "at": 55.31,
+        "name": "list_capability_operations"
+      },
+      {
+        "at": 57.369,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "78793036bfff4a808debd754317bbbf6",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "1da2d8447c989bc7f3de5097914f682cabbea5be03b809260f3a29b466b803fd",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进；按要求先记录激活约定，再创建12秒计时并调用等待事件工具",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "f050b3639ca047e1851e9f4e06638e35",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "f050b3639ca047e1851e9f4e06638e35"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "cfb30ae441b948e2a4cf3230df3bdd77",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "e43d1986ab394007abd3bc26c1464a20",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 51207.355409468,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "7025eb53e7f44683814ea46c42f37c8a",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "c92e29f5baaf586297388738f1233cb19845e0451a10120d0c1de54d44d94dcf",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "85f1d8b077774cc5b4d55da57320c89f",
+              "type": "timer_expired",
+              "timer_id": "e43d1986ab394007abd3bc26c1464a20",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 51207.355409468
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "85f1d8b077774cc5b4d55da57320c89f"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进；按要求先记录激活约定，再创建12秒计时并调用等待事件工具",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "f050b3639ca047e1851e9f4e06638e35",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "fd6c09f091aa4fd98c20464d2723a205"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 1,
+    "verifier_model": "kimi-k3"
+  },
+  {
+    "case": "normal",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 0.998,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.786,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期请报告事件，不自动推进。请先用任务工具记录并激活这个约定，在创建 12 秒计时调用等待事件工具。"
+      },
+      {
+        "at": 41.158,
+        "kind": "assistant_text",
+        "text": "12秒计时已经到期，收到了timer_expired事件，按照约定只报告事件，不自动推进。"
+      },
+      {
+        "at": 42.067,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 42.319,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 42.319,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 53.087,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 57.242,
+        "kind": "assistant_text",
+        "text": "等待任务的真实结果事件编号是eab9b26984c4422dbefdd9b69d01c30b。"
+      },
+      {
+        "at": 58.866,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 67.975,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 17.861,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 19.723,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 22.314,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 27.851,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 28.89,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 53.308,
+        "name": "list_capability_operations"
+      },
+      {
+        "at": 55.413,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "ad9a55c678d542d3be5135099bfee046",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "a5dc72772430817644649e5b64fdf18d15f3b0c9b06c4c49c8ec998bb0a06b63",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "创建12秒计时，到期仅报告事件，不自动推进，完成后等待事件",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "f058a0694ac24610b565c8da6df0d627",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "f058a0694ac24610b565c8da6df0d627"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "fa80b5a5895b41c382422b7a974a8091",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "325f22215db146999f3142904ac41314",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 51277.633110869,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "17a3cb2465184cde8b83aea38d53c4ba",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "4315fa2f5858bb74140e3930fb3ae25b0cea8bcb9de4ab1308e2857bac041b1f",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "eab9b26984c4422dbefdd9b69d01c30b",
+              "type": "timer_expired",
+              "timer_id": "325f22215db146999f3142904ac41314",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 51277.633110869
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "eab9b26984c4422dbefdd9b69d01c30b"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "创建12秒计时，到期仅报告事件，不自动推进，完成后等待事件",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "f058a0694ac24610b565c8da6df0d627",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "cfe60492a49d4693a013a98dcab3f593"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 2,
+    "verifier_model": "kimi-k3"
+  },
+  {
+    "case": "barge",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 1.047,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.711,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期请报告事件，不自动推进。请先用任务工具记录并激活这个约定，在创建 12 秒计时调用等待事件工具。"
+      },
+      {
+        "at": 30.916,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 30.916,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 38.113,
+        "kind": "user_text",
+        "text": "另外问一句，你能听到吗？原来的计时和约定保持不变，不要新建，不要取消。"
+      },
+      {
+        "at": 39.77,
+        "kind": "assistant_text",
+        "text": "能听到，我会保持原来的计时和约定不变，不新建也不取消。"
+      },
+      {
+        "at": 40.371,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 41.865,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 41.865,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 54.643,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 60.658,
+        "kind": "assistant_text",
+        "text": "刚才等待任务的事件编号是0a80aa6065b5454cafc2d317d803a0e9，类型是timer_expired，计时编号是d5c0e92bb0ba4d429eb9b0f5dd5a31c5。"
+      },
+      {
+        "at": 62.225,
+        "kind": "audio_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 18.658,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 21.002,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 29.416,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 30.436,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 38.348,
+        "name": "read_agent_task"
+      },
+      {
+        "at": 54.886,
+        "name": "list_capability_operations"
+      },
+      {
+        "at": 57.228,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "c5c08e3e334f46d8ab4d1f08c63a09c4",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "7e86e9fc2877176e5254cef83275e0a3e2a402ecb699f224a09b2539821ad2fd",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，按要求用任务工具记录并激活，再创建12秒计时并调用等待事件工具",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "08ab8f3e21a248ac9e8073a09ea45d0a",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "08ab8f3e21a248ac9e8073a09ea45d0a"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "15e3222076024e568631a8bf443fb333",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "d5c0e92bb0ba4d429eb9b0f5dd5a31c5",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 51349.547083867,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "ea294a5d6631482488caf820008c30b9",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "a427e5509d44322041405906ef296e080ab68eff4b5145aa99a4b6e8e70035ed",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "0a80aa6065b5454cafc2d317d803a0e9",
+              "type": "timer_expired",
+              "timer_id": "d5c0e92bb0ba4d429eb9b0f5dd5a31c5",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 51349.547083867
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "0a80aa6065b5454cafc2d317d803a0e9"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进，按要求用任务工具记录并激活，再创建12秒计时并调用等待事件工具",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "08ab8f3e21a248ac9e8073a09ea45d0a",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "2084a56828064291947d1552bf656613"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 2,
+    "verifier_model": "kimi-k3"
+  },
+  {
+    "case": "normal",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 0.957,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.813,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期请报告事件，不自动推进。请先用任务工具记录并激活这个约定，在创建 12 秒计时调用等待事件工具。"
+      },
+      {
+        "at": 41.094,
+        "kind": "assistant_text",
+        "text": "12秒计时已到期，收到timer_expired事件，按约定仅报告事件，没有自动推进其他操作。"
+      },
+      {
+        "at": 41.348,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 41.349,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 53.096,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 57.669,
+        "kind": "assistant_text",
+        "text": "等待任务的真实结果事件编号是3df89b38a0c64801bd7666f3c25b0ac5，事件类型为timer_expired，未超时。"
+      },
+      {
+        "at": 59.209,
+        "kind": "audio_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 17.03,
+        "name": "read_agent_task"
+      },
+      {
+        "at": 19.045,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 21.085,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 23.326,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 27.947,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 29.201,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 53.238,
+        "name": "list_capability_operations"
+      },
+      {
+        "at": 55.465,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "0230a16b94814196992e2d7396b486c9",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "e8bbae74955bfc49534dcc348ea5b9ab0b4382089c13ca346081f748787a0f9c",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "创建12秒计时，到期仅报告事件，不自动推进，完成后按要求调用等待事件工具",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "28024708d6c8462d9a3fc5e4b46e5a40",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "28024708d6c8462d9a3fc5e4b46e5a40"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "efa20183528846d88a1a77d666511ff2",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "653105a559d443d08dc5f602697988a6",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 51419.980626773,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "c75ff82e21a74da590d896a69442f529",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "a427e5509d44322041405906ef296e080ab68eff4b5145aa99a4b6e8e70035ed",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "3df89b38a0c64801bd7666f3c25b0ac5",
+              "type": "timer_expired",
+              "timer_id": "653105a559d443d08dc5f602697988a6",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 51419.980626773
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "3df89b38a0c64801bd7666f3c25b0ac5"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "创建12秒计时，到期仅报告事件，不自动推进，完成后按要求调用等待事件工具",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "28024708d6c8462d9a3fc5e4b46e5a40",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "70db7f0f450146b2aadfe97cc08c470d"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 3,
+    "verifier_model": "kimi-k3"
+  },
+  {
+    "case": "barge",
+    "passed": true,
+    "error": null,
+    "events": [
+      {
+        "at": 0.991,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.771,
+        "kind": "user_text",
+        "text": "这是合成能力测试。我明确同意本次临时约定创建一个 12 秒计时，到期请报告事件，不自动推进。请先用任务工具记录并激活这个约定，在创建 12 秒计时调用等待事件工具。"
+      },
+      {
+        "at": 30.023,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 30.024,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 37.172,
+        "kind": "user_text",
+        "text": "另外问一句，你能听到吗？原来的计时和约定保持不变，不要新建，不要取消。"
+      },
+      {
+        "at": 38.526,
+        "kind": "assistant_text",
+        "text": "能听到，原来的计时和约定会保持不变，不会新建也不会取消。"
+      },
+      {
+        "at": 39.154,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 40.993,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 40.996,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 53.407,
+        "kind": "user_text",
+        "text": "请读取刚才等待任务的真实结果。完整竹子读出事件编号，保留全部字母和数字。找不到就明确说找不到，不要猜测，不要重新创建计时。"
+      },
+      {
+        "at": 57.37,
+        "kind": "assistant_text",
+        "text": "刚才等待任务的事件编号是48d410b25f8140fdbe8282d3cc76426b。"
+      },
+      {
+        "at": 58.961,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 67.965,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 18.786,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 21.354,
+        "name": "propose_agent_task"
+      },
+      {
+        "at": 23.6,
+        "name": "activate_agent_task"
+      },
+      {
+        "at": 28.372,
+        "name": "create_task_timer"
+      },
+      {
+        "at": 29.492,
+        "name": "wait_for_task_event"
+      },
+      {
+        "at": 37.302,
+        "name": "read_agent_task"
+      },
+      {
+        "at": 53.674,
+        "name": "list_capability_operations"
+      },
+      {
+        "at": 55.774,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "name": "activate_agent_task",
+        "value": {
+          "operation_id": "7256ef2de28645949c0fa54c5572dd51",
+          "status": "completed",
+          "name": "activate_agent_task",
+          "args_hash": "ba78917df092d4511946ef095c86cb8720aa6928bf64743ad20be1c2f223eb16",
+          "result": {
+            "status": "ok",
+            "task": {
+              "status": "active",
+              "revision": 2,
+              "generation": "synthetic-timer",
+              "owner": "anonymous-test",
+              "proposal": null,
+              "agreement": {
+                "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进；按要求先记录并激活约定，再创建12秒计时，最后调用等待事件工具",
+                "revision": 2,
+                "source": "observed_user_turn",
+                "turn_id": "2e9677e50b1d44989ab8d97f7df050c4",
+                "generation": "synthetic-timer",
+                "owner": "anonymous-test"
+              },
+              "user_turn_id": "2e9677e50b1d44989ab8d97f7df050c4"
+            }
+          }
+        }
+      },
+      {
+        "name": "create_task_timer",
+        "value": {
+          "operation_id": "9ede3f0306814157a7a325d91391e90e",
+          "status": "completed",
+          "name": "create_task_timer",
+          "args_hash": "2f0606137180fb3a187f357432e2228ad452989b3e311dd6912700a2efe41aeb",
+          "result": {
+            "timer_id": "f1ba38d1d1774b59857a13adabec012c",
+            "timer_revision": 1,
+            "revision": 2,
+            "status": "ok",
+            "deadline": 51490.87105028,
+            "timer_status": "pending",
+            "event_delivery": "queue_until_wait_or_poll",
+            "waiting": false
+          }
+        }
+      },
+      {
+        "name": "wait_for_task_event",
+        "value": {
+          "operation_id": "eb4b2d65b80c44d0b8cf98abdfa3d1cd",
+          "status": "completed",
+          "name": "wait_for_task_event",
+          "args_hash": "c92e29f5baaf586297388738f1233cb19845e0451a10120d0c1de54d44d94dcf",
+          "result": {
+            "status": "ok",
+            "event": {
+              "event_id": "48d410b25f8140fdbe8282d3cc76426b",
+              "type": "timer_expired",
+              "timer_id": "f1ba38d1d1774b59857a13adabec012c",
+              "timer_revision": 1,
+              "revision": 2,
+              "deadline": 51490.87105028
+            },
+            "timed_out": false
+          }
+        }
+      }
+    ],
+    "event_ids": [
+      "48d410b25f8140fdbe8282d3cc76426b"
+    ],
+    "agreement": {
+      "status": "active",
+      "revision": 2,
+      "generation": "synthetic-timer",
+      "owner": "anonymous-test",
+      "proposal": null,
+      "agreement": {
+        "terms": "本次临时约定：创建12秒计时，到期仅报告事件，不自动推进；按要求先记录并激活约定，再创建12秒计时，最后调用等待事件工具",
+        "revision": 2,
+        "source": "observed_user_turn",
+        "turn_id": "2e9677e50b1d44989ab8d97f7df050c4",
+        "generation": "synthetic-timer",
+        "owner": "anonymous-test"
+      },
+      "user_turn_id": "f284082c98434de788e5129be3da2260"
+    },
+    "timer_count": 1,
+    "session_failed": false,
+    "repeat": 3,
+    "verifier_model": "kimi-k3"
+  }
+]

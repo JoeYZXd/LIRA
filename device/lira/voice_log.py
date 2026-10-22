@@ -47,12 +47,12 @@ class VoiceLog:
         """
         self._sink = sink
 
-    def log(self, kind: str, text: str) -> None:
+    def log(self, kind: str, text: str, *, mirror: bool = True) -> None:
         self._entries.append(VoiceLogEntry(time.time(), kind, text))
         # 镜像守卫（U8 评审）：本方法在 asr_partial 等每音频块热路径上——
         # sink 异常（如 lone-surrogate 文本的 UnicodeEncodeError）绝不能
         # 穿透进识别主链路（与 dev_telemetry.safe_add_event 同纪律）
-        if self._sink is not None:
+        if mirror and self._sink is not None:
             try:
                 self._sink.add_event(kind, text)
             except Exception:  # noqa: BLE001 - 展示镜像不拖垮主链路

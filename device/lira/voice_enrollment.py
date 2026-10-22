@@ -58,7 +58,7 @@ class VoiceEnrollment:
             self.task.cancel()
         self.task = None
 
-    def _vector(self, samples, vector):
+    def _vector(self, samples, vector, *, references=None):
         if samples is None or vector is None:
             return None
         audio=np.asarray(samples, np.float32)
@@ -71,7 +71,8 @@ class VoiceEnrollment:
         if float(np.sqrt(np.mean(audio.astype(np.float64)**2))) < self.params.min_rms or float(np.mean(np.abs(audio)>=.99)) > self.params.max_clip_ratio:
             return None
         v=v/norm
-        if self.vectors and (v.shape != self.vectors[0].shape or any(float(np.dot(v, previous)) < self.params.consistency_threshold for previous in self.vectors)):
+        references = self.vectors if references is None else references
+        if references and (v.shape != references[0].shape or any(float(np.dot(v, previous)) < self.params.consistency_threshold for previous in references)):
             return None
         return v
 

@@ -1,0 +1,16 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android" package="org.lira.receiver" android:versionCode="3" android:versionName="0.3">
+  <uses-sdk android:minSdkVersion="23" android:targetSdkVersion="23"/>
+  <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+  <uses-feature android:name="android.hardware.touchscreen" android:required="false"/>
+  <uses-feature android:name="android.software.leanback" android:required="false"/>
+  <application android:label="LIRA小助手" android:allowBackup="false" android:theme="@android:style/Theme.Material.NoActionBar">
+    <activity android:name=".Screen" android:exported="true" android:launchMode="singleTask" android:screenOrientation="landscape">
+      <intent-filter><action android:name="android.intent.action.MAIN"/><category android:name="android.intent.category.LAUNCHER"/><category android:name="android.intent.category.LEANBACK_LAUNCHER"/></intent-filter>
+    </activity>
+    <service android:name=".ReceiverService" android:exported="false"/>
+    <receiver android:name=".Boot" android:exported="true">
+      <intent-filter><action android:name="android.intent.action.BOOT_COMPLETED"/></intent-filter>
+    </receiver>
+  </application>
+</manifest>

@@ -1,0 +1,153 @@
+[
+  {
+    "reviewer": "correctness",
+    "findings": [
+      {
+        "title": "上一词请求被误记为未回答的提问",
+        "severity": "P2",
+        "file": "device/lira/dictation_tools.py",
+        "line": 11,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "把新增的上一词/上一个和下一词请求纳入可信输入分类：上一词作为非提问控制请求处理；下一词与下一个一样设置 child_ack。增加 observe_user 后成功 previous 再提问暂停并恢复的回归用例，确保不会残留 question/answer_pending。",
+        "first_evidence": "device/lira/dictation_tools.py:11:  'pending不是成功，不可用pause_agent_task代替电视暂停。写好了或下一词用confirm，重播用replay，上一词用previous，结束用cancel。手动模式每次只播报一遍，等待用户控制，不自行重播或推进。')"
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "security",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": [
+      "Cloud privacy coverage checks only an initially denied request. Add a mocked streaming response that flips allowed to false after its first audio row and assert synthesis aborts without returning or publishing PCM; this exercises the new per-row and post-stream privacy guards."
+    ]
+  },
+  {
+    "reviewer": "testing",
+    "findings": [
+      {
+        "title": "Test privacy revocation during cloud streaming",
+        "severity": "P2",
+        "file": "device/tests/test_dictation_cloud_tts.py",
+        "line": 24,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Add a mock streaming response that yields one valid PCM chunk, flips allowed to false before the next chunk, then asserts synthesis raises the revocation error and yields no completed asset. Keep the existing pre-request denial test.",
+        "first_evidence": "device/tests/test_dictation_cloud_tts.py:24: async def test_cloud_privacy_blocks_network():"
+      },
+      {
+        "title": "Test manual controls during active playback",
+        "severity": "P2",
+        "file": "tv-receiver/tests/DictationManualNavigationTest.java",
+        "line": 17,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Extend the native manual test to issue previous, confirm, and replay before sound.drain(), then invoke each captured old completion callback and assert the cursor, state, and actual_repeats stay on the newly selected item; also assert the old sound was stopped.",
+        "first_evidence": "tv-receiver/tests/DictationManualNavigationTest.java:17:   engine.control(DictationEngineV2Test.cmd(engine,\"replay\"));sound.drain();check(engine.status().getInt(\"index\")==1,\"center replays current\");"
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": [
+      "Cloud TTS tests cover incomplete PCM and a non-success code, but do not assert sanitized failures for malformed JSON, invalid base64, non-object rows, or an HTTP failure.",
+      "No focused test asserts that a manual task is rejected before asset upload when the TV omits dictation_manual_navigation_v1, or that an older non-manual task still delivers to that TV.",
+      "The native manual navigation test does not exercise the new previous command against explanation-audio-busy or expired-lease gates; existing V2 tests cover those gates only for earlier actions."
+    ]
+  },
+  {
+    "reviewer": "maintainability",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "agent-native",
+    "findings": [
+      {
+        "title": "Expose the bound manual mode to the agent",
+        "severity": "P2",
+        "file": "device/lira/llm/chinese_dictation_skill.md",
+        "line": 15,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Add the bound task's pinned playback settings, including manual_navigation, to model_instructions and the dialogue agent's system context; include the same setting in get_dictation_task_status so the agent can refresh it after adoption. Read from the task snapshot, not the latest configuration revision.",
+        "first_evidence": "device/lira/llm/chinese_dictation_skill.md:15: 当绑定流程的 manual_navigation=true 时，四会词每次只播报一次，结束后保持当前词等待遥控操作：左键返回上一词并播放，右键下一词并播放，确认键重播当前词。首词左键重播首词，末词右键结束；不循环、不计时重播或自动跳词。模型不能自行推进；收到孩子明确“下一个／写好了”才调用确认下一项，重播或上一词也须有对应请求。认读仍用确认键翻页；暂停后的确认键恢复当前词，不能绕过提问解释的暂停与继续确认。"
+      },
+      {
+        "title": "Allow spoken next during manual playback",
+        "severity": "P2",
+        "file": "device/lira/dictation_tools.py",
+        "line": 11,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "For bound tasks with manual_navigation enabled, accept an explicit next-word utterance while the current dictation item is playing. Bind the acknowledgement to the task and item identity and permit confirm after the audio completes or while it plays, while preserving the pending-answer and explanation gates.",
+        "first_evidence": "device/lira/dictation_tools.py:11: 'pending不是成功，不可用pause_agent_task代替电视暂停。写好了或下一词用confirm，重播用replay，上一词用previous，结束用cancel。手动模式每次只播报一遍，等待用户控制，不自行重播或推进。')"
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": [
+      "No targeted test covers a spoken next-word request arriving during manual-mode playback and the subsequent confirm call."
+    ]
+  },
+  {
+    "reviewer": "api-contract",
+    "findings": [
+      {
+        "title": "Pinned Vivi voice settings remain mutable",
+        "severity": "P2",
+        "file": "device/lira/dictation_cloud_tts.py",
+        "line": 17,
+        "confidence": 75,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Assuming 'pinned' means the specified values must be immutable, make validate_tts require equality with DEFAULT_TTS for every field and show those values as read-only in the UI. Keep the optional tts field itself so older local-TTS configs remain valid.",
+        "first_evidence": "device/lira/dictation_cloud_tts.py:17:     if type(value['speaker']) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',value['speaker']):raise ValueError('tts: 音色编号无效')"
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": [
+      "No focused compatibility test sends an older v2 task without manual_navigation to the updated TV and verifies it retains the original confirm/left/right behavior.",
+      "No focused transport test verifies that a manual_navigation task is rejected before asset upload when the TV lacks dictation_manual_navigation_v1."
+    ]
+  },
+  {
+    "reviewer": "reliability",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "adversarial",
+    "findings": [],
+    "residual_risks": [
+      "Live Doubao request/stream compatibility and actual Vivi prosody were not verified: this bounded review intentionally made no network or real-model calls."
+    ],
+    "testing_gaps": [
+      "Cloud tests cover privacy enabled before request, but not privacy activation while streaming followed by rejection without task publication."
+    ]
+  },
+  {
+    "reviewer": "julik-frontend-races",
+    "findings": [],
+    "residual_risks": [],
+    "testing_gaps": []
+  }
+]

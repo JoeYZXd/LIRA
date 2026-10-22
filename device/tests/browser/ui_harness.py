@@ -146,7 +146,7 @@ def open_live_tile(page) -> None:
     """展开实时区磁贴（触达即开始 observe 节拍，KTD4 展开才订阅）。"""
     head = page.locator("#tile-voicelog .tile-head")
     if head.get_attribute("aria-expanded") != "true":
-        head.click()
+        page.locator("#app-tile-voicelog").click()
     page.wait_for_selector("#tile-voicelog-body:not([hidden])")
 
 

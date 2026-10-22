@@ -1,0 +1,9 @@
+{
+  "task_id": "3f112fc6894d4d83a6de21d80112d461",
+  "state_at_delivery": "waiting_start",
+  "actual_repeats": 0,
+  "events": 1,
+  "no_remote_keys_sent": true,
+  "manual_navigation": true,
+  "apk_sha256": "4c3b2cd23e700a3f6af140fb300a918addafc9f0987e26a0bdc212471290116f"
+}

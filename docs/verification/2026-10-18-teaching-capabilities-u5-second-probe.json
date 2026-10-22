@@ -1,0 +1,764 @@
+[
+  {
+    "case": "complete",
+    "passed": true,
+    "expected": "completed",
+    "actual": [
+      "completed"
+    ],
+    "pcm_frames": 230811,
+    "drains": [
+      20.708,
+      27.542
+    ],
+    "events": [
+      {
+        "at": 1.04,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.683,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 16.441,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 16.906,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 20.637,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 20.708,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 21.096,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 21.925,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 21.926,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.662,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.635,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.937,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "0c0867098d2249848fa587a9e1374e64",
+        "status": "completed",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4",
+        "result": {
+          "status": "completed",
+          "speech_id": "8aca2f8437334434a35a184fec986586"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "interrupt",
+    "passed": true,
+    "expected": "interrupted",
+    "actual": [
+      "interrupted"
+    ],
+    "pcm_frames": 105645,
+    "drains": [
+      18.221
+    ],
+    "events": [
+      {
+        "at": 0.982,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.662,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 13.994,
+        "kind": "assistant_text",
+        "text": "播报还在进行中，稍等一下就能完整听到内容了。"
+      },
+      {
+        "at": 14.42,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 18.036,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 18.222,
+        "kind": "assistant_delivered",
+        "text": "播报还在进行中，稍等一下就能完整听到内容了。"
+      },
+      {
+        "at": 18.621,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 19.402,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 19.404,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 19.415,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 19.427,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 22.272,
+        "kind": "user_text",
+        "text": "请先停一下，暂停这次播报。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.585,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.762,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "7135abc9830e45439c2f7bb161bca904",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4",
+        "result": {
+          "status": "interrupted",
+          "speech_id": "c7e0b48d566d43ddabce107f91a8d8db"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "expected": "cancelled",
+    "actual": [
+      "cancelled"
+    ],
+    "pcm_frames": 86126,
+    "drains": [
+      19.478
+    ],
+    "events": [
+      {
+        "at": 0.945,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.586,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 15.425,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 15.849,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 19.278,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 19.478,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 19.866,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 19.869,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 19.921,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 19.927,
+        "kind": "input_started",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.641,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.518,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.537,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "4dd8cf0ca10b48b3a98e230fb9444342",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "complete",
+    "passed": true,
+    "expected": "completed",
+    "actual": [
+      "completed"
+    ],
+    "pcm_frames": 230476,
+    "drains": [
+      17.311,
+      24.551
+    ],
+    "events": [
+      {
+        "at": 0.988,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.627,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 13.449,
+        "kind": "assistant_text",
+        "text": "播报正在进行中，稍等片刻就能完成啦。"
+      },
+      {
+        "at": 13.887,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 17.307,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 17.311,
+        "kind": "assistant_delivered",
+        "text": "播报正在进行中，稍等片刻就能完成啦。"
+      },
+      {
+        "at": 17.695,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 18.565,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 18.574,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.578,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.584,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "864e1f9c616c45bf811db2d790d0fd72",
+        "status": "completed",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4",
+        "result": {
+          "status": "completed",
+          "speech_id": "b13848d595354939b47cd0db946596d7"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "interrupt",
+    "passed": true,
+    "expected": "interrupted",
+    "actual": [
+      "interrupted"
+    ],
+    "pcm_frames": 128432,
+    "drains": [
+      22.156
+    ],
+    "events": [
+      {
+        "at": 1.051,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.861,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 16.96,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，请稍等播报完成~"
+      },
+      {
+        "at": 17.581,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 21.995,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 22.156,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，请稍等播报完成~"
+      },
+      {
+        "at": 22.555,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 23.362,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.363,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 23.364,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 26.374,
+        "kind": "user_text",
+        "text": "请先停一下，暂停这次播报。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 11.124,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 13.454,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 15.723,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "427d3b4e770b43a4b221fb7f2ebdb01f",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4",
+        "result": {
+          "status": "interrupted",
+          "speech_id": "916fffe21f5f4356b711a80fd5be4b87"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "expected": "cancelled",
+    "actual": [
+      "cancelled"
+    ],
+    "pcm_frames": 91067,
+    "drains": [
+      19.604
+    ],
+    "events": [
+      {
+        "at": 1.051,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.662,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 15.357,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 15.823,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 19.329,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 19.604,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 19.977,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 19.98,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 20.037,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 20.037,
+        "kind": "input_started",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.582,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.617,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.605,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "c793d2e5e7bc4d29880cc261f710e1ba",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "complete",
+    "passed": true,
+    "expected": "completed",
+    "actual": [
+      "completed"
+    ],
+    "pcm_frames": 235011,
+    "drains": [
+      20.137,
+      27.136
+    ],
+    "events": [
+      {
+        "at": 0.961,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.644,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 15.836,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报这段内容，请稍等。"
+      },
+      {
+        "at": 16.322,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 19.898,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 20.137,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报这段内容，请稍等。"
+      },
+      {
+        "at": 20.524,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 21.359,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 21.36,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.568,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.493,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.49,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "36cdefa5ea2f4ddd93b7660f0cf1bea7",
+        "status": "completed",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4",
+        "result": {
+          "status": "completed",
+          "speech_id": "ca40b8caecaa43b88c638c742e33cf0b"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  },
+  {
+    "case": "interrupt",
+    "passed": false,
+    "error_type": "TimeoutError",
+    "events": [
+      {
+        "at": 0.944,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.719,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 15.853,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 16.305,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 20.122,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.882,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.925,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.946,
+        "name": "get_capability_operation"
+      }
+    ],
+    "repeat": 3
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "expected": "cancelled",
+    "actual": [
+      "cancelled"
+    ],
+    "pcm_frames": 101062,
+    "drains": [
+      18.128
+    ],
+    "events": [
+      {
+        "at": 0.954,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.599,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 13.369,
+        "kind": "assistant_text",
+        "text": "正在执行播报，稍等片刻就能听到完整内容了。"
+      },
+      {
+        "at": 13.995,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 18.003,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 18.128,
+        "kind": "assistant_delivered",
+        "text": "正在执行播报，稍等片刻就能听到完整内容了。"
+      },
+      {
+        "at": 18.513,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试。"
+      },
+      {
+        "at": 18.516,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 18.569,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 18.574,
+        "kind": "input_started",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.518,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.561,
+        "name": "get_capability_operation"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "f0cb84008ef444a6b610a173b92b1f47",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "f8939dbdb820d009fa74ec9c685381d24bcc5c7eb390de1a40a484e5c5840ac4"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  }
+]

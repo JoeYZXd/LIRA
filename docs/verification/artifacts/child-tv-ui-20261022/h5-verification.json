@@ -1,0 +1,34 @@
+{
+  "passed": true,
+  "remote_left_right": true,
+  "recognition_center_noop": true,
+  "no_auto_advance": true,
+  "dictation_replay_previous_next": true,
+  "debug_toggle": true,
+  "no_dictation_answer": true,
+  "no_fractional_counter": true,
+  "viewports": [
+    {
+      "viewport": {
+        "width": 1280,
+        "height": 720
+      },
+      "word_font": 48.45
+    },
+    {
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "word_font": 107.1
+    },
+    {
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "word_font": 72.6852
+    }
+  ],
+  "page_errors": []
+}

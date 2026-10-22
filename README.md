@@ -7,6 +7,8 @@ Orange Pi 5（RK3588S）上的老年人语音阅读 + 红外家电控制设备�
 - 需求权威：`docs/brainstorms/2026-09-26-lira-requirements.md`（R1–R32, AE1–AE7）
 - 实施计划：`docs/plans/2026-09-26-001-feat-lira-phase1-device-backend-plan.md`
 
+教学管理（2026-10-22 阶段交付）：[产品 PRD 与基础服务边界](docs/product/teaching-prd.md)、[家长与电视操作手册](docs/product/teaching-user-guide.md)、[开发复盘与复用经验](docs/product/teaching-retrospective-20261022.md)。当前语文默写规则以该 PRD 为准；历史验收保留当时版本与验证范围。
+
 ## 语音读书
 
 可以一口气说“小丽拉，帮我读下这本书”，无需等待唤醒提示音结束。

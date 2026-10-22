@@ -30,13 +30,13 @@ try:
     import pytest_playwright  # noqa: F401
     import uvicorn
 except ImportError:  # pragma: no cover - 浏览器依赖未装的机器上不收集
-    collect_ignore = ["test_dev_console_ui.py"]
+    collect_ignore_glob = ["test_*.py"]
 else:
     if not _BROWSER_REQUESTED:
         # 默认全量运行：与 pytest-asyncio 测试必须分进程（见模块 docstring）
-        collect_ignore = ["test_dev_console_ui.py"]
+        collect_ignore_glob = ["test_*.py"]
     else:
-        collect_ignore = []
+        collect_ignore_glob = []
 
 from ui_harness import PASSPHRASE, BrowserRuntime, DevBrowserServer, free_port
 

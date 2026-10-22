@@ -1,0 +1,69 @@
+{
+  "test": "live installed receiver force-stopped before explicit dictation check",
+  "input": "开始默写第8课",
+  "ordinary_probe_before": {
+    "status": "unavailable",
+    "reason": "Receiver unavailable; no wake or launch attempted."
+  },
+  "tool": "check_dictation_tv",
+  "arguments": {},
+  "result": {
+    "status": "ready",
+    "receiver": {
+      "version": "0.3",
+      "capabilities": [
+        "clear_content_id",
+        "pcm_audio_v1"
+      ],
+      "interactive": true,
+      "foreground": true,
+      "rendered_id": "",
+      "instance": "59ec63ef-538f-4414-8397-1037cf7e1fcc",
+      "audio": {
+        "status": "idle",
+        "music_volume": 4,
+        "music_muted": false
+      },
+      "status": "ok",
+      "clear_supported": true
+    },
+    "requested_lesson": 8,
+    "instructions": "已检测到电视亮屏且接收应用在前台，直接调用show_dictation_ready，不要询问电视是否打开。"
+  },
+  "duration_seconds": 0.517,
+  "http_calls": [
+    {
+      "method": "GET",
+      "url": "http://192.168.3.25:40100/status",
+      "error": "ConnectError"
+    },
+    {
+      "method": "GET",
+      "url": "http://192.168.3.25:40100/status",
+      "error": "ConnectError"
+    },
+    {
+      "method": "GET",
+      "url": "http://192.168.3.25:6095/controller",
+      "http_status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://192.168.3.25:40100/status",
+      "error": "ConnectError"
+    },
+    {
+      "method": "GET",
+      "url": "http://192.168.3.25:40100/status",
+      "http_status": 200
+    },
+    {
+      "method": "GET",
+      "url": "http://192.168.3.25:40100/status",
+      "http_status": 200
+    }
+  ],
+  "adb_used_for_launch": false,
+  "cloud_model_test": false,
+  "full_dictation_flow_test": false
+}

@@ -42,3 +42,6 @@ artifacts/
 /diag_frame_180.jpg
 /ocr_retry2.jpg
 /w2_blursharp.jpg
+
+# 开发会话临时副本、设备日志与试听产物，不纳入源码提交
+/tmp/

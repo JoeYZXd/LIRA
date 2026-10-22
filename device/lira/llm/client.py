@@ -183,6 +183,7 @@ class LlmClient:
         self.timing_log = None
         self.voice_member_provider = lambda: None
         self.voice_context_provider = lambda: ''
+        self.dictation_context_provider = lambda: ''
         self._web_search_enabled = cfg.web_search_enabled
         self._privacy = privacy
         self._network_ok = network_ok
@@ -237,6 +238,10 @@ class LlmClient:
             raise PrivacyBlocked("隐私模式开启，已拦截远程调用")
 
         messages: list[dict[str, str]] = []
+        if voice_log and system != PLAIN_SPEAK_SYSTEM_PROMPT:
+            dictation_context = self.dictation_context_provider()
+            if dictation_context:
+                messages.append({'role':'system','content':dictation_context})
         if self.memory is not None and memory_member_id is None and voice_log:
             messages.append({"role":"system","content":"本轮说话人身份尚未确认，只使用本轮对话上下文，不访问个人长期记忆，也不能声称已长期记住个人习惯。"})
             identity_context=self.voice_context_provider()

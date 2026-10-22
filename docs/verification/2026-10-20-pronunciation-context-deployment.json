@@ -1,0 +1,21 @@
+{
+  "deployed": true,
+  "backup": "/home/orangepi/lira/deploy-backups/pronunciation-context-20261020-075003",
+  "before_service": {
+    "MainPID": "72724",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "after_service": {
+    "MainPID": "75305",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "files": {
+    "lira/dictation.py": "99bb968370346cd0d398becaa4cc5221c64717c004da14698daa57b65593670b"
+  },
+  "protected_files_unchanged": true,
+  "textbook_data_unchanged": true,
+  "mode_unchanged": true,
+  "capabilities_flag": "false"
+}

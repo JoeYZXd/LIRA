@@ -1,0 +1,55 @@
+
+
+    /dev/bus/usb/001/009: UsbDevice[mName=/dev/bus/usb/001/009,mVendorId=11231,mProductId=640,mClass=239,mSubclass=2,mProtocol=1,mManufacturerName=04014008_P040200_SN0002,mProductName=1080P USB Camera,mVersion=2.0,mSerialNumber=04014008_P040200_SN0002,mConfigurations=[
+
+  UsbConfiguration[mId=1,mName=config,mAttributes=128,mMaxPower=250,mInterfaces=[
+
+  UsbInterface[mId=0,mAlternateSetting=0,mName=1080P USB Camera,mClass=14,mSubclass=1,mProtocol=0,mEndpoints=[
+
+  UsbEndpoint[mAddress=129,mAttributes=3,mMaxPacketSize=64,mInterval=8]]
+
+  UsbInterface[mId=1,mAlternateSetting=0,mName=1080P USB Camera,mClass=14,mSubclass=2,mProtocol=0,mEndpoints=[]
+
+  UsbInterface[mId=1,mAlternateSetting=1,mName=1080P USB Camera,mClass=14,mSubclass=2,mProtocol=0,mEndpoints=[
+
+  UsbEndpoint[mAddress=131,mAttributes=1,mMaxPacketSize=5116,mInterval=1]]
+
+  UsbInterface[mId=2,mAlternateSetting=0,mName=null,mClass=1,mSubclass=1,mProtocol=0,mEndpoints=[]
+
+  UsbInterface[mId=3,mAlternateSetting=0,mName=null,mClass=1,mSubclass=2,mProtocol=0,mEndpoints=[]
+
+  UsbInterface[mId=3,mAlternateSetting=1,mName=null,mClass=1,mSubclass=2,mProtocol=0,mEndpoints=[
+
+  UsbEndpoint[mAddress=137,mAttributes=1,mMaxPacketSize=128,mInterval=4]]]]
+
+    /dev/bus/usb/001/004: UsbDevice[mName=/dev/bus/usb/001/004,mVendorId=2652,mProductId=3036,mClass=255,mSubclass=0,mProtocol=0,mManufacturerName=Broadcom,mProductName=BCMUSB 802.11 Wireless Adapter,mVersion=2.16,mSerialNumber=51706,mConfigurations=[
+
+  UsbConfiguration[mId=1,mName=null,mAttributes=160,mMaxPower=250,mInterfaces=[
+
+  UsbInterface[mId=0,mAlternateSetting=0,mName=BCMUSB 802.11 Wireless Adapter,mClass=255,mSubclass=2,mProtocol=255,mEndpoints=[
+
+  UsbEndpoint[mAddress=129,mAttributes=3,mMaxPacketSize=16,mInterval=4]
+
+  UsbEndpoint[mAddress=130,mAttributes=2,mMaxPacketSize=512,mInterval=0]
+
+  UsbEndpoint[mAddress=2,mAttributes=2,mMaxPacketSize=512,mInterval=0]]]]
+
+    /dev/bus/usb/001/002: UsbDevice[mName=/dev/bus/usb/001/002,mVendorId=10007,mProductId=20480,mClass=0,mSubclass=0,mProtocol=0,mManufacturerName= ,mProductName=Synic Device,mVersion=1.16,mSerialNumber=null,mConfigurations=[
+
+  UsbConfiguration[mId=1,mName=null,mAttributes=128,mMaxPower=50,mInterfaces=[
+
+  UsbInterface[mId=3,mAlternateSetting=0,mName=null,mClass=3,mSubclass=0,mProtocol=0,mEndpoints=[
+
+  UsbEndpoint[mAddress=131,mAttributes=3,mMaxPacketSize=32,mInterval=2]
+
+  UsbEndpoint[mAddress=3,mAttributes=3,mMaxPacketSize=16,mInterval=2]]]]
+
+  USB Port State:
+
+    <no ports>
+
+  USB Audio Devices:
+
+    /dev/bus/usb/001/009: UsbAudioDevice: [card: 1, device: 0, name: USB-Audio - 1080P USB Camera, hasPlayback: false, hasCapture: true, class: 0x80000002]
+
+  

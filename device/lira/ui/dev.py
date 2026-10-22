@@ -37,11 +37,12 @@ import secrets
 import sqlite3
 import time
 import dataclasses
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -97,12 +98,38 @@ class DevHandle:
     def __init__(self, runtime) -> None:  # DeviceRuntime（鸭子类型避免循环导入）
         self.runtime = runtime
         #: 变更类测试端点的互斥锁（ASR/视觉/回放；进行中 → 409）
-        self.dev_mutex: asyncio.Lock = asyncio.Lock()
+        from lira.realtime_vision import shared_device_mutex
+        self.dev_mutex: asyncio.Lock = shared_device_mutex(runtime)
         #: 录音会话状态（start/stop 流；独占麦克风窗口由 runtime.mic_pause 承担）
         self.recording_active = False
         self._rec_task: asyncio.Task | None = None
         self._rec_stop: asyncio.Event | None = None
         self._rec_result: tuple[bytes, float] | None = None
+        self._jev_probe = None
+        self._doubao_lab = None
+        from lira.ui.guided_voice import GuidedVoice
+        self.guided_voice = GuidedVoice(self)
+        from lira.ui.voice_profile_test import VoiceProfileTest
+        self.voice_profile_test = VoiceProfileTest(self)
+        from lira.usage import AccountBalance
+        self.account_balance = AccountBalance()
+        paths = getattr(runtime, 'conversation_paths', None)
+        if paths is not None:
+            paths.test_busy = lambda: self.dev_mutex.locked() or self.recording_active
+
+    @property
+    def doubao_lab(self):
+        from lira.ui.doubao_lab import DoubaoLab
+        if self._doubao_lab is None:
+            self._doubao_lab = DoubaoLab(self.runtime,self.dev_mutex)
+        return self._doubao_lab
+
+    @property
+    def jev_probe(self):
+        from lira.ui.jev_probe import JevProbe
+        if self._jev_probe is None:
+            self._jev_probe = JevProbe(self.runtime, self.dev_mutex)
+        return self._jev_probe
 
     @property
     def store(self) -> ApplianceStore:
@@ -440,6 +467,23 @@ def _settings_items(runtime) -> list[dict]:
 def mount_dev(app: FastAPI, handle: DevHandle) -> None:
     """向设备 UI 应用挂载 dev 路由（仅 dev_console.enabled 时由 create_app 调用）。"""
     limiter = _RateLimiter()
+    from lira.ui.jev_probe import ProbeError
+    previous_lifespan = app.router.lifespan_context
+
+    @asynccontextmanager
+    async def probe_lifespan(application):
+        try:
+            async with previous_lifespan(application) as state:
+                yield state
+        finally:
+            probe = getattr(handle, "_jev_probe", None)
+            if probe is not None:
+                await probe.close()
+            lab = getattr(handle, '_doubao_lab', None)
+            if lab is not None:
+                await lab.close()
+
+    app.router.lifespan_context = probe_lifespan
 
     # 静态资源（CSS/JS）：与 dev 路由同生命周期——仅控制台开启时挂载。
     # 无鉴权可匿名获取：CSS/JS 不含敏感内容（tests/test_dev_console.py
@@ -484,17 +528,329 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
             )
         return None
 
+    from lira.ui.textbooks import mount_textbooks
+    mount_textbooks(app,handle,_require_session,_privacy_reject)
+    from lira.ui.teaching import mount_teaching
+    mount_teaching(app,handle,_require_session,_privacy_reject)
+
+    @app.api_route('/dev/api/identity-matches',methods=['GET','POST'])
+    async def dev_identity_matches(request: Request):
+        denied=_require_session(request,api=True)
+        if denied is not None:return denied
+        denied=await _privacy_reject()
+        if denied is not None:return denied
+        from lira.identity_journal import IdentityJournal
+        journal=IdentityJournal(handle.runtime.store._conn)
+        memory=getattr(handle.runtime,'personal_memory',None)
+        if request.method=='POST':
+            try:
+                body=await _json_body(request)
+                if not body or body.get('confirm') is not True:
+                    raise ValueError('请确认反馈。')
+                mid=body.get('member_id')
+                decision=body.get('decision')
+                if decision not in ('confirmed','rejected','corrected'):
+                    raise ValueError('反馈类型无效。')
+                if decision!='rejected' and (type(mid) is not int or memory is None or memory.people.get_member(mid) is None):
+                    raise ValueError('请选择已登记的真实说话人。')
+                row=journal.db.execute('SELECT selected_member_id,source FROM identity_match_events WHERE id=?',(str(body.get('event_id','')),)).fetchone()
+                if row is None or row['source']!='profile_test':
+                    raise ValueError('只可反馈这次档案测试；语音会话请直接口头确认。')
+                if decision=='confirmed' and mid!=row['selected_member_id']:
+                    raise ValueError('本人反馈必须对应被测试档案。')
+                journal.feedback(body['event_id'],decision,None if decision=='rejected' else mid,row['selected_member_id'],'console_user')
+                return JSONResponse({'status':'saved','template_updated':False})
+            except ValueError as exc:
+                return JSONResponse({'error':str(exc)},status_code=400)
+        return JSONResponse({**journal.recent(),'members':memory.people.list_members() if memory else []},headers={'Cache-Control':'no-store'})
+
+    @app.get('/dev/api/voice-history')
+    async def dev_voice_history(request: Request):
+        denied=_require_session(request,api=True)
+        if denied is not None:return denied
+        denied=await _privacy_reject()
+        if denied is not None:return denied
+        paths=getattr(handle.runtime,'conversation_paths',None)
+        if paths is None or not hasattr(paths,'history'):
+            return JSONResponse({'error':'语音聊天记录未装配。'},status_code=503)
+        memory=getattr(handle.runtime,'personal_memory',None)
+        return JSONResponse({'sessions':paths.history.sessions(),
+            'members':memory.people.list_members() if memory else [],
+            'active_session_id':paths.history.session_id},headers={'Cache-Control':'no-store'})
+
+    @app.api_route('/dev/api/voice-history/{session_id}',methods=['GET','POST'])
+    async def dev_voice_history_detail(session_id: str,request: Request):
+        denied=_require_session(request,api=True)
+        if denied is not None:return denied
+        denied=await _privacy_reject()
+        if denied is not None:return denied
+        paths=getattr(handle.runtime,'conversation_paths',None)
+        if paths is None or not hasattr(paths,'history'):
+            return JSONResponse({'error':'语音聊天记录未装配。'},status_code=503)
+        memory=getattr(handle.runtime,'personal_memory',None)
+        try:
+            data=paths.history.detail(session_id)
+            if request.method=='POST':
+                body=await _json_body(request)
+                if not body or body.get('confirm') is not True or 'member_id' not in body:
+                    raise ValueError('请确认关联成员和所选对话。')
+                ids=body.get('turn_ids')
+                if not isinstance(ids,list) or not 1<=len(ids)<=500 or any(type(i) is not int for i in ids):
+                    raise ValueError('请选择需要关联的对话轮次。')
+                turns=[turn for turn in data['turns'] if turn['id'] in ids]
+                if len(turns)!=len(set(ids)): raise ValueError('所选轮次不属于本次会话，请刷新。')
+                if memory is None: raise ValueError('个人记忆未装配。')
+                memory.link_voice_turns(session_id,turns,body['member_id'])
+                logger.info('dev event=voice_history_linked turns=%d',len(turns))
+            data['links']=memory.voice_links(session_id) if memory else {}
+            return JSONResponse(data,headers={'Cache-Control':'no-store'})
+        except ValueError as exc:
+            return JSONResponse({'error':str(exc)},status_code=400)
+
+    @app.get('/dev/api/voice-history/{session_id}/export')
+    async def dev_voice_history_export(session_id: str,request: Request):
+        denied=_require_session(request,api=True)
+        if denied is not None:return denied
+        denied=await _privacy_reject()
+        if denied is not None:return denied
+        paths=getattr(handle.runtime,'conversation_paths',None)
+        if paths is None or not hasattr(paths,'history'):
+            return JSONResponse({'error':'语音聊天记录未装配。'},status_code=503)
+        try:
+            data=paths.history.detail(session_id)
+            memory=getattr(handle.runtime,'personal_memory',None)
+            data['links']=memory.voice_links(session_id) if memory else {}
+            data['members']=memory.people.list_members() if memory else []
+        except ValueError as exc:return JSONResponse({'error':str(exc)},status_code=404)
+        # Fixed filename; user content never enters headers.
+        return JSONResponse(data,headers={'Cache-Control':'no-store',
+            'Content-Disposition':'attachment; filename="lira-voice-conversation.json"'})
+
+    @app.post('/dev/api/voice-test')
+    async def dev_voice_test(request: Request):
+        denied=_require_session(request,api=True)
+        if denied is not None:return denied
+        body=await _json_body(request)
+        if body is None:return JSONResponse({'error':'需要 JSON 对象。'},status_code=400)
+        test=handle.voice_profile_test
+        async with test.lock:
+            action=body.get('action')
+            if action!='begin' and (not test.capture.token or body.get('token')!=test.capture.token):
+                return JSONResponse({'error':'测试已结束，请重新开始。'},status_code=409)
+            if handle.runtime.privacy.is_on:
+                test.cancel()
+                return JSONResponse({'error':'隐私模式开启，测试录音已丢弃。'},status_code=403)
+            try:
+                if action=='begin':result=await test.begin(body.get('member_id'))
+                elif action=='restart':
+                    test.cancel();result=await test.begin(body.get('member_id'))
+                elif action=='stop':result=await test.stop()
+                elif action=='status':result=test.snapshot()
+                elif action=='cancel':
+                    test.cancel();result={'cancelled':True}
+                else:raise ValueError('未知操作。')
+                return JSONResponse(result,headers={'Cache-Control':'no-store'})
+            except ValueError as exc:
+                result={'error':str(exc)}
+                if action!='begin':result['state']=test.snapshot()
+                return JSONResponse(result,status_code=400)
+            except Exception:
+                test.cancel()
+                logger.warning('dev event=voice_profile_test_failed')
+                return JSONResponse({'error':'测试失败，麦克风已释放，请重试。'},status_code=503)
+
+    @app.post('/dev/api/voice-guided')
+    async def dev_voice_guided(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({'error': '需要 JSON 对象。'}, status_code=400)
+        guide = handle.guided_voice
+        async with guide.lock:
+            action = body.get('action')
+            if action != 'begin' and (not guide.token or body.get('token') != guide.token):
+                return JSONResponse({'error': '录入已结束或属于其他页面，请重新添加。'}, status_code=409)
+            if handle.runtime.privacy.is_on and action != 'cancel':
+                if guide.token:
+                    guide.cancel()
+                return JSONResponse({'error': '隐私模式开启，不能录音；录入数据已丢弃。'}, status_code=403)
+            try:
+                if action == 'begin':
+                    await guide.begin(body.get('name'), body.get('address'), body.get('replace_member_id'))
+                    result = guide.snapshot()
+                elif action == 'status':
+                    result = guide.snapshot()
+                elif action == 'resolve':
+                    result = guide.resolve(body.get('name'), body.get('address'), body.get('replace_member_id'))
+                else:
+                    result = await guide.action(action)
+                return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+            except ValueError as exc:
+                result = {'error': str(exc)}
+                if action != 'begin':
+                    # Polling must keep a rejected segment's explanation visible.
+                    guide.message = str(exc)
+                    logger.info('dev event=voice_guided_rejected step=%d action=%s reason=%s', len(guide.clips)+1, action, str(exc))
+                    result['state'] = guide.snapshot()
+                return JSONResponse(result, status_code=400)
+            except Exception:
+                logger.exception('dev event=voice_guided_failed')
+                guide.cancel()
+                return JSONResponse({'error': '录入失败，已释放麦克风。请重试。'}, status_code=503)
+
+    @app.get('/dev/api/costs')
+    async def dev_costs(request: Request):
+        denied = _require_session(request,api=True)
+        if denied is not None:return denied
+        paths=getattr(handle.runtime,'conversation_paths',None)
+        ledger=getattr(paths,'usage',None)
+        return JSONResponse({'balance':await handle.account_balance.snapshot(
+            refresh=request.query_params.get('refresh')=='1'),
+            'usage':ledger.snapshot() if ledger is not None else None},
+            headers={'Cache-Control':'no-store'})
+
+    @app.api_route('/dev/api/doubao-lab', methods=['GET','POST'])
+    async def dev_doubao_lab(request: Request):
+        denied = _require_session(request,api=True)
+        if denied is not None:return denied
+        try:
+            lab=handle.doubao_lab
+            if request.method=='GET':return JSONResponse(lab.snapshot())
+            body=await _json_body(request)
+            if body is None:raise ValueError('body 须为 JSON 对象。')
+            action=body.get('action')
+            if action=='stop':
+                await lab.stop()
+                return JSONResponse(lab.snapshot())
+            lab.guard()
+            if action=='start':return JSONResponse(await lab.start())
+            if action=='send':return JSONResponse(await lab.submit(body.get('text'),body.get('request_id')))
+            if action=='feedback':
+                return JSONResponse(lab.feedback(body.get('turn_id'),body.get('category'),body.get('note'),body.get('expected')))
+            if action=='clear':
+                await lab.clear()
+                return JSONResponse(lab.snapshot())
+            raise ValueError('未知测试操作。')
+        except PermissionError as exc:return JSONResponse({'error':str(exc)},status_code=403)
+        except ValueError as exc:return JSONResponse({'error':str(exc)},status_code=400)
+        except RuntimeError as exc:return JSONResponse({'error':str(exc)},status_code=409)
+
+    @app.get('/dev/api/doubao-lab/export')
+    async def dev_doubao_lab_export(request: Request):
+        denied = _require_session(request,api=True)
+        if denied is not None:return denied
+        try:
+            format=request.query_params.get('format','json')
+            if format=='zip':
+                return Response(handle.doubao_lab.bundle(),media_type='application/zip',headers={
+                    'Content-Disposition':f'attachment; filename="lira-doubao-{handle.doubao_lab.id}.zip"',
+                    'Cache-Control':'no-store'})
+            content=handle.doubao_lab.export(format)
+            extension='json' if format=='json' else 'md'
+            return Response(content,media_type='application/json' if format=='json' else 'text/markdown',
+                headers={'Content-Disposition':f'attachment; filename="lira-doubao-{handle.doubao_lab.id}.{extension}"',
+                         'Cache-Control':'no-store'})
+        except PermissionError as exc:return JSONResponse({'error':str(exc)},status_code=403)
+        except ValueError as exc:return JSONResponse({'error':str(exc)},status_code=400)
+
+    @app.get('/dev/api/doubao-lab/audio/{turn_id}')
+    async def dev_doubao_lab_audio(turn_id: str,request: Request):
+        denied = _require_session(request,api=True)
+        if denied is not None:return denied
+        try:
+            return Response(handle.doubao_lab.audio(turn_id),media_type='audio/wav',headers={'Cache-Control':'no-store'})
+        except PermissionError as exc:return JSONResponse({'error':str(exc)},status_code=403)
+        except ValueError as exc:return JSONResponse({'error':str(exc)},status_code=404)
+
+    @app.api_route('/dev/api/conversation-path', methods=['GET', 'POST'])
+    async def dev_conversation_path(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        paths = getattr(handle.runtime, 'conversation_paths', None)
+        if paths is None:
+            return JSONResponse({'error':'语音路径切换未装配'}, status_code=503)
+        if request.method == 'GET':
+            return JSONResponse(paths.snapshot())
+        denied = await _privacy_reject()
+        if denied is not None:
+            return denied
+        body = await _json_body(request)
+        if body is None:
+            return JSONResponse({'error':'body 须为合法 JSON 对象'}, status_code=400)
+        if handle.dev_mutex.locked() or handle.recording_active:
+            return JSONResponse({'error':'其他测试正在占用设备，请先结束测试。'}, status_code=409)
+        async with handle.dev_mutex:
+            try:
+                action = body.get('action', 'switch')
+                if action == 'switch':
+                    result = await paths.switch(body.get('mode'))
+                elif action == 'start':
+                    result = await paths.start()
+                elif action == 'stop':
+                    result = await paths.stop()
+                else:
+                    raise ValueError('未知操作。')
+                return JSONResponse(result)
+            except PermissionError as exc:
+                return JSONResponse({'error':str(exc)}, status_code=403)
+            except ValueError as exc:
+                return JSONResponse({'error':str(exc)}, status_code=400)
+            except RuntimeError as exc:
+                return JSONResponse({'error':str(exc)}, status_code=503)
+
+    @app.api_route("/dev/api/jev-probe", methods=["GET", "POST"])
+    async def dev_jev_probe(request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None:
+            return denied
+        try:
+            probe = handle.jev_probe
+            probe.guard()
+            if request.method == "GET":
+                return JSONResponse(probe.status())
+            if int(request.headers.get("content-length", "0")) > 16000:
+                return JSONResponse({"error": "请求过大。"}, status_code=413)
+            body = await request.json()
+            action = body.get("action")
+            if action == "prepare":
+                result = await probe.prepare()
+            elif action == "start":
+                result = await probe.start(body.get("phase"))
+            elif action in ("partial", "finish"):
+                args = body.get("id"), body.get("revision"), body.get("text")
+                if action == "finish":
+                    result = probe.finish(*args)
+                else:
+                    result = probe.snapshot(probe.submit(*args))
+            elif action == "cancel":
+                await probe.cancel(body.get("id"))
+                result = {"cancelled": True}
+            else:
+                raise ProbeError("未知测试操作。", 422)
+            return JSONResponse(result)
+        except ProbeError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=exc.status)
+        except (ValueError, TypeError, AttributeError):
+            return JSONResponse({"error": "请求参数无效。"}, status_code=422)
+
     # ---------- 页面与登录 ----------
 
     @app.get("/dev")
     async def dev_page(request: Request):
         if _session_ok(request):
-            return templates.TemplateResponse(request, "dev.html", {})
+            from lira.ui.static_assets import asset_versions
+            return templates.TemplateResponse(request, "dev.html", {
+                'asset_versions':asset_versions('dev-console.js','dev-console.css',
+                                                'teaching-hub.js','teaching-hub.css')
+            }, headers={'Cache-Control':'no-store'})
         if not handle.vault.is_set():
             # 首启引导：口令未设（fail-closed，去设备 UI 的设置页）
             return RedirectResponse("/passphrase/setup", status_code=303)
         # 口令已设：返回控制台专属登录页（浏览器唯一登录入口）
-        return templates.TemplateResponse(request, "dev_login.html", {})
+        return templates.TemplateResponse(request, "dev_login.html", {}, headers={'Cache-Control':'no-store'})
 
     @app.post("/dev/login")
     async def dev_login(request: Request):
@@ -684,7 +1040,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         profiles_ids = {member for member, _vector in profiles}
         members = [
             {"member_id": m["id"], "name": m["name"], "emoji": m["emoji"],
-             "has_profile": m["id"] in profiles_ids}
+             "has_profile": m["id"] in profiles_ids,
+             "address": rt.personal_memory.preferred_address(m['id']) or m['name'],
+             "revision": rt.personal_memory.voice_revision(m['id'])}
             for m in rt.personal_memory.people.list_members()
         ]
         by_id = {m["member_id"]: m for m in members}
@@ -704,6 +1062,34 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
                     len(snap["candidates"]), len(pending))
         return JSONResponse({**snap, "members": members,
                              "pending_confirmations": pending})
+
+    @app.post('/dev/api/voice-profiles/{member_id}/delete')
+    async def dev_voice_profile_delete(member_id: str, request: Request):
+        denied = _require_session(request, api=True)
+        if denied is not None: return denied
+        denied = await _privacy_reject()
+        if denied is not None: return denied
+        body = await _json_body(request)
+        try:
+            member_id = int(member_id)
+            if not 0 < member_id < 2**63: raise ValueError
+        except ValueError:
+            return JSONResponse({'error':'成员编号无效。'},status_code=400)
+        if body is None or body.get('confirm') is not True:
+            return JSONResponse({'error':'请明确确认删除声纹。'},status_code=400)
+        if handle.dev_mutex.locked() or handle.recording_active:
+            return JSONResponse({'error':'请先结束正在进行的录音或测试。'},status_code=409)
+        async with handle.dev_mutex:
+            memory=getattr(handle.runtime,'personal_memory',None)
+            if memory is None: return JSONResponse({'error':'声纹未装配。'},status_code=503)
+            try:
+                paths=getattr(handle.runtime,'conversation_paths',None)
+                if paths is not None: await paths.stop()
+                memory.delete_voice_profile(member_id,body.get('revision'))
+                logger.info('dev event=voice_profile_deleted')
+                return JSONResponse({'deleted':True})
+            except ValueError as exc:
+                return JSONResponse({'error':str(exc)},status_code=409)
 
     @app.delete("/dev/api/voice-candidates/{candidate_id}")
     async def dev_voice_candidate_delete(candidate_id: str, request: Request):
@@ -797,6 +1183,9 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         denied = _require_session(request, api=True)
         if denied is not None:
             return denied
+        paths = getattr(handle.runtime, 'conversation_paths', None)
+        if paths is not None and (paths.mode == 'doubao_realtime' or paths.external_test):
+            return JSONResponse({'error':'请先切回 A 路径，再运行本地播报测试。'}, status_code=409)
         body = await _json_body(request)
         if body is None:
             return JSONResponse({"error": "body 须为合法 JSON 对象"}, status_code=400)
@@ -829,6 +1218,8 @@ def mount_dev(app: FastAPI, handle: DevHandle) -> None:
         privacy_denied = await _privacy_reject()
         if privacy_denied is not None:
             return privacy_denied
+        if handle.dev_mutex.locked():
+            return JSONResponse({'error':'其他测试正在占用设备，请先结束。'},status_code=409)
         if handle.recording_active:
             return JSONResponse({"error": "录音已在进行中"}, status_code=409)
         try:

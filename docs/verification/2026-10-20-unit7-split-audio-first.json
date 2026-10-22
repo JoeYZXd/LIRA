@@ -1,0 +1,378 @@
+{
+  "test": "unit7 literal request real cloud split audio audit",
+  "started_utc": "2026-10-20T14:27:34Z",
+  "model": "1.2.6.1",
+  "service_before": {
+    "MainPID": "100735",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "capabilities_flag": "false",
+  "tool_names": [
+    "get_device_status",
+    "end_conversation",
+    "list_infrared_devices",
+    "prepare_infrared_learning",
+    "start_infrared_learning",
+    "get_infrared_learning_status",
+    "cancel_infrared_learning",
+    "control_infrared_device",
+    "start_voice_enrollment",
+    "set_voice_enrollment_details",
+    "start_voice_sample",
+    "check_voice_sample",
+    "get_voice_enrollment_status",
+    "save_voice_enrollment",
+    "cancel_voice_enrollment",
+    "reset_voice_samples",
+    "identify_current_speaker",
+    "get_speaker_continuity_context",
+    "report_speaker_continuity",
+    "request_identity_confirmation",
+    "submit_identity_feedback",
+    "get_recent_device_conversation",
+    "get_personal_memory",
+    "prepare_tv_display",
+    "list_practice_textbooks",
+    "prepare_pinyin_practice",
+    "list_tv_images",
+    "confirm_tv_display",
+    "cancel_tv_display",
+    "get_tv_display_status",
+    "check_dictation_tv",
+    "show_dictation_ready",
+    "get_dictation_material",
+    "present_dictation_item",
+    "cancel_dictation",
+    "get_dictation_status",
+    "get_dictation_book_choice",
+    "confirm_dictation_book_choice"
+  ],
+  "catalog": {
+    "status": "ok",
+    "books": [
+      {
+        "book_id": "4e28c92b626b4f29ae3affe194525579",
+        "title": "人教版语文二年级上册（官方当前电子版，字表待补全）",
+        "subject": "chinese",
+        "source": "review_draft",
+        "imported_at": 1792425490.5359643,
+        "lessons": [
+          {
+            "number": 1,
+            "unit": 1,
+            "title": "小蝌蚪找妈妈",
+            "reviewed": true
+          },
+          {
+            "number": 2,
+            "unit": 1,
+            "title": "我是什么",
+            "reviewed": true
+          },
+          {
+            "number": 3,
+            "unit": 1,
+            "title": "植物妈妈有办法",
+            "reviewed": false
+          },
+          {
+            "number": 1,
+            "unit": 2,
+            "title": "场景歌",
+            "reviewed": false
+          },
+          {
+            "number": 2,
+            "unit": 2,
+            "title": "树之歌",
+            "reviewed": false
+          },
+          {
+            "number": 3,
+            "unit": 2,
+            "title": "拍手歌",
+            "reviewed": false
+          },
+          {
+            "number": 4,
+            "unit": 2,
+            "title": "田家四季歌",
+            "reviewed": false
+          },
+          {
+            "number": 4,
+            "unit": 3,
+            "title": "彩虹",
+            "reviewed": false
+          },
+          {
+            "number": 5,
+            "unit": 3,
+            "title": "去外婆家",
+            "reviewed": false
+          },
+          {
+            "number": 6,
+            "unit": 3,
+            "title": "数星星的孩子",
+            "reviewed": false
+          },
+          {
+            "number": 7,
+            "unit": 4,
+            "title": "古诗二首",
+            "reviewed": true
+          },
+          {
+            "number": 8,
+            "unit": 4,
+            "title": "黄山奇石",
+            "reviewed": true
+          },
+          {
+            "number": 9,
+            "unit": 4,
+            "title": "日月潭",
+            "reviewed": false
+          },
+          {
+            "number": 10,
+            "unit": 4,
+            "title": "葡萄沟",
+            "reviewed": false
+          },
+          {
+            "number": 11,
+            "unit": 5,
+            "title": "坐井观天",
+            "reviewed": false
+          },
+          {
+            "number": 12,
+            "unit": 5,
+            "title": "寒号鸟",
+            "reviewed": false
+          },
+          {
+            "number": 13,
+            "unit": 5,
+            "title": "我要的是葫芦",
+            "reviewed": false
+          },
+          {
+            "number": 14,
+            "unit": 6,
+            "title": "八角楼上",
+            "reviewed": false
+          },
+          {
+            "number": 15,
+            "unit": 6,
+            "title": "朱德的扁担",
+            "reviewed": false
+          },
+          {
+            "number": 16,
+            "unit": 6,
+            "title": "难忘的泼水节",
+            "reviewed": false
+          },
+          {
+            "number": 17,
+            "unit": 6,
+            "title": "刘胡兰",
+            "reviewed": false
+          },
+          {
+            "number": 18,
+            "unit": 7,
+            "title": "古诗二首",
+            "reviewed": false
+          },
+          {
+            "number": 19,
+            "unit": 7,
+            "title": "雾在哪里",
+            "reviewed": false
+          },
+          {
+            "number": 20,
+            "unit": 7,
+            "title": "雪孩子",
+            "reviewed": false
+          },
+          {
+            "number": 21,
+            "unit": 8,
+            "title": "称赞",
+            "reviewed": false
+          },
+          {
+            "number": 22,
+            "unit": 8,
+            "title": "纸船和风筝",
+            "reviewed": false
+          },
+          {
+            "number": 23,
+            "unit": 8,
+            "title": "快乐的小河",
+            "reviewed": false
+          }
+        ]
+      }
+    ],
+    "instructions": "只可使用 reviewed=true 的课次，无需整本发布。imported_at 是本地导入目录时间，旧教材可能仅有文件时间；多本选用必须语音确认。"
+  },
+  "turns": [
+    {
+      "index": 1,
+      "input": "默写第7单元。",
+      "participant_reason": "requested starting utterance",
+      "at": 9.224,
+      "events": [
+        {
+          "at": 9.972,
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "at": 11.335,
+          "kind": "user_text",
+          "text": "我写第 7 单元。"
+        },
+        {
+          "at": 12.742,
+          "kind": "assistant_text",
+          "text": "电视已经打开了吗？"
+        },
+        {
+          "at": 13.008,
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "at": 15.052,
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "at": 11.609,
+          "returned_at": 11.816,
+          "name": "check_dictation_tv",
+          "arguments": {},
+          "result": {
+            "status": "needs_input",
+            "receiver": {
+              "version": "0.3",
+              "capabilities": [
+                "clear_content_id",
+                "pcm_audio_v1"
+              ],
+              "interactive": true,
+              "foreground": false,
+              "rendered_id": "",
+              "instance": "5d4c880d-17ef-49df-94d4-b1c736bebbea",
+              "audio": {
+                "status": "completed",
+                "music_volume": 4,
+                "music_muted": false,
+                "id": "37ff510d495e4ff58cc7a8d1b9d0a355",
+                "written_frames": 72208,
+                "played_frames": 72208,
+                "audio_session_id": 31,
+                "routed_device_type": 2,
+                "received_bytes": 144416,
+                "next_sequence": 156,
+                "error": ""
+              },
+              "status": "ok",
+              "clear_supported": true
+            },
+            "requested_lesson": null,
+            "question": "电视已经打开了吗？",
+            "instructions": "等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "at": 15.053,
+        "speech": {
+          "status": "idle"
+        },
+        "tv": {
+          "status": "idle"
+        }
+      }
+    }
+  ],
+  "quiet_windows": [],
+  "limits": [
+    "synthetic TTS user input through actual cloud ASR",
+    "normal real cloud PCM to LIRA speaker; explicit dictation PCM to paired television",
+    "TV-on statements and pronunciation approvals are synthetic participant replies, not verified household facts",
+    "real deployed TV/material handlers; no live household identity/memory or IR loaded",
+    "observer reads and quiet windows are not model function calls",
+    "no service restart/config change/classic-chain change"
+  ],
+  "source_code_hashes": {
+    "lira/dictation.py": "99bb968370346cd0d398becaa4cc5221c64717c004da14698daa57b65593670b",
+    "lira/tv_voice.py": "8bc2cc21ec2a178fba7044dcf359c0c7141be80146b73908a1bc090a7d1b5b59",
+    "lira/textbook_practice.py": "e599b20ffd86e75343d107e0a9a1ffe44c0742442da7eec549c2588fac2a1026",
+    "lira/audio/doubao_realtime.py": "68ba3f468aa6ddf7346da340f438a214b4c4ff0f63e7d79bd49fdbfc0356279b",
+    "lira/conversation_paths.py": "d724d9ed9952cd78391ff2b30c2d4ed958b59a598d8a8821ed01e41a6466e48e",
+    "lira/tv_audio.py": "7043e0f30a189b05e5acd4ce766df73a8e9ea186bda0b1eb5745e8db06680f82"
+  },
+  "lesson7": [
+    {
+      "book_id": "4e28c92b626b4f29ae3affe194525579",
+      "source": "review_draft",
+      "lessons": [
+        {
+          "unit": 4,
+          "number": 7,
+          "title": "古诗二首",
+          "reviewed": true,
+          "four_count": 10,
+          "two_count": 13
+        }
+      ]
+    }
+  ],
+  "tv_payloads": [],
+  "wire_tool_results": [
+    {
+      "at": 11.816,
+      "sent": true,
+      "item": {
+        "type": "message",
+        "call_id": "9610f777-1309-41f3-b14f-9db911a53767",
+        "role": "tool",
+        "content": [
+          {
+            "type": "input_text",
+            "text": "{\"status\": \"needs_input\", \"receiver\": {\"version\": \"0.3\", \"capabilities\": [\"clear_content_id\", \"pcm_audio_v1\"], \"interactive\": true, \"foreground\": false, \"rendered_id\": \"\", \"instance\": \"5d4c880d-17ef-49df-94d4-b1c736bebbea\", \"audio\": {\"status\": \"completed\", \"music_volume\": 4, \"music_muted\": false, \"id\": \"37ff510d495e4ff58cc7a8d1b9d0a355\", \"written_frames\": 72208, \"played_frames\": 72208, \"audio_session_id\": 31, \"routed_device_type\": 2, \"received_bytes\": 144416, \"next_sequence\": 156, \"error\": \"\"}, \"status\": \"ok\", \"clear_supported\": true}, \"requested_lesson\": null, \"question\": \"电视已经打开了吗？\", \"instructions\": \"等待用户回答，不要把接收端不可达说成电视关机；用户已打开后调用show_dictation_ready。\"}"
+          }
+        ]
+      }
+    }
+  ],
+  "wire_speech_requests": [],
+  "displayed_pinyin_pages": 0,
+  "more_instruction_sent": false,
+  "service_after": {
+    "MainPID": "100735",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "service_unchanged": true,
+  "textbook_files_unchanged": true,
+  "tv_audio_frames": 0,
+  "local_audio_frames": 43185,
+  "audio_receipts": [],
+  "ended_at": 15.557
+}

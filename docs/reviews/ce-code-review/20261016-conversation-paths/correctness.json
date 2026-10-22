@@ -1,0 +1,10 @@
+{
+  "reviewer": "correctness",
+  "findings": [],
+  "residual_risks": [
+    "Live Doubao protocol and audio device behavior remain unverified by the fake-WebSocket tests; their event ordering is supplied by the test itself."
+  ],
+  "testing_gaps": [
+    "No integration test exercises successful cloud start_voice_enrollment handoff through the real handle_voice_input flow and returns to cloud standby after local save/cancel. Current handoff coverage only rejects stale generations."
+  ]
+}

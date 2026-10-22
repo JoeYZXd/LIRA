@@ -1,0 +1,16 @@
+{
+  "android": "6.0.1",
+  "audio_inputs": [
+    {
+      "id": 20,
+      "type": 11,
+      "name": "USB-Audio - 1080P USB Camera"
+    }
+  ],
+  "selected_usb_id": 20,
+  "preferred_usb_accepted": true,
+  "camera_count": 1,
+  "audio_error": "java.io.IOException: read=0",
+  "camera_open": true,
+  "preview_frames": 0
+}

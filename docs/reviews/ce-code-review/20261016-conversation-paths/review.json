@@ -1,0 +1,113 @@
+{
+  "status": "complete",
+  "verdict": "Ready with fixes",
+  "scope": {
+    "base": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "branch": "feat/home-console-chat",
+    "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "pr_url": null,
+    "files_changed": 11,
+    "scope_mode": "local-aligned explicit task-selected hunks and named untracked files; unrelated WIP excluded"
+  },
+  "intent": "Preserve classic speech runtime and independent Jev cached testing; add a switchable Doubao full-duplex route, safe microphone ownership and local enrollment handoff.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security-reliability-adversarial"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "device/lira/audio/doubao_realtime.py:238-240: await self._stop_output(); await self.player.close(); if self.ws is not None:",
+        "device/lira/audio/doubao_realtime.py:231-233: if self.closed: return; self.closed = True (cleanup cannot subsequently be retried).",
+        "device/lira/audio/doubao_realtime.py:126: await self.player.stop() is executed by _stop_output; device/lira/hal/board/audio.py:_abort_blocking explicitly raises HalError on PortAudio abort failure.",
+        "device/lira/conversation_paths.py:191-196 removes self.session before awaiting session.close(), so the failing session is no longer available to subsequent stop calls."
+      ],
+      "file": "device/lira/audio/doubao_realtime.py",
+      "first_evidence": "device/lira/audio/doubao_realtime.py:238 -- await self._stop_output()",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 238,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Run audio stop/player close and WebSocket close/queue erasure in nested try/finally blocks so every cleanup stage runs even if the sound device fails; propagate the original audio error after cleanup. Add a fake-player stop failure regression asserting socket closure and sensitive buffer clearing.",
+      "title": "Audio stop failure prevents cloud session cleanup",
+      "why_it_matters": "When the board output device fails while stopping, close exits before closing the WebSocket or clearing queued microphone data and tool results. ConversationPaths._stop has already removed the session reference, and closed=True suppresses later cleanup attempts, leaving the cloud connection unclosed and aborting route switching/privacy/shutdown cleanup."
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "gated_auto",
+      "confidence": 75,
+      "evidence": [
+        "device/lira/audio/doubao_realtime.py:238-240: await self._stop_output(); await self.player.close(); if self.ws is not None:",
+        "device/lira/audio/doubao_realtime.py:231-233: if self.closed: return; self.closed = True (cleanup cannot subsequently be retried).",
+        "device/lira/audio/doubao_realtime.py:126: await self.player.stop() is executed by _stop_output; device/lira/hal/board/audio.py:_abort_blocking explicitly raises HalError on PortAudio abort failure.",
+        "device/lira/conversation_paths.py:191-196 removes self.session before awaiting session.close(), so the failing session is no longer available to subsequent stop calls."
+      ],
+      "file": "device/lira/audio/doubao_realtime.py",
+      "first_evidence": "device/lira/audio/doubao_realtime.py:238 -- await self._stop_output()",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 238,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "Run audio stop/player close and WebSocket close/queue erasure in nested try/finally blocks so every cleanup stage runs even if the sound device fails; propagate the original audio error after cleanup. Add a fake-player stop failure regression asserting socket closure and sensitive buffer clearing.",
+      "title": "Audio stop failure prevents cloud session cleanup",
+      "why_it_matters": "When the board output device fails while stopping, close exits before closing the WebSocket or clearing queued microphone data and tool results. ConversationPaths._stop has already removed the session reference, and closed=True suppresses later cleanup attempts, leaving the cloud connection unclosed and aborting route switching/privacy/shutdown cleanup."
+    }
+  ],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Cloud key missing: live Doubao service, hardware audio, interruption and tool sequencing unverified."
+  ],
+  "testing_gaps": [
+    "Successful cloud-to-real-local enrollment handoff, save/cancel and standby return lack integration coverage.",
+    "Cancellation during session startup/chime and 60-second idle behavior during long user speech or assistant output need targeted coverage."
+  ],
+  "coverage": {
+    "conditional_lenses": "Audio ownership and external I/O justify reliability/security/adversarial; tests, API and frontend reviewed in orchestrator context, without independent corroboration for those additional lenses.",
+    "cross_model": "Not started: sanctioned git-diff runner cannot faithfully express this task-selected scope including untracked files and selected WIP hunks; scoped local adversarial fallback used, no external code egress.",
+    "standards": "No applicable repository criteria files found; active supplied instructions used.",
+    "plan": "Native task engine; conversation intent authoritative, no implementation plan or settlement suppression evaluated.",
+    "scope_helper": "Executed against HEAD, output includes unrelated repository baseline and excludes untracked; not usable for narrowed scope, lite path disabled.",
+    "validators": {
+      "batch": 1,
+      "skipped": 0,
+      "verdicts": [
+        {
+          "#": 1,
+          "validated": true,
+          "reason": "Actual HAL stop raises HalError; sequential close skips WebSocket and buffer cleanup and suppresses retry."
+        }
+      ]
+    },
+    "suppressed_by_confidence": {},
+    "malformed_findings": 0,
+    "reviewer_limits": "Security/reliability/adversarial share one reviewer context and are not independent confirmations. Correctness separate; validator separate. No credential files or process environments read. No code edits, no heavy test duplication.",
+    "resolved_during_review": "Invalid tool argument rejection previously emitted successful tool_done and initiated enrollment; caller fixed before final reread, regression added; not retained as an open finding."
+  },
+  "artifact_path": "D:/Projects/LIRA/docs/reviews/ce-code-review/20261016-conversation-paths",
+  "run_id": "20261016-conversation-paths"
+}

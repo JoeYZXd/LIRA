@@ -1,0 +1,28 @@
+............................................                             [100%]
+=============================== warnings summary ===============================
+tests/test_dictation_routes.py::test_parent_guards_versions_and_source_write_readback
+tests/test_dictation_routes.py::test_real_result_photo_review_and_next_context
+tests/test_dictation_routes.py::test_prepare_model_tool_calls_use_real_service_and_bound_parent
+tests/test_dictation_routes.py::test_candidate_parent_click_is_required_and_session_is_bound
+  /tmp/lira-dictation-review-73366b76a057/device/lira/ui/dictation.py:186: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/test_dictation_routes.py::test_parent_guards_versions_and_source_write_readback
+tests/test_dictation_routes.py::test_real_result_photo_review_and_next_context
+tests/test_dictation_routes.py::test_prepare_model_tool_calls_use_real_service_and_bound_parent
+tests/test_dictation_routes.py::test_candidate_parent_click_is_required_and_session_is_bound
+  /home/orangepi/lira/device/.venv/lib/python3.11/site-packages/fastapi/applications.py:4744: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+44 passed, 8 warnings in 8.44s

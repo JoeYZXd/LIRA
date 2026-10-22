@@ -803,7 +803,8 @@ class TestBrowserLoginFlow:
         assert r.status_code == 200
         console = client.get("/dev")
         assert console.status_code == 200
-        assert "LIRA 开发者控制台</h1>" in console.text
+        assert "我的工作区</h1>" in console.text
+        assert 'id="app-launcher"' in console.text
         assert 'data-page="dev-console"' in console.text  # 功能区块出现
 
     def test_no_passphrase_still_redirects_to_setup(self):
@@ -875,7 +876,10 @@ class TestConsoleErrorFeedback:
         pages.append(client.get("/dev").text)  # 控制台页
         for html in pages:
             assert html.count("<script") == html.count("</script>") >= 1
-            assert html.count('src="/dev/static/dev-console.js"') == 1
+            import re
+            from urllib.parse import urlsplit
+            scripts = re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', html)
+            assert sum(urlsplit(src).path == '/dev/static/dev-console.js' for src in scripts) == 1
             # 结构顺序：闭合标签必须在 </body> 之前（吞掉 </body> 即语法错误）
             assert html.index("</script>") < html.index("</body>")
 
@@ -964,7 +968,11 @@ class TestConsoleTiles:
     U5：运行日志磁贴并入实时区日志区（系统日志 tab），tile-logs 不复存在。"""
 
     TILE_IDS = (
-        "tile-overview", "tile-voicelog", "tile-settings",
+        'tile-teaching',
+        'tile-voice-history',
+        "tile-costs",
+        "tile-doubao-lab",
+        "tile-jev", "tile-overview", "tile-voicelog", "tile-settings",
         "tile-voice-candidates", "tile-voice",
         "tile-vision", "tile-sync", "tile-replay",
     )
@@ -1051,6 +1059,25 @@ def make_voice_memory_client(tmp_path):
 
 
 class TestVoiceCandidatesEndpoints:
+    def test_delete_profile_requires_confirmation_privacy_and_idle(self,tmp_path):
+        _app,client,rt=make_voice_memory_client(tmp_path)
+        m=rt.personal_memory
+        member=m.register_voice('成员','称呼',[1.,0.])
+        url=f'/dev/api/voice-profiles/{member}/delete'
+        payload={'confirm':True,'revision':m.voice_revision(member)}
+        assert client.post(url,json=payload).status_code==401
+        login(client)
+        assert client.post(url,json={'revision':payload['revision']}).status_code==400
+        rt.privacy._on=True
+        assert client.post(url,json=payload).status_code==403
+        rt.privacy._on=False
+        rt.dev_handle.recording_active=True
+        assert client.post(url,json=payload).status_code==409
+        rt.dev_handle.recording_active=False
+        assert len(m.profiles())==1
+        assert client.post(url,json=payload).status_code==200
+        assert not m.profiles() and m.people.get_member(member)
+
     def test_delete_unfinished_candidate_removes_evidence_not_members(self, tmp_path):
         import numpy as np
         _app, client, rt = make_voice_memory_client(tmp_path)

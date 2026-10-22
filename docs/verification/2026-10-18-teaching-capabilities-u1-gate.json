@@ -1,0 +1,24 @@
+{
+  "gate": "PASSED",
+  "observed_at": "2026-10-18T23:13:17.165759+08:00",
+  "endpoint": "wss://openspeech.bytedance.com/api/v3/duplex/realtime/dialogue",
+  "model": "1.2.6.1",
+  "cases": 12,
+  "repeats_per_case": 3,
+  "isolated_overlay": true,
+  "running_service_changed": false,
+  "microphone_or_physical_speaker_used": false,
+  "new_raw_audio_persistence": false,
+  "raw_receipt": "2026-10-18-teaching-capabilities-u1-cloud-fixed.json",
+  "files_sha256": {
+    "device/lira/realtime_capabilities.py": "8ed6a156391967df10a5c5348cb815526f1f8f9a57de2f13e9f2de80a5458260",
+    "device/lira/audio/doubao_realtime.py": "dad296519000bbcb8c9847aeb76c959f6a5dd785d5b45228c461fc82b4dd3df8",
+    "device/lira/voice_trace.py": "ec91f7b6399ed48ff8113a46166c40a7c8da2c8db8b2ea3d6040bcc0a8fcfba3",
+    "device/scripts/probe_realtime_tool_protocol.py": "5f9c008fff260d9ed3c51a0b98a8402e7589c4c9d00641799177f5745f6448d1"
+  },
+  "limits": [
+    "Synthetic tools only; actual OCR/TTS/TV/timer hardware remains later-unit verification.",
+    "This observed matrix does not prove universal model correctness or autonomous teaching behavior.",
+    "Earlier first-fix receipt includes an executions=2 case and is not gate evidence."
+  ]
+}

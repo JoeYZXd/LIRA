@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from types import SimpleNamespace
 import pytest
 import numpy as np
@@ -205,7 +206,7 @@ async def test_expired_invitation_cannot_start_registration(tmp_path):
     rt=SimpleNamespace(speaker_identity=SimpleNamespace(embedding=lambda samples:V,match=lambda v:None),voice_enrollment=e,
         voice_member_id=None,personal_memory=m,engine=engine,privacy=SimpleNamespace(is_on=False),
         dispatcher=SimpleNamespace(generation=engine.listening_generation),_voice_invitation_owner=engine._owner,
-        _voice_invitation_time=0,_voice_invitation_offered=True)
+        _voice_invitation_time=time.monotonic()-61,_voice_invitation_offered=True)
     await DeviceRuntime.handle_voice_input(rt,'愿意注册',audio(),rt.dispatcher.generation,False)
     assert not e.active and calls==['愿意注册']
     await m.close()

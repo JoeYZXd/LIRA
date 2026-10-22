@@ -1,0 +1,845 @@
+{
+  "teaching_sensitive": true,
+  "service_before": {
+    "teaching_sensitive": true
+  },
+  "tool_names": [
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]"
+  ],
+  "catalog": {
+    "teaching_sensitive": true,
+    "status": "ok",
+    "books": [
+      {
+        "teaching_sensitive": true,
+        "lessons": [
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          },
+          {
+            "teaching_sensitive": true
+          }
+        ]
+      }
+    ]
+  },
+  "turns": [
+    {
+      "teaching_sensitive": true,
+      "events": [
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 8
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 29
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        }
+      ],
+      "tools": [
+        {
+          "teaching_sensitive": true,
+          "name": "check_dictation_tv",
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "ready",
+            "receiver": {
+              "teaching_sensitive": true,
+              "capabilities": [
+                "[teaching content omitted]",
+                "[teaching content omitted]"
+              ],
+              "audio": {
+                "teaching_sensitive": true,
+                "status": "idle"
+              },
+              "status": "ok"
+            }
+          }
+        },
+        {
+          "teaching_sensitive": true,
+          "name": "show_dictation_ready",
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "displaying"
+          }
+        },
+        {
+          "teaching_sensitive": true,
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "displayed"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "teaching_sensitive": true,
+        "speech": {
+          "teaching_sensitive": true,
+          "status": "idle"
+        },
+        "tv": {
+          "teaching_sensitive": true,
+          "status": "displayed"
+        }
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "events": [
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 26
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 13
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        }
+      ],
+      "tools": [
+        {
+          "teaching_sensitive": true,
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "ok",
+            "books": [
+              {
+                "teaching_sensitive": true,
+                "lessons": [
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "teaching_sensitive": true,
+          "name": "get_dictation_material",
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "ready",
+            "four": [
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]"
+            ],
+            "two": [
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]",
+              "[teaching content omitted]"
+            ]
+          }
+        },
+        {
+          "teaching_sensitive": true,
+          "name": "present_dictation_item",
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "confirmation_required"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "teaching_sensitive": true,
+        "speech": {
+          "teaching_sensitive": true,
+          "status": "idle"
+        },
+        "tv": {
+          "teaching_sensitive": true,
+          "status": "displayed"
+        }
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "events": [
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 7
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 27
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        }
+      ],
+      "tools": [
+        {
+          "teaching_sensitive": true,
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "ok",
+            "books": [
+              {
+                "teaching_sensitive": true,
+                "lessons": [
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  },
+                  {
+                    "teaching_sensitive": true
+                  }
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "teaching_sensitive": true,
+          "name": "present_dictation_item",
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "confirmation_required"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "teaching_sensitive": true,
+        "speech": {
+          "teaching_sensitive": true,
+          "status": "idle"
+        },
+        "tv": {
+          "teaching_sensitive": true,
+          "status": "displayed"
+        }
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "events": [
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 7
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 20
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        },
+        {
+          "teaching_sensitive": true,
+          "text": "[teaching content omitted]",
+          "text_length": 0
+        }
+      ],
+      "tools": [
+        {
+          "teaching_sensitive": true,
+          "name": "present_dictation_item",
+          "arguments": {
+            "teaching_sensitive": true
+          },
+          "result": {
+            "teaching_sensitive": true,
+            "status": "confirmation_required"
+          }
+        }
+      ],
+      "audio_receipts": [],
+      "observer": {
+        "teaching_sensitive": true,
+        "speech": {
+          "teaching_sensitive": true,
+          "status": "idle"
+        },
+        "tv": {
+          "teaching_sensitive": true,
+          "status": "displayed"
+        }
+      }
+    }
+  ],
+  "quiet_windows": [],
+  "limits": [
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]",
+    "[teaching content omitted]"
+  ],
+  "source_code_hashes": {
+    "teaching_sensitive": true
+  },
+  "lesson8-loop": [
+    {
+      "teaching_sensitive": true,
+      "lessons": [
+        {
+          "teaching_sensitive": true
+        }
+      ]
+    }
+  ],
+  "tv_payloads": [
+    {
+      "teaching_sensitive": true,
+      "payload": {
+        "teaching_sensitive": true,
+        "type": "text",
+        "text": "[teaching content omitted]",
+        "text_length": 9
+      },
+      "result": {
+        "teaching_sensitive": true,
+        "audio": {
+          "teaching_sensitive": true,
+          "status": "idle"
+        },
+        "capabilities": [
+          "[teaching content omitted]",
+          "[teaching content omitted]"
+        ]
+      }
+    }
+  ],
+  "wire_tool_results": [
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "c233a188-b8b9-4be1-b112-135a3e7702a5",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"ready\", \"receiver\": {\"teaching_sensitive\": true, \"capabilities\": [\"[teaching content omitted]\", \"[teaching content omitted]\"], \"audio\": {\"teaching_sensitive\": true, \"status\": \"idle\"}, \"status\": \"ok\"}}",
+            "text_length": 456
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "ee83562c-e2d7-4120-a06d-1f987dc39db6",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"displaying\"}",
+            "text_length": 144
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "bc7fe477-c13e-4f2b-834d-68a05ed6bd82",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"displayed\"}",
+            "text_length": 73
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "7b857f21-96fb-4365-870d-8ca147d0ec5f",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"ok\", \"books\": [{\"teaching_sensitive\": true, \"lessons\": [{\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}]}]}",
+            "text_length": 1992
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "5d843f72-eafd-4db1-ae04-10847aad4438",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"ready\", \"four\": [\"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\"], \"two\": [\"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\", \"[teaching content omitted]\"]}",
+            "text_length": 535
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "14919e7c-5e03-4647-8b6b-ef86783e10e0",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"confirmation_required\"}",
+            "text_length": 133
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "79cd9ebb-244f-4022-ba56-1514662c5b70",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"ok\", \"books\": [{\"teaching_sensitive\": true, \"lessons\": [{\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}, {\"teaching_sensitive\": true}]}]}",
+            "text_length": 1992
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "c72b3af8-b9a5-463b-9c28-b1554611b6fd",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"confirmation_required\"}",
+            "text_length": 133
+          }
+        ]
+      }
+    },
+    {
+      "teaching_sensitive": true,
+      "item": {
+        "teaching_sensitive": true,
+        "type": "message",
+        "call_id": "b51e4c66-84d4-4897-be20-6cbeb4d3c0b5",
+        "role": "tool",
+        "content": [
+          {
+            "teaching_sensitive": true,
+            "type": "input_text",
+            "text": "{\"teaching_sensitive\": true, \"status\": \"confirmation_required\"}",
+            "text_length": 133
+          }
+        ]
+      }
+    }
+  ],
+  "wire_speech_requests": [],
+  "service_after": {
+    "teaching_sensitive": true
+  },
+  "audio_receipts": [],
+  "test_metadata": {
+    "test": "lesson8-loop real cloud synthetic participant",
+    "source_code_hashes": {
+      "lira/dictation.py": "b946d148a10769405be6d9dcf51f0c4d20025d9037fd151e7677e7c1d7398b38",
+      "lira/tv_voice.py": "311ebd1a3559c1db0d831e26d6fb360e964183cc0037ca289622bb1c44071a01",
+      "lira/textbook_practice.py": "e599b20ffd86e75343d107e0a9a1ffe44c0742442da7eec549c2588fac2a1026",
+      "lira/audio/doubao_realtime.py": "68ba3f468aa6ddf7346da340f438a214b4c4ff0f63e7d79bd49fdbfc0356279b",
+      "lira/conversation_paths.py": "d724d9ed9952cd78391ff2b30c2d4ed958b59a598d8a8821ed01e41a6466e48e",
+      "lira/tv_audio.py": "7043e0f30a189b05e5acd4ce766df73a8e9ea186bda0b1eb5745e8db06680f82"
+    },
+    "stopped_reason": null,
+    "service_unchanged": true
+  }
+}

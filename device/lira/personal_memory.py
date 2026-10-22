@@ -6,6 +6,7 @@ import json
 import logging
 import re
 import sqlite3
+import threading
 import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -44,6 +45,12 @@ class PersonalMemory:
                 member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
                 day TEXT NOT NULL, weather_count INTEGER NOT NULL,
                 PRIMARY KEY(member_id,day));
+            CREATE TABLE IF NOT EXISTS linked_voice_turns (
+                session_id TEXT NOT NULL, turn_id INTEGER NOT NULL,
+                member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+                user TEXT NOT NULL, assistant TEXT NOT NULL, created REAL NOT NULL,
+                PRIMARY KEY(session_id,turn_id));
+            CREATE INDEX IF NOT EXISTS linked_voice_by_member ON linked_voice_turns(member_id,created,turn_id);
         ''')
         with self.db:
             self.db.execute("INSERT OR IGNORE INTO memory_daily_counts SELECT member_id,day,COUNT(*) FROM memory_turns WHERE topic='weather_search' GROUP BY member_id,day")
@@ -109,13 +116,59 @@ class PersonalMemory:
         row=self.db.execute('SELECT preferred_address FROM voice_preferences WHERE member_id=?',(member_id,)).fetchone()
         return row['preferred_address'] if row else None
 
+    def voice_revision(self, member_id):
+        member = self.people.get_member(member_id)
+        if member is None:
+            raise ValueError('成员已不存在，请刷新档案。')
+        row = self.db.execute('SELECT vector FROM voice_profiles WHERE member_id=?', (member_id,)).fetchone()
+        return hashlib.sha256(member['name'].encode()+b'\0'+(row['vector'] if row else b'')+b'\0'+str(self.preferred_address(member_id)).encode()).hexdigest()
+
+    def save_guided_voice(self, name, address, vector, *, replace_member_id=None, expected_revision=None, match_threshold=.8):
+        """Console-only explicit replacement; keep the member and all memories."""
+        if replace_member_id is None:
+            return self.register_voice(name, address, vector, match_threshold=match_threshold)
+        if self.privacy():
+            raise ValueError('隐私模式已开启，不能保存。')
+        if not all(isinstance(s,str) and 1<=len(s.strip())<=32 and not any(ord(c)<32 for c in s) for s in (name,address)):
+            raise ValueError('姓名和称呼请填写 1 到 32 个字。')
+        name,address=name.strip(),address.strip()
+        v=np.asarray(vector,np.float32)
+        norm=float(np.linalg.norm(v.astype(np.float64)))
+        if v.ndim!=1 or not v.size or not np.isfinite(v).all() or not np.isfinite(norm) or norm<1e-6:
+            raise ValueError('声纹数据无效。')
+        v=v/norm
+        with self.db:
+            if self.voice_revision(replace_member_id)!=expected_revision:
+                raise ValueError('原档案已发生变化，请重新选择替换目标。')
+            existing=self.find_member(name)
+            if existing is not None and existing['id']!=replace_member_id:
+                raise ValueError('该姓名属于另一档案，请改名或重新选择替换目标。')
+            if any(mid!=replace_member_id and p.shape==v.shape and float(np.dot(v,p))>=match_threshold for mid,p in self.profiles()):
+                raise ValueError('声音与另一档案重复，请重新选择替换目标；仅改名不能解决声音重复。')
+            self.db.execute('UPDATE members SET name=? WHERE id=?',(name,replace_member_id))
+            self.db.execute('INSERT INTO voice_profiles VALUES (?,?) ON CONFLICT(member_id) DO UPDATE SET vector=excluded.vector',(replace_member_id,v.astype(np.float32).tobytes()))
+            self.db.execute('INSERT INTO voice_preferences VALUES (?,?) ON CONFLICT(member_id) DO UPDATE SET preferred_address=excluded.preferred_address',(replace_member_id,address))
+        return replace_member_id
+
+    def delete_voice_profile(self, member_id, expected_revision):
+        if self.privacy():
+            raise ValueError('隐私模式已开启，不能删除。')
+        with self.db:
+            if self.voice_revision(member_id)!=expected_revision:
+                raise ValueError('档案已变化，请刷新后再删除。')
+            result=self.db.execute('DELETE FROM voice_profiles WHERE member_id=?',(member_id,))
+            if result.rowcount!=1:
+                raise ValueError('该成员已经没有声纹。')
+
     def recall(self, member_id):
         if member_id is None or self.privacy(): return ''
         member=self.people.get_member(member_id)
         if member is None: return ''
         row=self.db.execute('SELECT summary FROM personal_memories WHERE member_id=?',(member_id,)).fetchone()
         recent=self.db.execute('SELECT user,assistant FROM memory_turns WHERE member_id=? ORDER BY id DESC LIMIT 3',(member_id,)).fetchall()
+        linked=self.db.execute('SELECT session_id,user,assistant,created FROM linked_voice_turns WHERE member_id=? ORDER BY created DESC,turn_id DESC LIMIT 8',(member_id,)).fetchall()
         return json.dumps({'member_name':member['name'], 'preferred_address':self.preferred_address(member_id), 'remembered':row['summary'] if row else '',
+            'manually_linked_conversations':[{k:(str(r[k])[:1000] if k in ('user','assistant') else r[k]) for k in ('session_id','user','assistant','created')} for r in reversed(linked)],
             'recent_completed_turns':[{k:str(r[k])[:500] for k in ('user','assistant')} for r in reversed(recent)],
             'observed_stats':self.stats(member_id)},ensure_ascii=False)
 
@@ -173,10 +226,28 @@ class PersonalMemory:
                 logging.warning('memory event=summary_failed')
 
     def forget(self, member_id):
+        hook=getattr(self, "on_forget", None)
+        if hook is not None:hook(member_id)
         with self.db:
             self.db.execute('DELETE FROM personal_memories WHERE member_id=?',(member_id,))
             self.db.execute('DELETE FROM memory_turns WHERE member_id=?',(member_id,))
             self.db.execute('DELETE FROM memory_daily_counts WHERE member_id=?',(member_id,))
+            self.db.execute('DELETE FROM linked_voice_turns WHERE member_id=?',(member_id,))
+
+    def link_voice_turns(self, session_id, turns, member_id):
+        if self.privacy(): raise ValueError('隐私模式开启。')
+        if member_id is not None and (type(member_id) is not int or self.people.get_member(member_id) is None):
+            raise ValueError('请选择有效成员。')
+        with self.db:
+            for turn in turns:
+                if member_id is None:
+                    self.db.execute('DELETE FROM linked_voice_turns WHERE session_id=? AND turn_id=?',(session_id,turn['id']))
+                else:
+                    self.db.execute('INSERT INTO linked_voice_turns VALUES (?,?,?,?,?,?) ON CONFLICT(session_id,turn_id) DO UPDATE SET member_id=excluded.member_id,user=excluded.user,assistant=excluded.assistant',
+                        (session_id,turn['id'],member_id,turn['user'],turn['assistant'],turn['created']))
+
+    def voice_links(self, session_id):
+        return {r['turn_id']:r['member_id'] for r in self.db.execute('SELECT turn_id,member_id FROM linked_voice_turns WHERE session_id=?',(session_id,))}
 
     async def close(self):
         for task in self.tasks:task.cancel()
@@ -194,6 +265,7 @@ class SpeakerIdentity:
             config=sherpa_onnx.SpeakerEmbeddingExtractorConfig(model=str(model_path),num_threads=1,provider='cpu')
             extractor=sherpa_onnx.SpeakerEmbeddingExtractor(config)
         self.extractor=extractor
+        self._extract_lock = threading.Lock()
         # U7：候选存储（main 在构造本类后回填同一实例；None=未装配，resolve
         # 降级为不登记——候选是登记/关联的唯一出口，KTD6）
         self.candidates=candidates
@@ -202,6 +274,7 @@ class SpeakerIdentity:
         # 默认仅测试便利，不再是与 SpeakerConfig 并列的第二真相源）
         self.threshold=threshold
         self.margin=margin
+        self.last_match_details=None
 
     @property
     def model_fingerprint(self):
@@ -213,20 +286,51 @@ class SpeakerIdentity:
 
     def embedding(self, samples):
         if len(samples)<16000: return None
-        stream=self.extractor.create_stream()
-        stream.accept_waveform(16000,np.asarray(samples,np.float32))
-        stream.input_finished()
-        if not self.extractor.is_ready(stream):return None
-        vector=np.asarray(self.extractor.compute(stream),np.float32)
-        norm=np.linalg.norm(vector)
-        return vector/norm if norm>1e-6 else None
+        # Background discovery and explicit registration share this native model.
+        with self._extract_lock:
+            stream=self.extractor.create_stream()
+            stream.accept_waveform(16000,np.asarray(samples,np.float32))
+            stream.input_finished()
+            if not self.extractor.is_ready(stream):return None
+            vector=np.asarray(self.extractor.compute(stream),np.float32)
+            norm=np.linalg.norm(vector)
+            return vector/norm if norm>1e-6 else None
 
     def match(self, vector):
+        hit,details=self._evaluate_match(vector)
+        self.last_match_details=details
+        return hit
+
+    def match_diagnostics(self, vector):
+        """Read-only scoring for an explicitly labelled shadow experiment."""
+        _,details=self._evaluate_match(vector)
+        return details
+
+    def _evaluate_match(self, vector):
         # top-1+边际判定与候选侧同则（U8 化简批声明，此处兑现：共用
         # speaker_candidates.top1_with_margin，不再手写）
-        scores=[(float(np.dot(vector,v)),member) for member,v in self.memory.profiles()]
-        hit,_ambiguous=top1_with_margin(scores,self.threshold,self.margin)
-        return hit
+        profiles=self.memory.profiles()
+        vector=np.asarray(vector,np.float32)
+        details={'profile_count':len(profiles), 'threshold':self.threshold,
+                 'required_margin':self.margin, 'top_score':None,
+                 'second_score':None, 'score_gap':None, 'reason':'empty_profiles'}
+        if vector.ndim != 1 or not vector.size or not np.isfinite(vector).all():
+            details['reason']='invalid_query'
+            return None,details
+        if any(v.shape != vector.shape or not np.isfinite(v).all() for _,v in profiles):
+            details['reason']='incompatible_profiles'
+            return None,details
+        scores=[(float(np.dot(vector,v)),member) for member,v in profiles]
+        hit,ambiguous=top1_with_margin(scores,self.threshold,self.margin)
+        ordered=sorted((score for score,_ in scores),reverse=True)
+        if ordered:
+            details['top_score']=ordered[0]
+            if len(ordered)>1:
+                details['second_score']=ordered[1]
+                details['score_gap']=ordered[0]-ordered[1]
+            details['reason']=('matched' if hit is not None else
+                               'insufficient_margin' if ambiguous else 'below_threshold')
+        return hit,details
 
     def resolve(self, text, vector):
         if self.pending and time.monotonic()-self.pending['time']>120:self.pending=None

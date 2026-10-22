@@ -1,0 +1,95 @@
+{
+  "run_id": "dictation-tc1-20261021-01",
+  "status": "failed",
+  "started_at": 1792566881.7389932,
+  "evidence_type": "real model + local H5; not physical TV proof",
+  "steps": [
+    {
+      "name": "01_initial_actual_model_request",
+      "status": "passed",
+      "at": 1792566891.4970605,
+      "result": {
+        "status": "response",
+        "text": "好的，准备给孩子测试第二课的默写。开始之前需要确认一下教材信息：孩子用的是哪本教材？比如“部编版语文三年级上册”。告诉我教材后，我就读取第二课的内容和孩子以往的学习记录来准备默写词语。",
+        "trace": []
+      }
+    },
+    {
+      "name": "terminal_failure",
+      "status": "failed",
+      "at": 1792566891.9340785,
+      "after": "01_initial_actual_model_request",
+      "reason": "AssertionError: model did not read actual context before clarification"
+    }
+  ],
+  "model_calls": [
+    {
+      "number": 1,
+      "model": "kimi-k3",
+      "messages": [
+        {
+          "role": "system",
+          "content": "# 语文认读与默写业务指引\n\n严格围绕发起者指定的孩子、教材和课次准备任务；范围不明时向原发起渠道澄清，不追问布置原因。教材缺失或修改须由家长确认保存，模型候选不能替代家长确认。\n\n结合该孩子相关课次的学习事实、最新有效核对、历史错词错字、认读困难与辅导记录判断选词。优先关注尚未掌握词、前后鼻音易混字和难写字，说明依据；不能凭标签或固定掌握阈值判断。未核对、练习完成、翻页、上传照片都不是答对或掌握证据，不另起自动评估。\n\n默认二会字认读及四会字扩词默写；词语覆盖范围内全部四会字，优先教材或维护词库，不重复增加单字。明确要求单字时才增加单字环节。缺词提出候选并向发起者确认。保存目标字覆盖和选词理由，沿用准备会话绑定的 skill 与流程版本。背诵要求仅作教材资料，本版不执行背诵；不在执行中换词或增词。\n\n电视执行固定任务：认读翻页须孩子确认，默写播报完等待孩子说写好了或遥控确认；超时只提醒，不自动跳项。播报完成不等于作答完成。字号、排版和分页交由电视适配。\n\n孩子执行中提问时，先调用暂停工具，收到当前任务和项目的电视实际已暂停回执后才回答，不能把发送成功、accepted 或口头说明当暂停。暂停失败或未知时明确提示，不先解释。可解释字词、词义、组词和例句，并记录本项辅导。回答后询问是否继续；孩子真实确认并且设备回答播放排空后才请求恢复。恢复保留当前项，被打断的播报重新播放；离线或重启先暂停待确认，不突然播放。\n\n不推算未经核对的正确率，不把等待耗时当纯书写速度。家长核对和照片操作属于管理服务，不得由模型冒充提交。\n\n必须先调用get_dictation_context读取真实教材和学习事实。缺少教材或范围时询问。最终选词顺序由你决定；用prepare_dictation_task提交覆盖全部目标字的词语及理由，不能声称工具未完成的成功。词库外候选先向发起者确认。只做认读和默写，不做背诵。"
+        },
+        {
+          "role": "user",
+          "content": "帮测试孩子默写第二课"
+        }
+      ],
+      "started_at": 1792566883.4370358,
+      "response_id": "chatcmpl-6ad866672cf0515c1aa837a3",
+      "finished_at": 1792566891.4961498,
+      "response": {
+        "id": "chatcmpl-6ad866672cf0515c1aa837a3",
+        "choices": [
+          {
+            "finish_reason": "stop",
+            "index": 0,
+            "message": {
+              "content": "好的，准备给孩子测试第二课的默写。开始之前需要确认一下教材信息：孩子用的是哪本教材？比如“部编版语文三年级上册”。告诉我教材后，我就读取第二课的内容和孩子以往的学习记录来准备默写词语。",
+              "role": "assistant",
+              "reasoning_content": "Missing book info; but maybe context tool can clarify? Need book_id. Ask which textbook/child? Tool requires book_id. Ask clarification."
+            }
+          }
+        ],
+        "created": 1792566888,
+        "model": "kimi-k3",
+        "object": "chat.completion",
+        "usage": {
+          "completion_tokens": 98,
+          "prompt_tokens": 882,
+          "total_tokens": 980,
+          "completion_tokens_details": {
+            "reasoning_tokens": 30
+          },
+          "prompt_tokens_details": {
+            "cache_write_tokens": 768
+          }
+        }
+      }
+    }
+  ],
+  "inputs": [],
+  "counters": {
+    "regression_runs_started": 1,
+    "initial_requests": 1,
+    "new_task_ids": 0,
+    "task_completed": 0,
+    "prepare_after_ready": 0,
+    "child_turns": 0
+  },
+  "cleanup": {
+    "h5": {
+      "timers": 0,
+      "audioActive": false,
+      "pendingInputs": 0
+    },
+    "browser_closed": true,
+    "worker_done": true,
+    "server_pending": 0,
+    "pending_continue_inputs": 0
+  },
+  "tv_events": [],
+  "finished_at": 1792566891.9340785,
+  "reason": "AssertionError: model did not read actual context before clarification"
+}

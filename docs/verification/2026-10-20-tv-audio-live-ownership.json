@@ -1,0 +1,451 @@
+{
+  "test": "real receiver owned cancel, no replay, stale stop isolation and 0.5s silent PCM drain",
+  "events": [
+    {
+      "path": "/audio/start",
+      "arguments": {
+        "id": "bc43aa2eca404f099f604eb416a92b93",
+        "approved": true,
+        "sample_rate": 24000,
+        "channels": 1,
+        "format": "s16le"
+      },
+      "pcm_bytes": null,
+      "result": {
+        "status": "buffering",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "bc43aa2eca404f099f604eb416a92b93",
+        "written_frames": 0,
+        "played_frames": 0,
+        "audio_session_id": 0,
+        "routed_device_type": 0,
+        "received_bytes": 0,
+        "next_sequence": 0,
+        "error": ""
+      }
+    },
+    {
+      "path": "/audio/chunk",
+      "arguments": {
+        "id": "bc43aa2eca404f099f604eb416a92b93",
+        "sequence": 0
+      },
+      "pcm_bytes": 24000,
+      "result": {
+        "status": "playing",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "bc43aa2eca404f099f604eb416a92b93",
+        "written_frames": 0,
+        "played_frames": 0,
+        "audio_session_id": 39,
+        "routed_device_type": 0,
+        "received_bytes": 24000,
+        "next_sequence": 1,
+        "error": ""
+      }
+    },
+    {
+      "path": "/audio/stop",
+      "arguments": {
+        "id": "bc43aa2eca404f099f604eb416a92b93"
+      },
+      "pcm_bytes": null,
+      "result": {
+        "stopped_id": "bc43aa2eca404f099f604eb416a92b93"
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "cancelled",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "bc43aa2eca404f099f604eb416a92b93",
+          "written_frames": 2400,
+          "played_frames": 0,
+          "audio_session_id": 39,
+          "routed_device_type": 2,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/audio/start",
+      "arguments": {
+        "id": "bc43aa2eca404f099f604eb416a92b93",
+        "approved": true,
+        "sample_rate": 24000,
+        "channels": 1,
+        "format": "s16le"
+      },
+      "pcm_bytes": null,
+      "result": {
+        "status": "cancelled",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "bc43aa2eca404f099f604eb416a92b93",
+        "written_frames": 2400,
+        "played_frames": 0,
+        "audio_session_id": 39,
+        "routed_device_type": 2,
+        "received_bytes": 24000,
+        "next_sequence": 1,
+        "error": ""
+      }
+    },
+    {
+      "path": "/audio/start",
+      "arguments": {
+        "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+        "approved": true,
+        "sample_rate": 24000,
+        "channels": 1,
+        "format": "s16le"
+      },
+      "pcm_bytes": null,
+      "result": {
+        "status": "buffering",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+        "written_frames": 0,
+        "played_frames": 0,
+        "audio_session_id": 0,
+        "routed_device_type": 0,
+        "received_bytes": 0,
+        "next_sequence": 0,
+        "error": ""
+      }
+    },
+    {
+      "path": "/audio/stop",
+      "arguments": {
+        "id": "bc43aa2eca404f099f604eb416a92b93"
+      },
+      "pcm_bytes": null,
+      "result": {
+        "stopped_id": "bc43aa2eca404f099f604eb416a92b93"
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 0,
+          "next_sequence": 0,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/audio/chunk",
+      "arguments": {
+        "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+        "sequence": 0
+      },
+      "pcm_bytes": 24000,
+      "result": {
+        "status": "playing",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+        "written_frames": 0,
+        "played_frames": 0,
+        "audio_session_id": 41,
+        "routed_device_type": 0,
+        "received_bytes": 24000,
+        "next_sequence": 1,
+        "error": ""
+      }
+    },
+    {
+      "path": "/audio/end",
+      "arguments": {
+        "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+        "total_bytes": 24000
+      },
+      "pcm_bytes": null,
+      "result": {
+        "status": "playing",
+        "music_volume": 6,
+        "music_muted": false,
+        "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+        "written_frames": 0,
+        "played_frames": 0,
+        "audio_session_id": 41,
+        "routed_device_type": 0,
+        "received_bytes": 24000,
+        "next_sequence": 1,
+        "error": ""
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "playing",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 0,
+          "played_frames": 0,
+          "audio_session_id": 41,
+          "routed_device_type": 0,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "draining",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 12000,
+          "played_frames": 11776,
+          "audio_session_id": 41,
+          "routed_device_type": 2,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    },
+    {
+      "path": "/status",
+      "arguments": {},
+      "pcm_bytes": null,
+      "result": {
+        "interactive": true,
+        "foreground": true,
+        "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+        "rendered_id": "",
+        "version": "0.3",
+        "audio": {
+          "status": "completed",
+          "music_volume": 6,
+          "music_muted": false,
+          "id": "fb9787a2e34d4bc7b3c15a541193bd1e",
+          "written_frames": 12000,
+          "played_frames": 12000,
+          "audio_session_id": 41,
+          "routed_device_type": 2,
+          "received_bytes": 24000,
+          "next_sequence": 1,
+          "error": ""
+        },
+        "capabilities": [
+          "clear_content_id",
+          "pcm_audio_v1"
+        ]
+      }
+    }
+  ],
+  "passed": true
+}

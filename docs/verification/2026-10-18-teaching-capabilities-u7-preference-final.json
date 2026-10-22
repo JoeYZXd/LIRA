@@ -1,0 +1,329 @@
+{
+  "model": "kimi-k3",
+  "rows": [
+    {
+      "repeat": 1,
+      "case": "explicit",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 3.305
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "natural",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 4.304
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.203
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "once",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 3.562
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "negation",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 6.427
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.513
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "third_person",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.551
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.856
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "mastery",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 3.649
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "explicit",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 3.764
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "natural",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 3.935
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.328
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "once",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.793
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "negation",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.63
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.908
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "third_person",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.356
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.945
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "mastery",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.179
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "explicit",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 3.931
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "natural",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 4.923
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 3.798
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "once",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.355
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "negation",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.371
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "question",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.562
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "third_person",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.304
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "injection",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\":false}",
+        "elapsed": 4.959
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "mastery",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.299
+      }
+    }
+  ]
+}

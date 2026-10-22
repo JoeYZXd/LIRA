@@ -79,6 +79,8 @@ class UiServices:
     chat: "ChatService | None" = None
     #: 整机状态提供者（R1 状态面；/status JSON 合并其返回的枚举/布尔/数值字段）
     status_provider: Callable[[], dict] = lambda: {}
+    # Await runtime context invalidation before member deletion succeeds.
+    member_deleted: object | None = None
 
 
 def _appliance_rows(services: UiServices) -> list[dict[str, object]]:

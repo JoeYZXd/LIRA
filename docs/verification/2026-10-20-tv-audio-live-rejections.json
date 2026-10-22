@@ -1,0 +1,58 @@
+{
+  "before": {
+    "interactive": true,
+    "foreground": true,
+    "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+    "rendered_id": "",
+    "version": "0.3",
+    "audio": {
+      "status": "idle",
+      "music_volume": 6,
+      "music_muted": false
+    },
+    "capabilities": [
+      "clear_content_id",
+      "pcm_audio_v1"
+    ]
+  },
+  "checks": [
+    {
+      "path": "/audio/start",
+      "code": 409,
+      "result": {
+        "error": "audio consent or format invalid"
+      }
+    },
+    {
+      "path": "/audio/start",
+      "code": 409,
+      "result": {
+        "error": "audio consent or format invalid"
+      }
+    },
+    {
+      "path": "/audio/chunk",
+      "code": 409,
+      "result": {
+        "error": "audio ownership or state mismatch"
+      }
+    }
+  ],
+  "after": {
+    "interactive": true,
+    "foreground": true,
+    "instance": "ec558114-b4e7-4ab2-a209-e07f1e19a08b",
+    "rendered_id": "",
+    "version": "0.3",
+    "audio": {
+      "status": "idle",
+      "music_volume": 6,
+      "music_muted": false
+    },
+    "capabilities": [
+      "clear_content_id",
+      "pcm_audio_v1"
+    ]
+  },
+  "audio_unchanged": true
+}

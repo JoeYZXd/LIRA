@@ -204,9 +204,13 @@ function renderVoiceCandidates(data) {
     ' · 同名待确认 ' + (s.awaiting_console_count ?? 0);
   const parts = [];
   // 已建立成员卡（E2）：真实成员名单 + 声纹状态
+  window.voiceProfileMembers = data.members || [];
   const memberCards = (data.members || []).map(m =>
     '<div class="vc-member">' + vlEscape(m.emoji || '🙂') + ' ' + vlEscape(m.name) +
-    '<span class="vc-member-state">' + (m.has_profile ? '声纹已建立' : '无声纹（文字聊天成员）') + '</span></div>'
+    '<span class="vc-member-state">' + (m.has_profile ? '声纹已建立' : '无声纹（文字聊天成员）') + '</span>' +
+    '<button type="button" onclick="rerecordVoiceProfile(' + m.member_id + ')">' + (m.has_profile ? '重新录制' : '录制声纹') + '</button>' +
+    (m.has_profile ? '<button type="button" onclick="testVoiceProfile(' + m.member_id + ')">测试</button>' : '') +
+    (m.has_profile ? '<button type="button" onclick="deleteVoiceProfile(' + m.member_id + ')">删除声纹</button>' : '') + '</div>'
   ).join('');
   parts.push('<div class="vc-block"><div class="vc-block-title">已建立成员 ' + (data.members || []).length + '</div>' +
     (memberCards || '<p class="muted">（还没有成员）</p>') + '</div>');
@@ -289,7 +293,7 @@ async function deleteVoiceCandidate(candidateId) {
     if (r.status === 200) {
       await loadVoiceCandidates();
       out('voice-candidates-out', '未完成声纹已删除', 'ok');
-      document.querySelector('#tile-voice-candidates .tile-head').focus();
+      document.getElementById('app-tile-voice-candidates').focus();
     } else {
       target.textContent = (r.body && r.body.error) || ('删除失败：HTTP ' + r.status);
       target.className = 'err';
@@ -704,7 +708,15 @@ function ingestEvent(ev) {
     turnDirty = true;
   }
   const bucket = isModelKind(ev.kind) ? logBuffers.model : logBuffers.voice;
-  bucket.push(ev);
+  const audio = captureSummary(ev);
+  const previous = bucket[bucket.length - 1];
+  if (audio && previous?.audioSummary?.key === audio.key) {
+    bucket[bucket.length - 1] = {...ev, audioSummary: {
+      ...previous.audioSummary, count: previous.audioSummary.count + 1
+    }};
+  } else {
+    bucket.push(audio ? {...ev, audioSummary: audio} : ev);
+  }
   if (bucket.length > LOG_BUFFER_LIMIT) { bucket.splice(0, bucket.length - LOG_BUFFER_LIMIT); }
   logDirty[isModelKind(ev.kind) ? 'model' : 'voice'] = true;
 }
@@ -908,8 +920,28 @@ function renderTurns() {
 
 /* ---- 日志区（语音事件 / 模型交互 / 系统日志） ---- */
 
+function captureSummary(ev) {
+  if (ev.kind !== 'audio') return null;
+  const m = ev.text.match(/^收到处理后音频：RMS=(-?[\d.]+) dBFS，峰值=([\d.]+)，削波=([\d.]+)%，路由=(\w+)，播报占用=(True|False)；唤醒 KWS 持续检测（未报告新命中）$/);
+  if (!m || ![m[1], m[2], m[3]].every(x => Number.isFinite(Number(x))) || Number(m[3]) !== 0) return null;
+  const level = Number(m[2]) === 0 ? '静音' : '有输入';
+  const route = {wake: '待唤醒', asr: '识别中', playback: '播放控制'}[m[4]] || m[4];
+  return {key: [m[4], m[5], level].join('/'), count: 1, firstTs: ev.ts,
+    id: String(ev.seq) + '-' + ev.ts,
+    label: route + ' · ' + level + (m[5] === 'True' ? ' · 播报中' : '') + ' · KWS 检测中'};
+}
+
 function rowHtml(ev) {
   const label = LOG_KIND_LABELS[ev.kind] || ev.kind;
+  if (ev.audioSummary) {
+    const a = ev.audioSummary;
+    return '<details class="vl-row vl-audio-summary" data-kind="audio" data-group="' + vlEscape(a.id) +
+      '"><summary><span class="vl-ts">' + hhmmss(ev.ts * 1000) +
+      '</span> <span class="vl-kind">[收音]</span> ' + vlEscape(a.label) +
+      ' · 共 ' + a.count + ' 次 <span class="vl-ts">（' + hhmmss(a.firstTs * 1000) +
+      '—' + hhmmss(ev.ts * 1000) + '）</span></summary><div class="vl-audio-detail">最近一次明细：' +
+      vlEscape(ev.text) + '</div></details>';
+  }
   return '<div class="vl-row ' + rowClass(ev.kind) + '" data-kind="' + vlEscape(ev.kind) +
     '"><span class="vl-ts">' + hhmmss(ev.ts * 1000) +
     '</span> <span class="vl-kind">[' + label + ']</span> ' + vlEscape(ev.text) + '</div>';
@@ -967,6 +999,7 @@ function renderLog(force) {
   const kw = document.getElementById('log-filter').value.trim();
   const kindSel = document.getElementById('log-kind').value;
   const rows = [];
+  const expanded = new Set(Array.from(view.querySelectorAll('details[data-group][open]'), el => el.dataset.group));
   for (let i = buf.length - 1; i >= 0 && rows.length < LOG_RENDER_LIMIT; i--) {
     if (logRowMatches(buf[i], kw, kindSel)) {
       rows.push(logTab === 'sys'
@@ -975,8 +1008,12 @@ function renderLog(force) {
     }
   }
   view.innerHTML = rows.length ? rows.join('') : '<p class="muted">（暂无匹配事件）</p>';
+  for (const detail of view.querySelectorAll('details[data-group]')) {
+    detail.open = expanded.has(detail.dataset.group);
+  }
   if (follow) { view.scrollTop = view.scrollHeight; }
-  out('log-out', buf.length + ' 条缓冲' +
+  const captures = buf.reduce((n, item) => n + (item.audioSummary ? item.audioSummary.count - 1 : 0), 0);
+  out('log-out', buf.length + ' 条缓冲' + (captures ? '（重复收音已合并 ' + captures + ' 条）' : '') +
     (rows.length < buf.length ? '（显示最近 ' + rows.length + ' 条）' : ''), 'muted');
 }
 
@@ -987,6 +1024,7 @@ function setLogTab(tab) {
     document.getElementById('tab-' + t).setAttribute('aria-selected', t === tab ? 'true' : 'false');
   }
   renderLog(true);
+  saveWorkspace();
 }
 
 /* vlClear 语义并入：只清前端展示缓冲（服务端环不受影响） */
@@ -1015,35 +1053,146 @@ function initLogControls() {
 
 /* ---------- 磁贴展开/收起（键盘语义见文件头注释） ---------- */
 
+const WORKSPACE_KEY = 'lira.dev.workspace.v1';
+let workspaceReady = false;
+
+function workspaceTiles() {
+  return [...document.querySelectorAll('#workspace > .tile')];
+}
+
+function saveWorkspace() {
+  if (!workspaceReady) return;
+  const tiles = workspaceTiles();
+  const details = {};
+  for (const tile of tiles) {
+    details[tile.id] = [...tile.querySelectorAll('details:not([data-group])')].map(d => d.open);
+  }
+  const state = {version:1, order:tiles.map(t => t.id),
+    open:tiles.filter(t => !t.hidden).map(t => t.id), details, logTab,
+    scrollY:window.scrollY, sidebarScroll:document.querySelector('.app-center').scrollTop};
+  try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(state)); } catch (_) {}
+}
+
+function restoreWorkspace() {
+  let saved = null;
+  try {
+    const state = JSON.parse(localStorage.getItem(WORKSPACE_KEY));
+    if (state?.version === 1 && Array.isArray(state.open) && Array.isArray(state.order)) saved = state;
+  } catch (_) {}
+  if (saved) {
+    const tiles = new Map(workspaceTiles().map(t => [t.id,t]));
+    for (const id of new Set(saved.order)) {
+      const tile = tiles.get(id);
+      if (tile) document.getElementById('workspace').appendChild(tile);
+    }
+    for (const tile of workspaceTiles()) {
+      setTileOpen(tile, saved.open.includes(tile.id));
+      const states = saved.details?.[tile.id];
+      if (Array.isArray(states)) [...tile.querySelectorAll('details:not([data-group])')].forEach((d,i) => {d.open = states[i] === true;});
+    }
+    if (['voice','model','sys'].includes(saved.logTab)) setLogTab(saved.logTab);
+  }
+  workspaceReady = true;
+  document.getElementById('workspace').addEventListener('toggle', saveWorkspace, true);
+  new MutationObserver(saveWorkspace).observe(document.getElementById('workspace'), {childList:true});
+  window.addEventListener('pagehide', saveWorkspace);
+  let scrollTimer;
+  const onScroll = () => { clearTimeout(scrollTimer); scrollTimer = setTimeout(saveWorkspace,150); };
+  window.addEventListener('scroll',onScroll,{passive:true});
+  document.querySelector('.app-center').addEventListener('scroll',onScroll,{passive:true});
+  if (saved) requestAnimationFrame(() => {
+    if (Number.isFinite(saved.sidebarScroll)) document.querySelector('.app-center').scrollTop = Math.max(0,saved.sidebarScroll);
+    if (Number.isFinite(saved.scrollY)) window.scrollTo(0,Math.max(0,saved.scrollY));
+  });
+}
+
 function setTileOpen(tile, open) {
   const head = tile.querySelector('.tile-head');
   const body = tile.querySelector('.tile-body');
   if (!head || !body) { return; }
   head.setAttribute('aria-expanded', open ? 'true' : 'false');
   body.hidden = !open;
+  tile.hidden = !open;
+  const launcher = document.getElementById('app-' + tile.id);
+  if (launcher) {
+    launcher.setAttribute('aria-pressed', open ? 'true' : 'false');
+    launcher.querySelector('.app-state').textContent = open ? '已打开' : '打开';
+  }
+  updateWorkspaceCount();
   if (tile.id === 'tile-voicelog') { observeLiveChange(open); }
   if (tile.id === 'tile-voice-candidates' && open) { loadVoiceCandidates(); }
   // 视觉磁贴收起即停预览（U8 对抗评审 F6：0.45fps 相机拉取不随折叠停止
   // 是僵尸拉取；隐藏页场景已由 visibilitychange 覆盖）
   if (tile.id === 'tile-vision' && !open && previewOn) { stopPreview('预览已随磁贴收起停止'); }
+  document.dispatchEvent(new CustomEvent('lira:tile-visibility', {detail: {id: tile.id, open}}));
+  saveWorkspace();
+}
+
+function updateWorkspaceCount() {
+  const count = document.querySelectorAll('#workspace > .tile:not([hidden])').length;
+  document.getElementById('workspace-count').textContent = count + ' 个 App 已打开';
+  document.getElementById('workspace-empty').hidden = count !== 0;
 }
 
 function initTiles() {
+  const apps = {
+    'tile-teaching': ['教学管理', 'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16', 'var(--sage)'],
+    'tile-costs': ['费用与用量', 'M4 5h16v14H4z M4 9h16 M14 14h3', 'var(--sage)'],
+    'tile-voice-history': ['聊天记录', 'M4 4h16v16H4z M8 8h8M8 12h8M8 16h5', 'var(--lavender)'],
+    'tile-doubao-lab': ['豆包对话', 'M4 4h16v12H9l-5 4z M8 8h8M8 12h5', 'var(--sage)'],
+    'tile-jev': ['Jev 测试', 'M4 7h16v10H4z M8 11h1m3 0h1m3 0h1 M8 15h8 M12 4v3', 'var(--apricot)'],
+    'tile-overview': ['运行概览', 'M3 12h4l3-8 4 16 3-8h4', 'var(--apricot)'],
+    'tile-settings': ['运行参数', 'M4 6h16M4 12h16M4 18h16 M8 3v6m8 0v6M10 15v6', 'var(--sage)'],
+    'tile-voicelog': ['实时交互', 'M4 8v8m4-12v16m4-13v10m4-13v16m4-12v8', 'var(--lavender)'],
+    'tile-voice-candidates': ['声纹档案', 'M8 8a4 4 0 1 0 8 0a4 4 0 1 0-8 0 M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2', 'var(--sage)'],
+    'tile-voice': ['语音链路', 'M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0z M5 10v1a7 7 0 0 0 14 0v-1 M12 18v4m-4 0h8', 'var(--apricot)'],
+    'tile-vision': ['视觉链路', 'M3 7h4l2-3h6l2 3h4v13H3z M8 13a4 4 0 1 0 8 0a4 4 0 1 0-8 0', 'var(--lavender)'],
+    'tile-sync': ['设备同步', 'M4 9a8 8 0 0 1 13-5l3 3 M20 3v4h-4 M20 15a8 8 0 0 1-13 5l-3-3 M4 21v-4h4', 'var(--sage)'],
+    'tile-replay': ['场景回放', 'M5 4h14v16H5z M10 8l6 4-6 4z', 'var(--lavender)']
+  };
+  const nav = document.getElementById('app-launcher');
   for (const head of document.querySelectorAll('.tile-head')) {
+    const tile = head.closest('.tile');
+    const [name, path, accent] = apps[tile.id];
+    const button = document.createElement('button');
+    button.type = 'button'; button.id = 'app-' + tile.id; button.className = 'app-launch';
+    button.setAttribute('aria-controls', tile.id);
+    button.title = head.querySelector('.tile-title').textContent;
+    const icon = document.createElement('span'); icon.className = 'app-icon';
+    icon.style.setProperty('--app-accent', accent);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.6');
+    svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    shape.setAttribute('d', path); svg.appendChild(shape); icon.appendChild(svg);
+    const label = document.createElement('span'); label.className = 'app-label'; label.textContent = name;
+    const state = document.createElement('span'); state.className = 'app-state';
+    button.append(icon, label, state); nav.appendChild(button);
+    const open = head.getAttribute('aria-expanded') === 'true';
+    tile.hidden = !open; button.setAttribute('aria-pressed', String(open));
+    state.textContent = open ? '已打开' : '打开';
+    head.title = '关闭 ' + name;
+    head.setAttribute('aria-label', '关闭 ' + name);
+    button.addEventListener('click', () => setTileOpen(tile, tile.hidden));
     head.addEventListener('click', function () {
-      const tile = head.closest('.tile');
-      setTileOpen(tile, head.getAttribute('aria-expanded') !== 'true');
+      setTileOpen(tile, false);
+      button.focus();
     });
   }
-  // Escape：收起焦点所在磁贴并把焦点还给磁贴头按钮
+  updateWorkspaceCount();
+  // Escape closes the current window and returns focus to its launcher.
   document.addEventListener('keydown', function (e) {
     if (e.key !== 'Escape') { return; }
-    const tile = (e.target && e.target.closest) ? e.target.closest('.tile') : null;
+    const launcher = e.target?.closest?.('.app-launch');
+    const tile = e.target?.closest?.('.tile') ||
+      (launcher ? document.getElementById(launcher.getAttribute('aria-controls')) : null);
     if (!tile) { return; }
     const head = tile.querySelector('.tile-head');
     if (head && head.getAttribute('aria-expanded') === 'true') {
       setTileOpen(tile, false);
-      head.focus();
+      document.getElementById('app-' + tile.id).focus();
     }
   });
 }
@@ -1062,6 +1211,8 @@ function initConsole() {
   initObserveVisibility();
   initLogControls();
   loadStatus();
+  // Other App listeners must be installed before restored visibility events.
+  setTimeout(restoreWorkspace, 0);
   // 实时区默认折叠：展开磁贴才开始 observe 节拍（KTD4 停订阅纪律）
 }
 

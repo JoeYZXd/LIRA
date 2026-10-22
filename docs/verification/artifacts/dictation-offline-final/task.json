@@ -1,0 +1,404 @@
+{
+  "schema_version": 2,
+  "task_id": "01faa7b6e5824904bfdc45576cdcfd53",
+  "content_hash": "e93a240b6beb6ddcbb423bf662ec932cb9210cda7444207b87fd78c4d831868c",
+  "config_revision": 2,
+  "skill_revision": 1,
+  "callback_registration_id": "tc1-callback",
+  "lessons": [
+    {
+      "lesson_id": "tc1-a.unit-1.lesson-2",
+      "source": {
+        "book_id": "tc1-a",
+        "unit": 1,
+        "number": 2,
+        "revision": 193583511
+      },
+      "two_targets": [
+        "登",
+        "鹳",
+        "雀",
+        "楼",
+        "依",
+        "尽",
+        "黄",
+        "层",
+        "更",
+        "瀑",
+        "遥",
+        "挂",
+        "前",
+        "川",
+        "炉",
+        "烟",
+        "紫",
+        "日"
+      ],
+      "four_targets": [
+        "晴",
+        "清",
+        "情",
+        "请",
+        "睛",
+        "蜻",
+        "声",
+        "生",
+        "升",
+        "深",
+        "身",
+        "晨"
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "phase_id": "recognition",
+      "type": "recognition",
+      "items": [
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r0",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "登",
+          "covers": [
+            "登"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r1",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "鹳",
+          "covers": [
+            "鹳"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r2",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "雀",
+          "covers": [
+            "雀"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r3",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "楼",
+          "covers": [
+            "楼"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r4",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "依",
+          "covers": [
+            "依"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r5",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "尽",
+          "covers": [
+            "尽"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r6",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "黄",
+          "covers": [
+            "黄"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r7",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "层",
+          "covers": [
+            "层"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r8",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "更",
+          "covers": [
+            "更"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r9",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "瀑",
+          "covers": [
+            "瀑"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r10",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "遥",
+          "covers": [
+            "遥"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r11",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "挂",
+          "covers": [
+            "挂"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r12",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "前",
+          "covers": [
+            "前"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r13",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "川",
+          "covers": [
+            "川"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r14",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "炉",
+          "covers": [
+            "炉"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r15",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "烟",
+          "covers": [
+            "烟"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r16",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "紫",
+          "covers": [
+            "紫"
+          ],
+          "audio_asset_id": null
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.r17",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "日",
+          "covers": [
+            "日"
+          ],
+          "audio_asset_id": null
+        }
+      ]
+    },
+    {
+      "phase_id": "dictation",
+      "type": "dictation",
+      "items": [
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d0",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "晴天",
+          "covers": [
+            "晴"
+          ],
+          "audio_asset_id": "speech.3efc6babe61903ce8bab6bb7d58bf193310cce07"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d1",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "清水",
+          "covers": [
+            "清"
+          ],
+          "audio_asset_id": "speech.c8ae978f0f5a869ec296d21ed87ac898e1011a02"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d2",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "心情",
+          "covers": [
+            "情"
+          ],
+          "audio_asset_id": "speech.28f5b858887824066f0f7431da6e5afda18faa3d"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d3",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "请问",
+          "covers": [
+            "请"
+          ],
+          "audio_asset_id": "speech.42be23d8344a497124dca6fba07f0b841b15ae36"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d4",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "眼睛",
+          "covers": [
+            "睛"
+          ],
+          "audio_asset_id": "speech.9069cc8f2c62b4b449dbe7ad49ba0d4e18c08346"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d5",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "蜻蜓",
+          "covers": [
+            "蜻"
+          ],
+          "audio_asset_id": "speech.379038ffc88b9616034f4f233aad6e2a5a97ccf4"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d6",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "声音",
+          "covers": [
+            "声"
+          ],
+          "audio_asset_id": "speech.473400815c0f687da9d51a61e214975ee2e3a78f"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d7",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "生活",
+          "covers": [
+            "生"
+          ],
+          "audio_asset_id": "speech.15d208d1b4c98aae0cbadefb1e5e984ec6c50431"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d8",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "升起",
+          "covers": [
+            "升"
+          ],
+          "audio_asset_id": "speech.e7a9170807e926349d44f1a783562bee6a8a09fe"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d9",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "深水",
+          "covers": [
+            "深"
+          ],
+          "audio_asset_id": "speech.6e6d714410a1da71fe2adf937291dde3046d4c56"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d10",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "身体",
+          "covers": [
+            "身"
+          ],
+          "audio_asset_id": "speech.4729deedde2a0710ca52c0e7a789e3cf527ead85"
+        },
+        {
+          "item_id": "tc1-a.unit-1.lesson-2.d11",
+          "lesson_id": "tc1-a.unit-1.lesson-2",
+          "text": "早晨",
+          "covers": [
+            "晨"
+          ],
+          "audio_asset_id": "speech.119af509ad0770c505f73a3dba50874c651f3230"
+        }
+      ]
+    }
+  ],
+  "audio_assets": [
+    {
+      "asset_id": "speech.3efc6babe61903ce8bab6bb7d58bf193310cce07",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.c8ae978f0f5a869ec296d21ed87ac898e1011a02",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.28f5b858887824066f0f7431da6e5afda18faa3d",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.42be23d8344a497124dca6fba07f0b841b15ae36",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.9069cc8f2c62b4b449dbe7ad49ba0d4e18c08346",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.379038ffc88b9616034f4f233aad6e2a5a97ccf4",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.473400815c0f687da9d51a61e214975ee2e3a78f",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.15d208d1b4c98aae0cbadefb1e5e984ec6c50431",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.e7a9170807e926349d44f1a783562bee6a8a09fe",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.6e6d714410a1da71fe2adf937291dde3046d4c56",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.4729deedde2a0710ca52c0e7a789e3cf527ead85",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    },
+    {
+      "asset_id": "speech.119af509ad0770c505f73a3dba50874c651f3230",
+      "sha256": "312f0c5e9a79ad8b300c0b557361d0e98b78dc53af1eebc922e0d6f6cccd6a7d",
+      "media_type": "audio/pcm"
+    }
+  ],
+  "playback": {
+    "repeat_count": 3,
+    "interval_ms": 1000,
+    "speech_rate": 1
+  }
+}

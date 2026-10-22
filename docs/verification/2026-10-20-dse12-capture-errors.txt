@@ -1,0 +1,3 @@
+10-20 21:46:56.732  8776  8790 W AudioRecord: restoreRecord_l() failed status -22
+10-20 21:46:56.732  8776  8790 E AudioRecord: start() status -22
+10-20 21:47:00.139  8776  8776 E Camera  : Error 1

@@ -8,6 +8,8 @@ Hardware 3A is unavailable on this image; dark captures receive bounded gain.
 from __future__ import annotations
 
 import asyncio
+import contextvars
+import threading
 import json
 import re
 from pathlib import Path
@@ -23,6 +25,7 @@ __all__ = ["V4l2IspCamera"]
 _ISP_DEVICE = "/dev/video11"
 _SUBDEV_GLOB = "/dev/v4l-subdev*"
 _CAPTURE_TIMEOUT_S = 15.0
+_TRANSIENT = contextvars.ContextVar("transient_camera", default=False)
 _TMP_NV12 = Path("/tmp/lira_isp_frame.raw")
 _SENSOR_SUBDEV = "/dev/v4l-subdev2"  # M3：OV13855@CAM1 的传感器子设备
 
@@ -93,6 +96,56 @@ class V4l2IspCamera(Camera):
     async def close(self) -> None:
         self._tmp.unlink(missing_ok=True)
 
+    async def capture_transient(self) -> bytes:
+        """Capture for transient OCR, deleting this HAL's raw frame on every exit.
+
+        Existing classic callers keep using capture(). The caller must retain
+        exclusive camera ownership until this coroutine actually finishes.
+        """
+        cancelled = threading.Event()
+        guard = threading.Lock()
+        running = {}
+
+        def run():
+            async def capture_owned():
+                token = _TRANSIENT.set(True)
+                with guard:
+                    running.update(loop=asyncio.get_running_loop(), task=asyncio.current_task())
+                    if cancelled.is_set():
+                        asyncio.current_task().cancel()
+                try:
+                    return await self.capture()
+                finally:
+                    # Child processes have been reaped by the transient command
+                    # helper before raw data can be deleted or ownership released.
+                    self._tmp.unlink(missing_ok=True)
+                    _TRANSIENT.reset(token)
+                    with guard:
+                        running.clear()
+            return asyncio.run(capture_owned())
+
+        worker = asyncio.create_task(asyncio.to_thread(run))
+        try:
+            return await asyncio.shield(worker)
+        except asyncio.CancelledError:
+            cancelled.set()
+            with guard:
+                if running:
+                    running['loop'].call_soon_threadsafe(running['task'].cancel)
+            # Cancellation cannot stop CPU/native work. Keep ownership until the
+            # thread completes and its subprocess cleanup really finishes.
+            while not worker.done():
+                try:
+                    await asyncio.shield(worker)
+                except asyncio.CancelledError:
+                    continue
+                except Exception:
+                    break
+            # Retrieve a late failure without replacing the caller's cancellation.
+            if not worker.cancelled():
+                worker.exception()
+            raise
+
     async def capture(self) -> bytes:
         """单批三帧 → 对齐均值降噪（固定机位免费 √3 信噪比；失配回退择优）→
         空域降噪 → 数字补偿 → JPEG。"""
@@ -107,6 +160,10 @@ class V4l2IspCamera(Camera):
         return jpeg.tobytes()
 
     async def _sensor_set(self, ctrl: str, value: int) -> bool:
+        if _TRANSIENT.get():
+            code, _, _ = await self._transient_command(
+                _SENSOR_SUBDEV, "-c", "%s=%d" % (ctrl, value))
+            return code == 0
         proc = await asyncio.create_subprocess_exec(
             "v4l2-ctl", "-d", _SENSOR_SUBDEV, "-c", "%s=%d" % (ctrl, value),
             stdout=asyncio.subprocess.DEVNULL,
@@ -163,6 +220,11 @@ class V4l2IspCamera(Camera):
             raise HalError(f"ISP 帧布局不符: {exc}") from exc
 
     async def _v4l2(self, *args: str) -> tuple[bytes, bytes]:
+        if _TRANSIENT.get():
+            code, stdout, stderr = await self._transient_command(self.device, *args)
+            if code != 0:
+                raise HalError("ISP transient capture command failed")
+            return stdout, stderr
         proc = await asyncio.create_subprocess_exec(
             "v4l2-ctl", "-d", self.device, *args,
             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
@@ -177,6 +239,28 @@ class V4l2IspCamera(Camera):
         if proc.returncode != 0:
             raise HalError(f"ISP 拍摄失败: {stderr.decode(errors='replace').strip()}")
         return stdout, stderr
+
+
+    async def _transient_command(self, device, *args):
+        # Shield process creation too: cancellation can race with child spawn.
+        spawning = asyncio.create_task(asyncio.create_subprocess_exec(
+            "v4l2-ctl", "-d", device, *args,
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE))
+        proc = None
+        try:
+            proc = await asyncio.shield(spawning)
+            output = await asyncio.wait_for(proc.communicate(), _CAPTURE_TIMEOUT_S)
+            return proc.returncode, *output
+        except BaseException:
+            if proc is None:
+                proc = await spawning
+            if proc.returncode is None:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass  # The child exited between returncode check and kill.
+            await proc.communicate()
+            raise
 
 
 

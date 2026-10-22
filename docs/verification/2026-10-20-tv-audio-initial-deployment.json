@@ -1,0 +1,24 @@
+{
+  "deployed": true,
+  "backup": "/home/orangepi/lira/deploy-backups/tv-audio-20261020-081504",
+  "before_service": {
+    "MainPID": "75305",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "after_service": {
+    "MainPID": "81145",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "files": {
+    "lira/tv_audio.py": "7043e0f30a189b05e5acd4ce766df73a8e9ea186bda0b1eb5745e8db06680f82",
+    "lira/tv_display.py": "8936e451ba4019130ed320b50c0617522eb60a55ff360c9b8d3421b3f3f3fccc",
+    "lira/conversation_paths.py": "86913314daec8ddb92b77574d1ab8071173eb582e1345350e81c333fd4e6305f"
+  },
+  "protected_files_unchanged": true,
+  "textbook_data_unchanged": true,
+  "mode_unchanged": true,
+  "realtime_audio_output": "tv",
+  "capabilities_flag": "false"
+}

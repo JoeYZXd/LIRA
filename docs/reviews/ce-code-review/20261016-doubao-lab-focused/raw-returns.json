@@ -1,0 +1,70 @@
+[
+  {
+    "reviewer": "correctness",
+    "findings": [
+      {
+        "title": "Handle session failures between turns",
+        "severity": "P2",
+        "file": "device/lira/ui/doubao_lab.py",
+        "line": 223,
+        "confidence": 100,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Handle error events before the no-current-turn guard; mark the lab errored and close/release its failed session while preserving exportable records.",
+        "first_evidence": "device/lira/ui/doubao_lab.py:223 -- if turn is None:return",
+        "why_it_matters": "A receive failure between turns leaves the UI ready and device ownership retained; a subsequent input can wait against a failed session until timeout.",
+        "evidence": [
+          "RealtimeSession._task_done sets failed=True and emits error; feed rejects failed sessions.",
+          "The lab ignores this event without _current; ordinary watchdog only eventually closes the session."
+        ]
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": []
+  },
+  {
+    "reviewer": "security",
+    "findings": [
+      {
+        "title": "Handle session failures between turns",
+        "severity": "P2",
+        "file": "device/lira/ui/doubao_lab.py",
+        "line": 223,
+        "confidence": 100,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Handle error events before the no-current-turn guard; mark the lab errored and close/release its failed session while preserving exportable records.",
+        "first_evidence": "device/lira/ui/doubao_lab.py:223 -- if turn is None:return",
+        "why_it_matters": "A receive failure between turns leaves the UI ready and device ownership retained; a subsequent input can wait against a failed session until timeout.",
+        "evidence": [
+          "RealtimeSession._task_done sets failed=True and emits error; feed rejects failed sessions.",
+          "The lab ignores this event without _current; ordinary watchdog only eventually closes the session."
+        ]
+      },
+      {
+        "title": "Stop audio before removing cleared records",
+        "severity": "P2",
+        "file": "device/lira/ui/static/dev-doubao-lab.js",
+        "line": 97,
+        "confidence": 100,
+        "autofix_class": "gated_auto",
+        "owner": "downstream-resolver",
+        "requires_verification": true,
+        "pre_existing": false,
+        "suggested_fix": "Dispose removed cards by pausing audio, removing src, calling load(), cancelling timers, and removing DOM; share cleanup with clearSensitive.",
+        "first_evidence": "device/lira/ui/static/dev-doubao-lab.js:97 -- for (const [id, card] of cards) if (!ids.has(id)) { clearTimeout(card.timer); card.root.remove(); cards.delete(id); }",
+        "why_it_matters": "If another browser clears records while a reply is playing, removing the audio DOM node alone can leave playback running and makes later cleanup unable to reach it.",
+        "evidence": [
+          "The removed-record branch never pauses or unloads audio.",
+          "clearSensitive only iterates remaining cards, so removed playing elements are no longer reachable there."
+        ]
+      }
+    ],
+    "residual_risks": [],
+    "testing_gaps": []
+  }
+]

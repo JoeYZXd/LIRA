@@ -1,0 +1,9 @@
+{
+  "verdicts": [
+    {
+      "#": 1,
+      "validated": false,
+      "reason": "Current _release returns before accessing self.expiry when owns_mutex is false; old-run cleanup no longer cancels successor expiry."
+    }
+  ]
+}

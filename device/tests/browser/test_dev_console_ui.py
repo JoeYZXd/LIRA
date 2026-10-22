@@ -44,6 +44,125 @@ from ui_harness import (
 
 pytest.importorskip("playwright.sync_api")
 
+
+class TestConversationPaths:
+    @pytest.mark.parametrize('width', [390, 1440])
+    def test_switch_readback_and_missing_configuration(self, dev_server, page, width, tmp_path):
+        from types import SimpleNamespace
+        from lira.conversation_paths import ConversationPaths
+        from lira.audio.doubao_realtime import RealtimeConfig
+        rt = dev_server.runtime
+        rt._mic_paused = False
+        rt.engine.close = lambda: None
+        rt.clear_voice_identity = lambda enabled: None
+        rt.pipeline = SimpleNamespace(playback_stop=lambda:None)
+        rt.dispatcher = SimpleNamespace(clear=lambda:None)
+        async def stop(): pass
+        rt.tts = SimpleNamespace(stop=stop)
+        rt.conversation_paths = ConversationPaths(rt, env={})
+        page.set_viewport_size({'width':width,'height':900})
+        login_console(page, dev_server)
+        wait_for_text(page, '#conversation-current', 'A · 现有语音链路')
+        page.select_option('#conversation-path', 'doubao_realtime')
+        page.click('#conversation-switch')
+        wait_for_text(page, '#conversation-message', '请先配置')
+        assert page.locator('#conversation-start').is_disabled()
+        assert rt.conversation_paths.mode=='classic'
+        rt.conversation_paths.config = RealtimeConfig(api_key='never-render-this-secret', voice='test-voice')
+        page.click('#conversation-switch')
+        wait_for_text(page, '#conversation-current', 'B · 豆包实时语音')
+        assert page.locator('#conversation-start').is_enabled()
+        assert 'never-render-this-secret' not in page.content()
+        page.reload()
+        wait_for_text(page, '#conversation-current', 'B · 豆包实时语音')
+        assert page.locator('#conversation-path').input_value()=='doubao_realtime'
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.locator('#conversation-path').focus()
+        import os
+        from pathlib import Path
+        target = Path(os.environ.get('LIRA_SCREENSHOT_DIR',str(tmp_path)))
+        target.mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(target / f'conversation-path-{width}.png'), full_page=True)
+        page.select_option('#conversation-path','classic')
+        page.click('#conversation-switch')
+        wait_for_text(page, '#conversation-current', 'A · 现有语音链路')
+
+
+class TestDoubaoLab:
+    @pytest.mark.parametrize('width',[390,1440])
+    def test_multiturn_feedback_export_and_refresh(self,dev_server,page,width,tmp_path):
+        import asyncio,json,os
+        import numpy as np
+        from pathlib import Path
+        from types import SimpleNamespace
+        from lira.audio.doubao_realtime import RealtimeConfig
+        from lira.ui.doubao_lab import DoubaoLab
+        rt=dev_server.runtime
+        async def stop():pass
+        rt._mic_paused=False
+        rt.tts=SimpleNamespace(sample_rate=16000,generate=lambda text,speed:np.full(1600,.1,np.float32))
+        rt.conversation_paths=SimpleNamespace(config=RealtimeConfig(api_key='never-visible',voice='voice'),stop=stop,external_test=False)
+        rt.conversation_paths.snapshot=lambda:{'mode':'classic','state':'standby','doubao_configured':True,
+            'doubao_missing':[],'cloud_active':False,'local_enrollment':False}
+        class Session:
+            def __init__(self,**kwargs):self.kwargs=kwargs
+            async def open(self):pass
+            async def close(self):pass
+            async def send(self,*a,**kw):pass
+            def feed(self,samples):
+                if not np.any(samples):return
+                async def reply():
+                    self.kwargs['on_event']('user_text','我想录入声纹')
+                    await self.kwargs['on_tool']('start_voice_enrollment',{})
+                    async def chunks():yield b'\0'*960
+                    await self.kwargs['player'].play_stream(chunks())
+                    self.kwargs['on_event']('assistant_text','本次仅模拟，没有保存声纹。')
+                    self.kwargs['on_event']('response_done','')
+                asyncio.create_task(reply())
+        rt.dev_handle._doubao_lab=DoubaoLab(rt,rt.dev_handle.dev_mutex,session_factory=Session)
+        page.set_viewport_size({'width':width,'height':960})
+        login_console(page,dev_server)
+        page.click('#app-tile-doubao-lab')
+        page.click('#lab-start')
+        wait_for_text(page,'#lab-status','已连接')
+        for text in ['我想录入声纹','取消刚才的操作']:
+            page.fill('#lab-text',text)
+            page.click('#lab-send')
+            page.wait_for_function("[...document.querySelectorAll('.lab-turn')].every(t => t.textContent.includes('回复完成')) && document.querySelectorAll('.lab-turn').length === " + str(1 if text.startswith('我') else 2))
+        card=page.locator('.lab-turn').first
+        card.locator('.lab-feedback').locator('..').locator('summary').click()
+        card.locator('select').select_option('tool')
+        card.locator('textarea').nth(0).fill('不应该把模拟说成真实执行')
+        card.locator('textarea').nth(1).fill('请明确说只是模拟')
+        with page.expect_download() as download:
+            page.click('#lab-export-json')
+        data=json.loads(Path(download.value.path()).read_text())
+        assert len(data['turns'])==2
+        assert data['turns'][0]['feedback']['note']=='不应该把模拟说成真实执行'
+        assert data['turns'][0]['feedback']['expected']=='请明确说只是模拟'
+        assert data['tool_execution']=='simulated' and 'never-visible' not in json.dumps(data)
+        assert len({t['session'] for t in data['turns']})==1
+        page.click('#lab-stop')
+        wait_for_text(page,'#lab-status','会话已结束')
+        page.reload()
+        page.click('#app-tile-doubao-lab')
+        page.wait_for_selector('.lab-turn')
+        assert page.locator('.lab-turn').count()==2
+        assert page.locator('.lab-turn textarea').first.input_value()=='不应该把模拟说成真实执行'
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        target=Path(os.environ.get('LIRA_SCREENSHOT_DIR',str(tmp_path)))
+        target.mkdir(parents=True,exist_ok=True)
+        page.screenshot(path=str(target/f'doubao-lab-{width}.png'),full_page=True)
+        page.evaluate("""() => {
+          window.labAudioRef = document.querySelector('.lab-turn audio');
+          window.labAudioPaused = 0;
+          const original = window.labAudioRef.pause.bind(window.labAudioRef);
+          window.labAudioRef.pause = () => { window.labAudioPaused++; original(); };
+        }""")
+        assert page.request.post(dev_server.base_url+'/dev/api/doubao-lab',data={'action':'clear'}).ok
+        page.wait_for_function("document.querySelectorAll('.lab-turn').length === 0")
+        assert page.evaluate('window.labAudioPaused > 0 && !window.labAudioRef.getAttribute("src")')
+
 # ---------- 场景 1（AE3）：静音 / 无数据 / 间断 展示可辨，停更不伪造 ----------
 
 
@@ -175,8 +294,8 @@ class TestResponsiveAccessibility:
     def test_key_controls_visible_and_operable(self, dev_server, page, width):
         page.set_viewport_size({"width": width, "height": 800})
         login_console(page, dev_server)
-        for sel in ("#tile-voicelog .tile-head", "#tile-overview .tile-head",
-                    "#tile-settings .tile-head"):
+        for sel in ("#app-tile-voicelog", "#app-tile-overview",
+                    "#app-tile-settings"):
             assert page.locator(sel).is_visible(), f"{width}px: {sel}"
         open_live_tile(page)
         for sel in ("#curve-canvas", "#curve-status", "#curve-last",
@@ -192,14 +311,14 @@ class TestResponsiveAccessibility:
     def test_keyboard_expand_escape_focus_return(self, dev_server, page):
         login_console(page, dev_server)
         head = "#tile-voicelog .tile-head"
-        page.focus(head)
+        page.focus("#app-tile-voicelog")
         page.keyboard.press("Enter")
         page.wait_for_selector("#tile-voicelog-body:not([hidden])")
         assert page.locator(head).get_attribute("aria-expanded") == "true"
         page.keyboard.press("Escape")
         page.wait_for_selector("#tile-voicelog-body[hidden]", state="attached")
         assert page.locator(head).get_attribute("aria-expanded") == "false"
-        assert page.evaluate("() => document.activeElement.className") == "tile-head", \
+        assert page.evaluate("() => document.activeElement.id") == "app-tile-voicelog", \
             "Escape 收起后焦点必须归还磁贴头"
 
     def test_reduced_motion_info_complete(self, dev_server, page):
@@ -370,7 +489,7 @@ def open_voice_tile(page) -> None:
     """展开声纹磁贴（触达即单拉 /dev/api/voice-candidates）。"""
     head = page.locator("#tile-voice-candidates .tile-head")
     if head.get_attribute("aria-expanded") != "true":
-        head.click()
+        page.locator("#app-tile-voice-candidates").click()
     page.wait_for_selector("#tile-voice-candidates-body:not([hidden])")
 
 
@@ -463,3 +582,244 @@ class TestVoiceCandidatesTile:
         open_voice_tile(page)
         wait_for_text(page, "#voice-candidates-view", "声纹候选未装配")
         wait_for_text(page, "#voice-candidates-summary", "未装配")
+
+
+class TestJevProbe:
+    @pytest.mark.parametrize("width", [390, 768, 1440, 1920])
+    def test_full_width_top_panel_and_unconfigured_state(self, dev_server, page, monkeypatch, width):
+        monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+        page.set_viewport_size({"width": width, "height": 960})
+        login_console(page, dev_server)
+        wait_for_text(page, "#jev-ready", "未配置")
+        assert page.locator("#tile-jev").is_visible()
+        assert page.locator("#jev-start").is_disabled()
+        assert page.locator("#jev-prepare").is_visible()
+        assert page.locator("#tile-jev").bounding_box()["y"] < 140
+        assert page.evaluate("getComputedStyle(document.querySelector('.dev-console')).display") == "flex"
+        assert page.evaluate("document.documentElement.scrollWidth <= window.innerWidth")
+        assert page.locator(".console-shell").bounding_box()["width"] == width
+        if width in (390, 1440):
+            page.screenshot(path=f"/mnt/c/Users/Joey/.codex/visualizations/2026/10/16/01a14212-5e29-70f3-9118-ffd855e09c09/jev-console-{width}.png", full_page=True)
+
+    def test_typing_prediction_and_finish_play_cached_audio(self, dev_server, page):
+        import asyncio
+        import numpy as np
+        from lira.audio.tts import PlaybackCompletion
+        from lira.audio.voice_metrics import current_trace, mark
+
+        class ControlledDecision:
+            configured = True
+
+            async def choose(self, text, phase):
+                return {"choice": "cancel" if "不录" in text else "start", "confidence": .9,
+                        "model": "browser-test-only", "probabilities": {}}
+
+        class TestTts:
+            occupied = False
+            sample_rate = 16000
+            calls = 0
+            plays = 0
+
+            def generate(self, text, speed):
+                self.calls += 1
+                return np.ones(160, dtype=np.float32) * .1
+
+            def speak_cached(self, samples, *, owner, volume):
+                self.plays += 1
+                done = PlaybackCompletion(owner)
+                trace = current_trace.get()
+
+                async def output():
+                    mark(trace, "output_consumed")
+                    await asyncio.sleep(.03)
+                    mark(trace, "output_drained")
+                    done.finish("success")
+
+                asyncio.create_task(output())
+                return done
+
+            async def stop(self, **kwargs):
+                pass
+
+        rt = dev_server.runtime
+        rt.tts = TestTts()
+        rt.dev_handle.jev_probe.decision = ControlledDecision()
+        login_console(page, dev_server)
+        page.locator("#jev-prepare").click()
+        wait_for_text(page, "#jev-ready", "可用")
+        page.locator("#jev-start").click()
+        page.locator("#jev-text").fill("帮我录入声纹")
+        wait_for_text(page, "#jev-decisions", "start")
+        assert rt.tts.plays == 0
+        page.locator("#jev-text").fill("帮我录入声纹，不过今天先不录")
+        wait_for_text(page, "#jev-decisions", "cancel")
+        page.locator("#jev-finish").click()
+        wait_for_text(page, "#jev-message", "播放完成")
+        assert "这次录入已取消" in page.locator("#jev-reply").text_content()
+        assert "ms" in page.locator("#jev-total").text_content()
+        assert rt.tts.plays == 1
+        assert rt.tts.calls == 11
+        # Cancel a scheduled snapshot before its timer fires, then start again.
+        page.locator("#jev-start").click()
+        page.locator("#jev-text").fill("录入")
+        page.locator("#jev-cancel").click()
+        wait_for_text(page, "#jev-message", "已取消")
+        page.locator("#jev-start").click()
+        page.locator("#jev-text").fill("帮我录入声纹")
+        wait_for_text(page, "#jev-decisions", "start")
+        page.locator("#jev-cancel").click()
+        wait_for_text(page, "#jev-message", "已取消")
+        page.locator("#jev-start").click()
+        page.locator("#jev-text").fill("开始录入")
+        page.locator("#app-tile-jev").click()
+        assert page.locator("#tile-jev").is_hidden()
+        wait_for_text(page, "#jev-message", "已取消")
+        assert rt.dev_handle.jev_probe.run["state"] == "cancelled"
+
+
+class TestCosts:
+    @pytest.mark.parametrize('width',[390,1440])
+    def test_balance_daily_breakdown_and_warning(self,dev_server,page,width):
+        import httpx
+        from types import SimpleNamespace
+        from lira.usage import AccountBalance,UsageLedger
+        rt=dev_server.runtime
+        ledger=UsageLedger(rt.store)
+        ledger.add('normal','sessions',2)
+        ledger.add('normal','input_seconds',60)
+        ledger.add('test','turns',3)
+        rt.conversation_paths=SimpleNamespace(usage=ledger,snapshot=lambda:{})
+        rt.dev_handle.account_balance=AccountBalance(env={
+            'VOLCENGINE_ACCESS_KEY_ID':'test-ak','VOLCENGINE_SECRET_ACCESS_KEY':'test-sk'},
+            transport=httpx.MockTransport(lambda request:httpx.Response(200,json={'Result':{
+                'AvailableBalance':'12.50','CashBalance':'12.50','ArrearsBalance':'0'}})))
+        page.set_viewport_size({'width':width,'height':1000})
+        login_console(page,dev_server)
+        page.locator('#app-tile-costs').click()
+        wait_for_text(page,'#cost-balance','12.50')
+        wait_for_text(page,'#cost-input','1.00')
+        assert page.locator('#cost-days tr').count()==14
+        wait_for_text(page,'#cost-warning','低于')
+        assert page.locator('#cost-details').get_attribute('open') is None
+        assert not page.locator('#cost-days').is_visible()
+        page.locator('#cost-details > summary').click()
+        page.locator('#cost-threshold').fill('5')
+        assert page.locator('#cost-warning').inner_text()==''
+        assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+        page.screenshot(path=f'/mnt/c/Users/Joey/.codex/visualizations/2026/10/16/01a14212-5e29-70f3-9118-ffd855e09c09/costs-{width}.png',full_page=True)
+
+
+class TestAppCenter:
+    @pytest.mark.parametrize("width", [390, 768, 1440, 1920])
+    def test_multiple_windows_and_adaptive_layout(self, dev_server, page, width):
+        page.set_viewport_size({"width": width, "height": 1000})
+        login_console(page, dev_server)
+        assert page.locator(".app-launch").count() == 13
+
+        page.locator("#app-tile-overview").click()
+        assert page.locator("#tile-overview").is_visible()
+        assert page.locator("#tile-settings").is_visible()
+        assert page.locator("#tile-jev").is_visible()
+        wait_for_text(page, "#workspace-count", "3 个")
+        assert page.locator("#app-tile-overview").get_attribute("aria-pressed") == "true"
+        assert page.evaluate("document.documentElement.scrollWidth <= innerWidth")
+        left = page.locator(".app-center").bounding_box()
+        right = page.locator("#workspace").bounding_box()
+        assert right["x"] >= left["x"] + left["width"]
+        panels = page.locator("#workspace > .tile:not([hidden])")
+        positions = [round(panels.nth(i).bounding_box()["x"]) for i in range(panels.count())]
+        if width >= 1440:
+            assert len(set(positions)) >= 2
+        else:
+            assert len(set(positions)) == 1
+        if width in (390, 1440):
+            page.screenshot(path=f"/mnt/c/Users/Joey/.codex/visualizations/2026/10/16/01a14212-5e29-70f3-9118-ffd855e09c09/app-center-{width}.png", full_page=True)
+
+    def test_close_reopen_preserves_fields_and_empty_workspace(self, dev_server, page):
+        login_console(page, dev_server)
+        page.locator("#app-tile-voice").click()
+        page.locator("#tts-text").fill("保留输入，不执行播报")
+        page.locator("#tile-voice .tile-head").click()
+        assert page.locator("#tile-voice").is_hidden()
+        assert page.locator("#app-tile-voice").get_attribute("aria-pressed") == "false"
+        page.locator("#app-tile-voice").click()
+        assert page.locator("#tts-text").input_value() == "保留输入，不执行播报"
+        ids = page.locator('.app-launch[aria-pressed="true"]').evaluate_all("nodes => nodes.map(n => n.id)")
+        for app_id in ids:
+            page.locator("#" + app_id).click()
+        assert page.locator("#workspace-empty").is_visible()
+        wait_for_text(page, "#workspace-count", "0 个")
+        page.locator("#app-tile-settings").click()
+        assert page.locator("#tile-settings").is_visible()
+        assert page.locator("#workspace-empty").is_hidden()
+
+
+class TestJevRegionFailure:
+    def test_region_error_is_visible_and_stops_this_run(self, dev_server, page):
+        from types import SimpleNamespace
+        import numpy as np
+        from lira.ui.jev_probe import CUES, ProbeError
+
+        class RegionDenied:
+            configured = True
+            calls = 0
+
+            async def choose(self, text, phase):
+                self.calls += 1
+                raise ProbeError("TypeSafe 当前地区不可用（HTTP 451）。本轮测试已停止。", 451)
+
+        probe = dev_server.runtime.dev_handle.jev_probe
+        probe.decision = RegionDenied()
+        dev_server.runtime.tts = SimpleNamespace(occupied=False)
+        probe.cache = {key: np.ones(16, dtype=np.float32) for key in CUES}
+        probe.cache_speed = dev_server.runtime.settings.tts_speed
+        login_console(page, dev_server)
+        page.locator("#jev-start").click()
+        page.locator("#jev-text").fill("请录入声纹")
+        wait_for_text(page, "#jev-message", "当前地区不可用")
+        wait_for_text(page, "#jev-decisions", "451")
+        assert page.locator("#jev-text").is_disabled()
+        assert page.locator("#jev-finish").is_disabled()
+        assert probe.run["state"] == "failed"
+        assert probe.decision.calls == 1
+        assert not probe.mutex.locked()
+
+
+class TestAudioLogSummary:
+    @staticmethod
+    def sample(route="wake", clipped="0.0"):
+        return ("收到处理后音频：RMS=-200.0 dBFS，峰值=0.000，削波=" + clipped +
+                "%，路由=" + route + "，播报占用=False；唤醒 KWS 持续检测（未报告新命中）")
+
+    def test_repeated_capture_is_compact_and_keeps_important_events(self, dev_server, page):
+        login_console(page, dev_server)
+        open_live_tile(page)
+        dev_server.telemetry.add_event("wake", "重要唤醒事件不能被周期收音挤走")
+        wait_for_text(page, "#log-view", "重要唤醒事件")
+        for batch in range(6):
+            for _ in range(100):
+                dev_server.telemetry.add_event("audio", self.sample())
+            wait_for_text(page, "#log-view", "共 " + str((batch + 1) * 100) + " 次")
+        assert page.locator('#log-view [data-kind="audio"]').count() == 1
+        assert page.locator('#log-view [data-kind="wake"]').count() == 1
+        summary = page.locator("#log-view .vl-audio-summary")
+        assert not summary.get_attribute("open")
+        summary.locator("summary").click()
+        assert summary.locator(".vl-audio-detail").is_visible()
+        assert "RMS=-200.0" in summary.text_content()
+        dev_server.telemetry.add_event("audio", self.sample())
+        wait_for_text(page, "#log-view", "共 601 次")
+        assert page.locator("#log-view .vl-audio-summary").get_attribute("open") is not None
+
+    def test_state_changes_and_clipping_are_not_hidden(self, dev_server, page):
+        login_console(page, dev_server)
+        open_live_tile(page)
+        for _ in range(3):
+            dev_server.telemetry.add_event("audio", self.sample())
+        dev_server.telemetry.add_event("asr", "用户请求保留逐条显示")
+        dev_server.telemetry.add_event("audio", self.sample(route="asr"))
+        dev_server.telemetry.add_event("audio", self.sample(route="asr", clipped="2.0"))
+        wait_for_text(page, "#log-view", "削波=2.0")
+        assert page.locator("#log-view .vl-audio-summary").count() == 2
+        assert page.locator('#log-view [data-kind="asr"]').count() == 1
+        assert page.locator('#log-view .vl-row[data-kind="audio"]').count() == 3

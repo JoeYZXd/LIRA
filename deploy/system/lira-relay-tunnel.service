@@ -1,0 +1,15 @@
+[Unit]
+Description=LIRA reverse SSH relay to WarmHouse
+After=default.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/ssh -NT -F /dev/null -i %h/.ssh/lira_warmhouse_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%h/.ssh/known_hosts_warmhouse -o ExitOnForwardFailure=yes -o ConnectTimeout=10 -o ServerAliveInterval=20 -o ServerAliveCountMax=3 -o TCPKeepAlive=yes -R 0.0.0.0:18191:127.0.0.1:8080 lira-relay@152.136.21.84
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+UMask=0077
+
+[Install]
+WantedBy=default.target

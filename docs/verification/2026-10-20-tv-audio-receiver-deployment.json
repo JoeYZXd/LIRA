@@ -1,0 +1,12 @@
+{
+  "apk_sha256": "fbe53deb3a94ae09ad37ae6a08fd4c8a87611737b5ec300ffac928ac96a85e9e",
+  "installed_apk_matches_build": true,
+  "source": {
+    "tv-receiver\\src\\AudioReceiver.java": "4180c019c376d3c41960cb603bc417d49868d2240b34f7ba925f16abb7d08e40",
+    "tv-receiver\\src\\Boot.java": "427fc3940e7f7748a18d2e444543f243f8d6b7be480092d7747572187f16434d",
+    "tv-receiver\\src\\ReceiverService.java": "d5b0add08556f0749f6752c479ae07e729299bf04321b2fe0d2b38314c5af5a0",
+    "tv-receiver\\src\\Screen.java": "f520d5856a9ebed12f731b868c7eb7f7e4549941f696d7edbcc0776366fd3ffa",
+    "tv-receiver\\AndroidManifest.xml": "a645eb70ca69aa902653317a86a3ed0e16443e261c0fae8a740835d1c1032398"
+  },
+  "prior_apk_backup": "tv-receiver/build/pre-audio-receiver.apk"
+}

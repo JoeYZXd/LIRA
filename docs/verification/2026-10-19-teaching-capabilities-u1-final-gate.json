@@ -1,0 +1,25 @@
+{
+  "status": "passed",
+  "scope": "actual Doubao realtime tool protocol with synthetic handlers after capacity review fixes",
+  "model": "1.2.6.1",
+  "cases": 4,
+  "repeat": 3,
+  "passed": 12,
+  "total": 12,
+  "one_execution_each": true,
+  "premature_claims": [],
+  "session_failures": 0,
+  "source_sha256": {
+    "device/lira/audio/doubao_realtime.py": "d3c1c9e398edc9dec9dab0269edcd3653d29648c3f5ecb8a355d92370231e8ee",
+    "device/lira/realtime_capabilities.py": "24e4f5a097dacfb537a8533751c15161a0b50519fd250a632c87ba5e63dee243"
+  },
+  "raw_receipt": "2026-10-19-teaching-capabilities-u1-final.json",
+  "deployed": false,
+  "hardware_verified": false,
+  "classic_changed": false,
+  "limitations": [
+    "Does not establish physical microphone/speaker/OCR/TV acceptance",
+    "Does not replace failed U10 real-model cooperation acceptance",
+    "Owner reconnect verified locally with actual session/executor and fake transport, not real voice biometrics"
+  ]
+}

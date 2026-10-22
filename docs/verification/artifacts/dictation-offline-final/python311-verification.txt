@@ -1,0 +1,36 @@
+........................................................................ [ 14%]
+........................................................................ [ 28%]
+........................................................................ [ 43%]
+........................................................................ [ 57%]
+........................................................................ [ 71%]
+........................................................................ [ 86%]
+.....................................................................    [100%]
+=============================== warnings summary ===============================
+tests/test_dictation_routes.py: 4 warnings
+tests/test_teaching_routes.py: 5 warnings
+tests/test_conversation_paths.py: 1 warning
+tests/test_dev_console.py: 61 warnings
+tests/test_doubao_lab.py: 1 warning
+  /tmp/lira-dictation-review-73366b76a057/device/lira/ui/dictation.py:186: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/test_dictation_routes.py: 4 warnings
+tests/test_teaching_routes.py: 5 warnings
+tests/test_conversation_paths.py: 1 warning
+tests/test_dev_console.py: 61 warnings
+tests/test_doubao_lab.py: 1 warning
+  /home/orangepi/lira/device/.venv/lib/python3.11/site-packages/fastapi/applications.py:4744: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)  # ty: ignore[deprecated]
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+501 passed, 144 warnings in 40.55s

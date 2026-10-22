@@ -1,0 +1,44 @@
+{
+  "white_patch": [
+    NaN,
+    NaN,
+    NaN
+  ],
+  "gains": [
+    NaN,
+    NaN,
+    NaN
+  ],
+  "results": [
+    {
+      "name": "test02-fullwidth-current",
+      "shape": [
+        4224,
+        3136,
+        3
+      ],
+      "text": "1、2、3，头人\n焦昱设计\n小动物们正在玩“木头人” 游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量\n把数量最多的图形贴纸贴在方框里。",
+      "lines": 6
+    },
+    {
+      "name": "test03-fullwidth-native",
+      "shape": [
+        4224,
+        3136,
+        3
+      ],
+      "text": "它们—\n1、 2、3, 木头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量\n把数量最多的图形贴纸贴在方框里。",
+      "lines": 7
+    },
+    {
+      "name": "test04-white-reference-assumption",
+      "shape": [
+        4224,
+        3136,
+        3
+      ],
+      "text": "",
+      "lines": 0
+    }
+  ]
+}

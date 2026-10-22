@@ -1,0 +1,32 @@
+{
+  "passed": true,
+  "service": {
+    "MainPID": "91082",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "tv_audio_frames": 603016,
+  "tv_audio_seconds": 25.125666666666667,
+  "audio_streams": 6,
+  "wire_tool_results": 11,
+  "pages": [
+    {
+      "offset": 0,
+      "count": 8,
+      "preview": "dēng    táng    yī    jìn    yù    qióng    céng    pù"
+    },
+    {
+      "offset": 8,
+      "count": 5,
+      "preview": "bù    lú    zǐ    yān    yáo"
+    }
+  ],
+  "quiet_seconds": [
+    20,
+    20
+  ],
+  "extra_confirmation_after_more": true,
+  "synthetic_input": true,
+  "classic_changed": false,
+  "textbook_files_unchanged": true
+}

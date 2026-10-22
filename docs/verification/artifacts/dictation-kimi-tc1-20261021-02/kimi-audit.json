@@ -1,0 +1,31 @@
+{
+  "run_id": "dictation-kimi-tc1-20261021-02",
+  "provider_host": "api.moonshot.cn",
+  "model": "kimi-k3",
+  "actual_model_calls": 7,
+  "doubao_used": false,
+  "speech": "local Melo TTS + actual H5 AudioContext onended",
+  "status": "completed",
+  "seconds": 339.77,
+  "counters": {
+    "regression_runs_started": 1,
+    "initial_requests": 1,
+    "new_task_ids": 1,
+    "task_completed": 1,
+    "prepare_after_ready": 0,
+    "child_turns": 28
+  },
+  "cleanup": {
+    "h5": {
+      "timers": 0,
+      "audioActive": false,
+      "pendingInputs": 0
+    },
+    "browser_closed": true,
+    "worker_done": true,
+    "server_pending": 0,
+    "pending_continue_inputs": 0
+  },
+  "previous_failed_report_preserved": true,
+  "physical_hardware_verified": false
+}

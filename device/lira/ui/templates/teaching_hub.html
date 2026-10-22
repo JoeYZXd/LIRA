@@ -1,0 +1,17 @@
+<div id="teaching-hub" class="teaching-hub">
+  <nav class="teach-breadcrumb" aria-label="教学管理位置"><button type="button" id="teach-home">全部科目</button><span id="teach-location" aria-live="polite"></span></nav>
+  <p id="teach-notice" role="status" aria-live="polite"></p>
+  <div id="teach-subjects">
+    <h2 tabindex="-1" id="teach-heading">今天想学什么？</h2>
+    <p class="muted">先选科目，再选课本或学习内容。学习时可以与 LIRA 商量安排。</p>
+    <div class="teach-grid">
+      <button type="button" class="teach-subject" data-subject="chinese"><strong>语文</strong><span>课本 · 生字 · 课文与诗词</span></button>
+      <button type="button" class="teach-subject" data-subject="math"><strong>数学</strong><span>知识点 · 视频讲解 · 练习题</span></button>
+      <button type="button" class="teach-subject" data-subject="english"><strong>英语</strong><span>日常对话 · 每日单词 · 复习</span></button>
+    </div>
+    <p class="muted">语文资料管理可用；新增学习活动仍在建设与验证中。</p>
+  </div>
+  <section id="teach-subject-panel" hidden aria-labelledby="teach-subject-title"><h2 id="teach-subject-title" tabindex="-1"></h2><p id="teach-subject-intro" class="muted"></p><div id="teach-features" class="teach-grid"></div></section>
+  <section id="teach-detail" hidden aria-labelledby="teach-detail-title"><div class="teach-detail-head"><h2 id="teach-detail-title" tabindex="-1"></h2><button type="button" id="teach-back">返回科目</button></div><p id="teach-description"></p><div id="teach-planned" class="teach-planned" hidden></div><p id="teach-loading" role="status" hidden>正在读取设备上的资料…</p><iframe id="teach-frame" title="教学资料管理" hidden></iframe></section>
+  <details class="teach-common"><summary>家长记录与设备状态</summary><div class="teach-common-actions"><button type="button" data-common="reviews">家长核对与修正</button><button type="button" data-common="status">查看能力状态</button></div><p class="muted">记录按家庭成员查看，不会自动判断孩子是否已掌握。</p></details>
+</div>

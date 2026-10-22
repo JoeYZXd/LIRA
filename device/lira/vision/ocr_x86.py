@@ -22,6 +22,7 @@ import pyclipper
 from shapely.geometry import Polygon
 
 from lira.vision.engine import OcrEngine
+from lira.vision.detection_tiles import detect_document
 
 __all__ = [
     "OnnxOcrEngine",
@@ -100,6 +101,10 @@ class OnnxOcrEngine(OcrEngine):
     # ---------- OcrEngine 接口 ----------
 
     def detect(self, image: np.ndarray) -> list[np.ndarray]:
+        """Full-page plus overlapping detail views, in original coordinates."""
+        return detect_document(image, self._detect_single)
+
+    def _detect_single(self, image: np.ndarray) -> list[np.ndarray]:
         """det：文本行四点多边形（原图坐标 float32 (4,2)，tl→tr→br→bl）。"""
         src_h, src_w = image.shape[:2]
         img, ratio_h, ratio_w = self._det_preprocess(image)

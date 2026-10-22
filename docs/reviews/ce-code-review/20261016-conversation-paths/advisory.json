@@ -1,0 +1,9 @@
+{
+  "residual_risks": [
+    "Cloud key missing: live Doubao service, hardware audio, interruption and tool sequencing unverified."
+  ],
+  "testing_gaps": [
+    "Successful cloud-to-real-local enrollment handoff, save/cancel and standby return lack integration coverage.",
+    "Cancellation during session startup/chime and 60-second idle behavior during long user speech or assistant output need targeted coverage."
+  ]
+}

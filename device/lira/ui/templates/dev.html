@@ -1,0 +1,452 @@
+{% set asset_versions = asset_versions|default({}) %}
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LIRA 开发者控制台</title>
+  <link rel="stylesheet" href="/dev/static/dev-console.css?v={{ asset_versions.get('dev-console.css','shelf-r9') }}">
+  <link rel="stylesheet" href="/dev/static/teaching-hub.css?v={{ asset_versions.get('teaching-hub.css','shelf-r9') }}">
+</head>
+<body>
+<div class="console-shell">
+<aside class="app-center" aria-labelledby="app-center-title">
+  <a class="app-brand" href="/dev" aria-label="LIRA 开发者控制台">L<span>IRA</span><small>DEV</small></a>
+  <h2 id="app-center-title">App 中心</h2>
+  <p class="app-center-hint">点击打开，可同时使用多个 App</p>
+  <nav id="app-launcher" class="app-launcher" aria-label="控制台 App"></nav>
+  <p class="app-center-foot">LIRA · 设备开发工作台</p>
+</aside>
+<main id="dev-console" class="dev-console" data-page="dev-console">
+  <header class="workspace-heading"><div><p class="workspace-eyebrow">LIRA 开发者控制台</p><h1>我的工作区</h1></div>
+    <p id="workspace-count" class="workspace-count" role="status" aria-live="polite">从左侧选择 App</p></header>
+  <div id="workspace" class="workspace">
+  <section class="tile" id="tile-teaching" hidden>
+    <button class="tile-head" type="button" aria-expanded="false" aria-controls="tile-teaching-body"><span class="tile-title">教学管理</span><span class="tile-summary">语文 · 数学 · 英语</span></button>
+    <div class="tile-body" id="tile-teaching-body" hidden>{% include "teaching_hub.html" %}</div>
+  </section>
+  <p id="workspace-empty" class="workspace-empty" hidden>工作区暂时为空。点击左侧 App，即可打开工具。</p>
+
+  <section class="tile" id="tile-voice-history" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voice-history-body">
+      <span class="tile-title">语音聊天记录</span><span class="tile-summary">真实豆包会话 · 查看、导出与关联个人记忆</span>
+    </button>
+    <div class="tile-body" id="tile-voice-history-body" hidden>
+      <p class="muted">保存本机豆包转写与生成的回复文字，不保存原音；被打断时不代表文字已完整播出。最多保留最近 100 场会话，每场最近 500 轮。请选择实际属于同一人的轮次再关联；关联不会修改声纹或立即改变识别身份。</p>
+      <div class="row"><button type="button" id="vh-refresh">刷新记录</button>
+        <label>会话 <select id="vh-session" aria-label="语音会话"></select></label>
+        <a id="vh-export" hidden>导出本次对话</a></div>
+      <div class="row"><label>关联成员 <select id="vh-member" aria-label="关联成员"></select></label>
+        <button type="button" id="vh-select-all">全选轮次</button>
+        <button type="button" id="vh-link">确认关联所选对话</button></div>
+      <p id="vh-status" role="status" aria-live="polite"></p>
+      <div id="vh-turns"></div>
+    </div>
+  </section>
+
+  <section class="tile" id="tile-costs" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-costs-body">
+      <span class="tile-title">费用与用量</span>
+      <span class="tile-summary">火山账户余额 · 本机每日用量</span>
+    </button>
+    <div class="tile-body" id="tile-costs-body" hidden>
+      <div class="row"><button type="button" id="cost-refresh">刷新余额与统计</button>
+        <a href="https://console.volcengine.com/home" target="_blank" rel="noopener noreferrer">前往火山控制台充值 ↗</a></div>
+      <p id="cost-status" role="status" aria-live="polite">打开后读取余额和用量。</p>
+      <div class="cost-cards">
+        <div class="cost-stat"><span>账户可用余额</span><strong id="cost-balance">—</strong><small id="cost-balance-time">尚未查询</small></div>
+        <div class="cost-stat"><span>今日会话 / 交互轮次</span><strong id="cost-turns">—</strong><small>日常对话与后台测试合计</small></div>
+        <div class="cost-stat"><span>今日上传音频</span><strong id="cost-input">—</strong><small id="cost-zero">包含全零静音保活</small></div>
+        <div class="cost-stat"><span>今日返回音频</span><strong id="cost-output">—</strong><small>云端返回时长，包含未播放的音频</small></div>
+      </div>
+      <p id="cost-warning" role="status"></p>
+      <details id="cost-details"><summary>查看每日明细与提醒设置</summary>
+      <label for="cost-threshold">低余额提醒阈值（元）</label>
+      <input id="cost-threshold" type="number" min="0" max="1000000" step="1" value="50">
+      <h3>最近 7 天 · 日常与测试分别统计</h3>
+      <div class="cost-table-wrap"><table class="cost-table"><caption class="muted">音频时长单位为分钟，按北京时间归档</caption>
+        <thead><tr><th scope="col">日期</th><th scope="col">来源</th><th scope="col">会话</th><th scope="col">轮次</th><th scope="col">上传音频</th><th scope="col">其中全零静音</th><th scope="col">返回音频</th></tr></thead>
+        <tbody id="cost-days"></tbody></table></div>
+      <p id="cost-since" class="muted"></p>
+      <p class="muted">仅统计本机通过正式豆包语音路径及“豆包对话”测试发送和收到的音频。全零静音不是语音活动检测；非零音频也可能只是环境声。用量为本地估计，不是官方账单或 Token 数，不反推费用。内置搜索调用次数目前不可见，不按对话轮数推算。</p>
+      <p class="muted">余额通常每 5 分钟查询，手动刷新最短间隔 1 分钟。红色提醒只在此页面显示，不会自动充值。用量约每 10 秒及会话结束时落盘，正常重启保留；异常断电可能损失最后约 10 秒。</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="tile tile--doubao-lab" id="tile-doubao-lab" aria-labelledby="doubao-lab-title" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-doubao-lab-body">
+      <span class="tile-title" id="doubao-lab-title">豆包对话实验室</span>
+      <span class="tile-summary" id="doubao-lab-summary">文字模拟语音 · 多轮对话 · 问题反馈与导出</span>
+    </button>
+    <div class="tile-body" id="tile-doubao-lab-body" hidden>
+      <div class="lab-toolbar row">
+        <button type="button" id="lab-start">开始对话</button>
+        <button type="button" id="lab-stop" disabled>结束会话</button>
+        <button type="button" id="lab-export-md">导出 Markdown</button>
+        <button type="button" id="lab-export-json">导出 JSON</button>
+        <button type="button" id="lab-export-zip">导出完整包（含音频）</button>
+        <button type="button" id="lab-clear">清空记录</button>
+      </div>
+      <p id="lab-status" role="status" aria-live="polite">打开后读取状态。</p>
+      <p class="muted">输入文字会先在板子上合成为语音，再发送给豆包。同一连接支持多轮上下文。默认不外放、不使用麦克风，工具只模拟，不实际录入声纹。</p>
+      <div class="lab-composer">
+        <label for="lab-text">你想对小鹿说什么？</label>
+        <textarea id="lab-text" rows="3" maxlength="200" placeholder="例如：小鹿，我想录入声纹。" disabled></textarea>
+        <div class="row"><button type="button" id="lab-send" disabled>转成语音并发送</button>
+          <span class="muted">最多 200 字；Ctrl / ⌘ + Enter 发送</span></div>
+      </div>
+      <p id="lab-message" role="status" aria-live="polite"></p>
+      <div id="lab-turns" class="lab-turns" aria-label="对话记录"></div>
+      <p id="lab-empty" class="muted">还没有对话。开始后输入一句话试试。</p>
+      <details><summary>记录保存、测试范围与计时说明</summary>
+        <p class="muted">反馈按轮次自动保存。导出前会先保存当前反馈，包含输入、转写、回复、工具参数与模拟结果、计时、模型配置及期望表现。下载文件不会自动发送给任何人，你可以之后附到聊天中。</p>
+        <p class="muted">记录仅在设备内存中；刷新可查看，服务重启、开启隐私或清空会删除。回复音频内存最多保留 8 MB，旧音频可能释放；完整包包含当前仍保留的音频，JSON / Markdown 仅含文字记录。新连接不继承上一连接的模型上下文，旧记录仍保留。</p>
+        <p class="muted">每个连接最多 3 分钟，空闲 45 秒自动结束，最多保留 20 轮。首包等待从输入音频最后一块的提交窗口结束近似计时；总耗时包含本地 TTS 和实时送音，均非扬声器实测。</p>
+      </details>
+    </div>
+  </section>
+
+  <section class="tile tile--jev" id="tile-jev" aria-labelledby="jev-title">
+    <button type="button" class="tile-head" aria-expanded="true" aria-controls="tile-jev-body">
+      <span class="tile-title" id="jev-title">TypeSafe Jev · 缓存语音响应测试</span>
+      <span id="jev-ready" class="tile-summary" role="status">正在读取设备能力…</span>
+    </button>
+    <div class="tile-body" id="tile-jev-body">
+    <div class="probe-workspace">
+      <div class="probe-input">
+        <p>输入时分段预判，点击“输入完成并播报”后才播放设备缓存语音。仅测试引导，不会登记或修改声纹。</p>
+        <div class="row"><label for="jev-phase">模拟阶段</label>
+          <select id="jev-phase"><option value="idle">录入邀请</option><option value="details">收集称呼</option>
+            <option value="samples">采集声音</option><option value="confirm">等待保存确认</option><option value="retry_scope">询问重录范围</option></select>
+          <button type="button" id="jev-prepare">预热固定语音</button>
+          <button type="button" id="jev-start">开始文本测试</button></div>
+        <label for="jev-text">模拟用户回复</label>
+        <textarea id="jev-text" rows="4" maxlength="1000" disabled aria-describedby="jev-help"
+          placeholder="开始测试后输入，例如：我想重新录一下，不过只重录刚才那段。"></textarea>
+        <p id="jev-help" class="muted">输入中每 450 ms 合并提交当前完整文本；支持中文输入法。预判不触发播放。每轮最多 100 次提交，3 分钟后自动结束。</p>
+        <div class="row"><button type="button" id="jev-finish" disabled>输入完成并播报</button>
+          <button type="button" id="jev-cancel" disabled>取消测试 / 停止播报</button></div>
+        <p id="jev-message" role="status" aria-live="polite">先预热固定语音，再开始测试。</p>
+      </div>
+      <div class="probe-results">
+        <h3>本轮时间统计</h3>
+        <dl class="probe-metrics">
+          <div><dt>输入完成 → 首帧输出</dt><dd id="jev-response">—</dd></div>
+          <div><dt>首帧输出 → 播放排空</dt><dd id="jev-playback">—</dd></div>
+          <div><dt>输入完成 → 播放排空</dt><dd id="jev-total">—</dd></div>
+        </dl>
+        <p id="jev-timeline" class="muted">等待测试。</p>
+        <p id="jev-reply">尚未选择播报语料。</p>
+        <p class="muted">“输入完成”以设备收到完成请求为起点；首帧与结束来自音频驱动消费 / 排空事件，非扬声器声学实测。缓存预热耗时单独报告。</p>
+      </div>
+    </div>
+    <div class="probe-detail"><h3>分段判断记录</h3><div class="probe-table-wrap"><table class="probe-table">
+      <thead><tr><th>版本 / 字数</th><th>提交时间</th><th>决策耗时</th><th>状态 / 选择</th><th>置信度</th></tr></thead>
+      <tbody id="jev-decisions"><tr><td colspan="5">暂无判断。</td></tr></tbody></table></div>
+      <details><summary>固定语料库</summary><ul id="jev-cues"></ul></details></div>
+    </div>
+  </section>
+
+  <!-- 概览磁贴：摘要先行（磁贴头摘要行），展开看明细；手动刷新，语义同旧版 -->
+  <section class="tile tile--overview" id="tile-overview" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-overview-body">
+      <span class="tile-title">运行概览</span>
+      <span class="tile-summary" id="overview-summary">引擎 / 路由 / 隐私 / 同步（手动刷新）</span>
+    </button>
+    <div class="tile-body" id="tile-overview-body" hidden>
+      <div class="row">
+        <button type="button" onclick="loadStatus()">刷新状态</button>
+        <span id="status-out" class="muted"></span>
+      </div>
+      <pre id="status-view">（未加载）</pre>
+    </div>
+  </section>
+
+  <!-- 运行参数磁贴（原位展开）：当前值由 /dev/api/status 真实回读 -->
+  <section class="tile tile--settings" id="tile-settings">
+    <button type="button" class="tile-head" aria-expanded="true" aria-controls="tile-settings-body">
+      <span class="tile-title">运行参数</span>
+      <span class="tile-summary">音量 / 语速 / 日志级别 · 当前值真实回读</span>
+    </button>
+    <div class="tile-body" id="tile-settings-body">
+      <fieldset class="conversation-path-controls">
+        <legend>语音交互路径 · A/B 试验</legend>
+        <label for="conversation-path">选择路径</label>
+        <div class="row">
+          <select id="conversation-path">
+            <option value="classic">A · 现有 ASR＋大模型＋TTS</option>
+            <option value="doubao_realtime">B · 豆包实时语音</option>
+          </select>
+          <button type="button" id="conversation-switch">切换并结束当前对话</button>
+        </div>
+        <p id="conversation-current" role="status" aria-live="polite">正在读取当前路径…</p>
+        <p id="conversation-config" class="muted"></p>
+        <p id="conversation-metrics" class="muted">豆包本轮耗时：等待语音交互。</p>
+        <div class="row">
+          <button type="button" id="conversation-start" disabled>开始豆包语音试验</button>
+          <button type="button" id="conversation-stop">结束当前语音会话</button>
+          <button type="button" id="conversation-refresh">刷新状态</button>
+        </div>
+        <p id="conversation-message" role="status" aria-live="polite"></p>
+        <p class="muted">播报期间先说“小鹿”可打断，再说新的指令；普通语音在播报结束及尾音缓冲后恢复接收，避免把自身播报识别为用户讲话。</p>
+        <p class="muted">切换后再次唤醒即可使用；豆包连接成功会响提示音。待机不上传音频，开始会话后音频发送至豆包。连续 60 秒无对话活动自动结束；播报及尾音期间不计为空闲。选择会保存在设备中。</p>
+        <details><summary>试验范围与配置</summary>
+          <p class="muted">A 使用当前语音主链路；TypeSafe Jev 仍通过左侧“Jev 测试”独立试验。B 支持自然对话、状态查询、红外配对与遥控，以及全程豆包语音引导的声纹录入；采集、检查和保存由本地工具完成，不切换语音链路。</p>
+          <p class="muted">豆包服务环境变量：LIRA_DOUBAO_REALTIME_API_KEY、LIRA_DOUBAO_REALTIME_VOICE。配置后需重启服务。后台只显示配置状态，不显示密钥。</p>
+        </details>
+      </fieldset>
+      <div class="row">
+        <label for="vol">音量</label>
+        <input id="vol" type="number" step="0.1" min="0.1" max="2">
+        <button type="button" onclick="postForm('/volume','vol','音量','volume','set-out')">设置音量</button>
+      </div>
+      <div class="row">
+        <label for="spd">语速</label>
+        <input id="spd" type="number" step="0.1" min="0.5" max="2">
+        <button type="button" onclick="postForm('/speed','spd','语速','speed','set-out')">设置语速</button>
+        <span id="set-out"></span>
+      </div>
+      <p class="muted">允许范围来自设备当前能力（/dev/api/status）；保存失败时输入值保留并显示原因。</p>
+      <div class="row">
+        <label for="lvl">日志级别</label>
+        <select id="lvl">
+          <option>DEBUG</option><option selected>INFO</option>
+          <option>WARNING</option><option>ERROR</option>
+        </select>
+        <button type="button" onclick="setLevel()">调整</button><span id="lvl-out"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 实时区磁贴（工作区，跨双列，U5）：声音曲线 / 同轮交互 / 日志三个工作区。
+       KTD4：展开磁贴才开始 250ms 游标拉取，折叠或页面隐藏即停订阅。 -->
+  <section class="tile tile--live" id="tile-voicelog" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voicelog-body">
+      <span class="tile-title">实时区：声音 · 同轮交互 · 日志</span>
+      <span class="tile-summary">展开时 250ms 观察真实输入与模型交互；折叠即停订阅</span>
+    </button>
+    <div class="tile-body" id="tile-voicelog-body" hidden>
+      <p class="muted">观察的是隐私门之后的真实共享输入；无数据、断连与隐私开启都如实标注，绘制停顿不会伪造声音数据。</p>
+      <div id="privacy-banner" class="observe-banner" hidden>
+        <span id="privacy-banner-text"></span>
+        <button type="button" onclick="observeResume()">重新连接</button>
+      </div>
+
+      <!-- 工作区一：声音曲线（真实处理后包络 + 唤醒/语句/播报标记 + 间断） -->
+      <div class="live-block" id="live-curve-block">
+        <div class="live-block-head">
+          <span class="live-block-title">实时声音曲线</span>
+          <span class="live-block-side">
+            <span id="curve-status" class="muted" aria-live="polite">等待数据</span>
+            <span id="curve-last" class="muted">最后更新：--:--:--</span>
+          </span>
+        </div>
+        <div class="curve-wrap">
+          <canvas id="curve-canvas" width="960" height="150" role="img"
+                  aria-label="实时声音曲线（最近 10 秒包络）：暂无数据"></canvas>
+          <div id="curve-empty" class="curve-empty">等待数据…（展开实时区后自动开始观察）</div>
+        </div>
+        <p class="muted" id="curve-legend">竖带 = 每桶 min~max；折线 = RMS（同一线性标度）；红色虚线 = 采集间断；轴上标记：唤 = 唤醒、语 = 语句、播 = 播报、断 = 播报被打断。</p>
+        <p class="muted" id="curve-gaps" hidden></p>
+      </div>
+
+      <!-- 工作区二：同轮交互（按 turn 合并语句/路由/模型/播报） -->
+      <div class="live-block" id="live-turns-block">
+        <div class="live-block-head">
+          <span class="live-block-title">同轮交互</span>
+          <span class="muted">按轮次合并：语句 → 实际路由 → 模型首段/回复 → 播报结果</span>
+        </div>
+        <div id="turns-view" class="turns-view"><p class="muted">（暂无语音轮次，与 LIRA 说一句话试试）</p></div>
+        <div id="unlinked-block" class="unlinked-block" hidden>
+          <span class="tile-summary">未关联轮次的模型事件（如阅读白话）</span>
+          <div id="unlinked-view" class="log-rows"></div>
+        </div>
+      </div>
+
+      <!-- 工作区三：日志（语音事件 / 模型交互 / 系统日志，共用暂停/筛选/清空） -->
+      <div class="live-block" id="live-logs-block">
+        <div class="live-block-head">
+          <span class="live-block-title">日志</span>
+          <div class="log-tabs" role="tablist" aria-label="日志类别">
+            <button type="button" class="log-tab" id="tab-voice" role="tab" aria-selected="true"
+                    onclick="setLogTab('voice')">语音事件</button>
+            <button type="button" class="log-tab" id="tab-model" role="tab" aria-selected="false"
+                    onclick="setLogTab('model')">模型交互</button>
+            <button type="button" class="log-tab" id="tab-sys" role="tab" aria-selected="false"
+                    onclick="setLogTab('sys')">系统日志</button>
+          </div>
+        </div>
+        <div class="row">
+          <label><input type="checkbox" id="log-pause" checked> 暂停滚动</label>
+          <label for="log-kind">类别</label>
+          <select id="log-kind"><option value="">全部</option></select>
+          <input id="log-filter" type="search" placeholder="按关键字筛选" aria-label="按关键字筛选">
+          <button type="button" onclick="clearActiveLog()">清空当前展示</button>
+          <button type="button" id="log-refresh-btn" onclick="loadLogs()" hidden>刷新</button>
+          <span id="log-out" class="muted"></span>
+        </div>
+        <div id="log-view" class="vl-view log-view"><p class="muted">（暂无事件）</p></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- 声纹小档案磁贴（U7）：候选/已建立成员总览 + 同名关联确认（领域操作）。
+       低频单拉 /dev/api/voice-candidates（展开时 + 确认后），不进 250ms observe 节拍。 -->
+  <section class="tile tile--voice-candidates" id="tile-voice-candidates" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voice-candidates-body">
+      <span class="tile-title">声纹小档案</span>
+      <span class="tile-summary" id="voice-candidates-summary">候选与已建立成员（展开加载）</span>
+    </button>
+    <div class="tile-body" id="tile-voice-candidates-body" hidden>
+      <p class="muted">候选数不是人数：同一人的不同声音条件可能形成多个候选；确认前候选不产生成员身份，也不读取个人记忆。</p>
+      <div id="voice-candidates-view" class="voice-candidates"><p class="muted">（未加载）</p></div>
+      <details id="identity-match-details"><summary>匹配与确认记录</summary>
+        <button type="button" onclick="loadIdentityMatches()">刷新记录</button>
+        <p>仅保存分数、门槛、拒绝原因和用户反馈；不保存录音，不自动训练模板。</p>
+        <div id="identity-match-records" aria-live="polite"></div>
+      </details>
+      <div class="row"><button type="button" onclick="openVoiceGuide()">添加</button><button type="button" onclick="loadVoiceCandidates()">刷新声纹档案</button>
+        <span id="voice-candidates-out" class="muted" role="status" aria-live="polite"></span></div>
+    </div>
+  </section>
+
+  <!-- 语音链路测试磁贴 -->
+  <section class="tile tile--voice" id="tile-voice" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-voice-body">
+      <span class="tile-title">语音链路测试</span>
+      <span class="tile-summary">TTS 播报 · 录音回放 · ASR 识别</span>
+    </button>
+    <div class="tile-body" id="tile-voice-body" hidden>
+      <div class="row">TTS 文本（POST body）：<input id="tts-text" size="40">
+        <button type="button" onclick="ttsSpeak()">播报</button><span id="tts-out"></span></div>
+      <div class="row">
+        <button type="button" id="rec-btn" onclick="recordToggle()">开始录音</button>
+        <span id="rec-out" class="muted">录音期间主循环语音暂停（独占设备）</span>
+        <audio id="clip" controls class="hidden-audio"></audio></div>
+      <div class="row"><button type="button" onclick="asrTest()">识别上一步录音（ASR→意图）</button>
+        <span id="asr-out"></span></div>
+    </div>
+  </section>
+
+  <!-- 视觉链路磁贴（工作区式，跨双列）：预览 / 方向 / 拍摄+OCR -->
+  <section class="tile tile--vision" id="tile-vision" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-vision-body">
+      <span class="tile-title">视觉链路</span>
+      <span class="tile-summary">实时预览 · 方向控制 · 拍摄 + OCR</span>
+    </button>
+    <div class="tile-body" id="tile-vision-body" hidden>
+      <p><strong>文本距离：镜头到纸面约 20 cm。</strong>
+        请保持机位固定、整页完整入镜，纸面尽量平整，照明均匀并避免反光。
+        此距离为当前 OV13855 实测机位参考，拍摄 A4 时请先通过预览确认四边完整可见。</p>
+      <div class="row">
+        <button type="button" id="preview-btn" onclick="previewToggle()">开启实时预览（~0.5fps）</button>
+        <span id="preview-out" class="muted">慢速单帧路径预览；隐私开启时取帧失败即停</span></div>
+      <img id="preview-img" class="shot hidden" alt="preview">
+      <div class="row row-gap-top">
+        <button type="button" onclick="orientBy(90)">旋转 90°</button>
+        <button type="button" onclick="orientBy(-90)">反向 90°</button>
+        <button type="button" onclick="orientBy(0)">复位</button>
+        <button type="button" onclick="flip()">水平翻转</button>
+        <span id="orient-out" class="muted"></span></div>
+      <div class="row"><button type="button" onclick="visionTest()">拍摄 + OCR</button>
+        <span id="vis-out"></span></div>
+      <img id="vis-img" class="shot hidden" alt="capture">
+      <pre id="vis-view"></pre>
+    </div>
+  </section>
+
+  <!-- 同步磁贴 -->
+  <section class="tile tile--sync" id="tile-sync" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-sync-body">
+      <span class="tile-title">同步</span>
+      <span class="tile-summary">设备 ↔ 后台快照手动拉取</span>
+    </button>
+    <div class="tile-body" id="tile-sync-body" hidden>
+      <div class="row"><button type="button" onclick="syncPull()">立即拉取后台快照</button>
+        <span id="sync-out"></span></div>
+    </div>
+  </section>
+
+  <!-- 整机场景回放磁贴 -->
+  <section class="tile tile--replay" id="tile-replay" hidden>
+    <button type="button" class="tile-head" aria-expanded="false" aria-controls="tile-replay-body">
+      <span class="tile-title">整机场景回放</span>
+      <span class="tile-summary">真实出声并驱动状态机（需确认）</span>
+    </button>
+    <div class="tile-body" id="tile-replay-body" hidden>
+      <div class="row">指令文本：<input id="replay-text" size="30" value="打开台灯">
+        <button type="button" onclick="replay(true)">回放（真实出声）</button>
+        <span id="replay-out"></span></div>
+      <pre id="replay-view"></pre>
+    </div>
+  </section>
+  </div>
+</main>
+</div>
+<dialog id="voice-profile-test" aria-labelledby="voice-test-title">
+  <h2 id="voice-test-title">测试声纹</h2>
+  <p>使用 <strong>LIRA 设备麦克风</strong>，测试会先停止当前语音对话，结束后可重新唤醒聊天。保持平常聊天的距离、自然语速和音量，随意说一句 5 到 10 秒的话，至少需要 2 秒有效语音。</p>
+  <p>例如：今天我想出去走走，看看附近的花草，回来以后再听一会儿音乐。</p>
+  <p class="muted">按日常识别的门槛在全部档案中比对，再检查是否匹配这份档案；测试不改声纹、姓名或个人记忆，录音不落盘。单次最多录音 40 秒，测试窗口 2 分钟到期。</p>
+  <div class="row">
+    <button type="button" id="vt-start" onclick="voiceTestRequest(vtToken ? 'restart' : 'begin')">开始录音</button>
+    <button type="button" id="vt-stop" onclick="voiceTestRequest('stop')" hidden>说完了，开始比对</button>
+  </div>
+  <p id="vt-clock" role="timer"></p>
+  <p id="vt-status" role="status" aria-live="polite"></p>
+  <p id="vt-result"></p>
+  <div id="vt-feedback" hidden>
+    <p>刚才录音的真实身份（仅保存标签，不修改声纹）：</p>
+    <button type="button" onclick="voiceTestFeedback('confirmed')">是本人</button>
+    <button type="button" onclick="voiceTestFeedback('rejected')">不是本人</button>
+    <label>纠正为 <select id="vt-actual-member"></select></label>
+    <button type="button" onclick="voiceTestFeedback('corrected')">提交纠正</button>
+  </div>
+  <button type="button" onclick="closeVoiceTest()">关闭测试</button>
+</dialog>
+<dialog id="voice-guide" aria-labelledby="voice-guide-title">
+  <h2 id="voice-guide-title">添加声纹档案</h2>
+  <p>使用 <strong>LIRA 设备麦克风</strong>，不是电脑麦克风。请在平常聊天的位置，由同一人独自朗读；自然语速、正常音量，不用刻意快慢或大声。</p>
+  <p class="muted">四段不同文案，每段至少 8 秒有效说话；最后另读一段验证。暂时关闭或刷新本页可恢复进度；开始录入后 10 分钟到期，隐私开启或服务重启也会清除。暂存期间暂停语音对话，原始录音仅在内存中，不落盘。</p>
+  <div id="vg-details">
+    <label>姓名 <input id="vg-name" maxlength="32" autocomplete="off"></label>
+    <label>希望怎样称呼你 <input id="vg-address" maxlength="32" autocomplete="off"></label>
+    <p>孩子可以把文案当作给小鹿讲故事；不识字时可由家人逐句指读，家人说完后再开始录音。可以先熟悉内容，再用自己的话说。老人可以慢慢读、自然停顿，不必赶时间。</p>
+    <button type="button" id="vg-begin" onclick="voiceGuideAction('begin')">同意采集，开始引导</button>
+  </div>
+  <div id="vg-reading" hidden>
+    <strong id="vg-step"></strong>
+    <p id="vg-text"></p>
+    <p id="vg-clock" role="timer"></p>
+    <div class="row">
+      <button type="button" id="vg-record" onclick="voiceGuideAction('record')">准备好了，开始录音</button>
+      <button type="button" id="vg-stop" onclick="voiceGuideAction('stop')" hidden>读完了，检查本段</button>
+      <button type="button" id="vg-save" onclick="resolveVoiceGuide()" hidden>验证通过，保存档案</button>
+    </div>
+    <p id="vg-segments" class="muted"></p>
+    <div id="vg-resolution" hidden>
+      <p id="vg-conflicts" role="status"></p>
+      <label>保存姓名 <input id="vg-save-name" maxlength="32"></label>
+      <label>保存称呼 <input id="vg-save-address" maxlength="32"></label>
+      <label>保存方式 <select id="vg-target" aria-label="保存方式"></select></label>
+      <p class="muted">仅改名不能解除声音重复。替换会更新所选成员的声纹、姓名和称呼，保留该成员的聊天记忆；通过独立验证并点击保存后才生效。</p>
+      <button type="button" id="vg-apply" onclick="resolveVoiceGuide()">应用修改，继续独立验证</button>
+    </div>
+    <details id="vg-diagnostics" hidden><summary>验证分数</summary><p id="vg-score"></p></details>
+  </div>
+  <p id="vg-message" role="status" aria-live="polite"></p>
+  <button type="button" onclick="closeVoiceGuide()">暂时关闭（保留进度）</button>
+  <button type="button" onclick="discardVoiceGuide()">放弃本次录入</button>
+</dialog>
+<script src="/dev/static/dev-voice-guide.js?v=guided-r5"></script>
+<script src="/dev/static/dev-console.js?v={{ asset_versions.get('dev-console.js','shelf-r9') }}"></script>
+<script src="/dev/static/dev-voice-test.js?v=identity-feedback-r3"></script>
+<script src="/dev/static/dev-jev-probe.js?v=jev-errors-r2"></script>
+<script src="/dev/static/dev-conversation-path.js?v=conversation-path-r1"></script>
+<script src="/dev/static/dev-doubao-lab.js?v=doubao-lab-r1"></script>
+<script src="/dev/static/dev-costs.js?v=costs-r2"></script>
+<script src="/dev/static/dev-voice-history.js?v=turn-details-r2"></script>
+<script src="/dev/static/teaching-hub.js?v={{ asset_versions.get('teaching-hub.js','shelf-r9') }}"></script>
+</body>
+</html>

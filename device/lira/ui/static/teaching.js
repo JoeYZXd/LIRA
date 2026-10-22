@@ -1,0 +1,42 @@
+'use strict';
+(()=>{
+const $=id=>document.getElementById(id);
+let current=null,dirty=false,review=null,pendingBody=null,busy=false;
+  window.liraTeachingEditState = () => ({dirty: dirty || Boolean(pendingBody) || Boolean($('result').value.trim()) || Boolean($('note').value.trim()) || Boolean($('import-pages').value.trim()), busy});
+const drafts=new Map();
+const kinds={paper_review:"纸面核对",recitation_evidence:"待核对的背诵证据",recitation_annotation:"家长修正附注",preference:"长期偏好",learning_note:"待核实笔记"};
+const statuses={pending:"等待或执行中",completed:"已完成",failed:"失败",cancelled:"已取消",busy:"忙",unavailable:"不可用"};
+function details(text,value){const node=document.createElement("details");node.append(element("summary",text),element("pre",JSON.stringify(value,null,2)));return node;}
+const uid=()=>globalThis.crypto?.randomUUID?.()||('parent-'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
+function notice(text,error=false){$('notice').textContent=text;if(error)$('notice').focus();}
+async function api(path,method='GET',data){const response=await fetch('/dev/api/teaching'+path,{method,headers:data?{'Content-Type':'application/json'}:{},body:data?JSON.stringify(data):undefined});const value=await response.json();if(!response.ok)throw Error(response.status===401?'请返回控制台重新登录。':response.status===409?'版本已被其他操作更新，编辑内容已保留。':value.error||'操作失败');return value;}
+function element(tag,text){const node=document.createElement(tag);node.textContent=text;return node;}
+function button(text,fn){const node=element('button',text);node.type='button';node.onclick=()=>run(fn);return node;}
+async function run(fn){
+if(busy)return;
+busy=true;
+const controls=[...document.querySelectorAll('button,input,select,textarea')].map(node=>[node,node.disabled]);
+for(const [node] of controls)node.disabled=true;
+try{await fn();}catch(error){notice(error.message,true);}
+finally{
+busy=false;
+for(const [node,disabled] of controls)node.disabled=disabled;
+$('confirm-content').disabled=!current||dirty||current.review_state==='confirmed';
+$('delete-content').disabled=!current;
+}
+}
+function edit(row){current=row;dirty=false;$('content-id').value=row?.id||'';$('title').value=row?.title||'';$('text').value=row?.text||'';$('kind').value=row?.kind||'text';$('source').value=row?.source||'手动录入';$('content-version').textContent=row?'版本 '+row.version+' · '+(row.review_state==='confirmed'?'已确认':'待核对草稿'):'尚未保存';$('confirm-content').disabled=!row||row.review_state==='confirmed';$('delete-content').disabled=!row;}
+async function refresh(){const data=await api('');$('model-state').textContent=data.model_available?'实时模型会话已启用；已配置不代表操作成功。':'模型当前不可调用：扩展能力关闭或没有实时会话。';$('capabilities').replaceChildren(...data.capabilities.map(row=>{const names={read_agent_task:'读取本次约定',propose_agent_task:'提出本次约定',revise_agent_task:'协商修改约定',activate_agent_task:'核验并启用约定',pause_agent_task:'暂停本次活动',stop_agent_task:'结束本次活动',create_task_timer:'创建计时',update_task_timer:'修改计时',cancel_task_timer:'取消计时',list_task_timers:'查看计时',poll_task_events:'读取到期事件',wait_for_task_event:'等待到期事件',capture_text:'拍照识字',start_exact_speech:'准确播报',read_teaching_memory:'读取教学记忆',propose_teaching_memory:'提议保存记忆',compare_observed_recitation:'比对背诵证据',list_teaching_content:'查找已确认原文',read_teaching_content:'读取原文',read_textbook_characters:'读取教材字表',probe_tv_receiver:'检查电视接收端',clear_tv_content:'清除本次电视内容'};const item=element('li',(names[row.name]||'实时能力')+'：'+({configured:'已配置',unavailable:'不可用',busy:'忙'}[row.status]||row.status));item.append(details('工具标识',row.name));return item;}));$('agreement-summary').textContent=({idle:'尚未建立约定',proposed:'约定待协商',active:'约定已生效',paused:'已暂停',stopped:'已停止'}[data.task.status]||data.task.status)+'：'+(data.task.agreement?.terms||data.task.proposal?.terms||'暂无本次约定');$('agreement').textContent=JSON.stringify(data.task,null,2);$('operations').replaceChildren(...data.operations.map(row=>{const item=element('div',(statuses[row.status]||row.status)+' · '+row.name);item.append(details('查看实际结果',row));return item;}));$('contents').replaceChildren(...(data.contents.contents||[]).map(row=>{const entry=element('div','');entry.className='entry';entry.append(element('p',row.title+' · v'+row.version+' · '+(row.review_state==='confirmed'?'已确认':'待核对')),button('编辑 '+row.title,async()=>{if(dirty&&!confirm('放弃尚未保存的编辑？'))return;edit((await api('/content/'+row.id)).content);$('title').focus();}));return entry;}));const selected=$('member').value;$('member').replaceChildren(new Option('请选择成员',''),...data.members.map(row=>new Option(row.name,row.id)));$('member').value=selected;}
+$('new-content').onclick=()=>{if(!dirty||confirm('放弃尚未保存的编辑？')){edit(null);$('title').focus();}};
+$('content-form').addEventListener('input',()=>{dirty=true;$('confirm-content').disabled=true;});
+$('content-form').onsubmit=event=>{event.preventDefault();run(async()=>{const data={title:$('title').value,text:$('text').value,kind:$('kind').value,source:$('source').value};if(current)data.expected_version=current.version;const saved=await api('/content'+(current?'/'+current.id:''),current?'PUT':'POST',data);edit(saved.content);await refresh();notice('草稿已保存，请对照原文确认。');});};
+$('confirm-content').onclick=()=>run(async()=>{if(!current||dirty)return;if(!confirm('已对照原文核对当前版本的完整文字？'))return;await api('/content/'+current.id+'/confirm','POST',{version:current.version});edit((await api('/content/'+current.id)).content);await refresh();notice('当前版本原文已确认。');});
+$('delete-content').onclick=()=>run(async()=>{if(!current||!confirm('删除此原文及关联记录？此操作会结束旧实时上下文。'))return;await api('/content/'+current.id,'DELETE',{expected_version:current.version});edit(null);await refresh();notice('原文及关联记录已删除。');});
+$('import-form').onsubmit=event=>{event.preventDefault();run(async()=>{const data={draft_id:$('draft-id').value,expected_revision:drafts.get($('draft-id').value)?.revision,page_numbers:$('import-pages').value.split(/[,，\s]+/).filter(Boolean).map(Number),title:$('title').value,kind:$('kind').value};const saved=await api('/import','POST',data);edit(saved.content);await refresh();notice('已从选定页面建立待核对草稿。');});};
+function resetReview(){review=null;pendingBody=null;$('result').value='';$('note').value='';$('review-heading').textContent='新增纸面核对';}
+async function records(){const member=Number($('member').value);if(!member)throw Error('请先选择家庭成员');const data=await api('/records','POST',{member_id:member,action:'list'});$('records').replaceChildren(...data.records.map(row=>{const entry=element('div','');entry.className='entry';entry.append(element('p',(kinds[row.kind]||'学习记录')+' · 修订 '+row.revision),element('p',row.body.result||row.body.text||'机器转写与比对结果，尚待家长核对'),element('p',row.body.note||''),details('查看来源与证据',row.body));if(['paper_review','recitation_evidence'].includes(row.kind))entry.append(button(row.kind==='paper_review'?'修正纸面核对':'添加家长修正附注',()=>{review=row;pendingBody=null;$('result').value=row.kind==='paper_review'?row.body.result:'';$('note').value='';$('review-heading').textContent=row.kind==='paper_review'?'修正纸面核对':'添加背诵证据附注';$('result').focus();}));entry.append(button('删除此记录',async()=>{if(!confirm('删除此记录及关联附注？'))return;await api('/records','POST',{member_id:member,action:'delete',record_id:row.id,expected_revision:row.revision});resetReview();await records();notice('记录已删除。');}));return entry;}));}
+$('review-form').addEventListener('input',()=>{pendingBody=null;});
+$('review-form').onsubmit=event=>{event.preventDefault();run(async()=>{const member=Number($('member').value);if(!member)throw Error('请先选择家庭成员');if(!pendingBody){pendingBody={member_id:member,action:review?.kind==='recitation_evidence'?'annotation':'paper',record_id:review?.id||null,expected_revision:review?.revision||0,request_id:uid(),result:$('result').value,note:$('note').value};}await api('/records','POST',pendingBody);resetReview();await records();notice('家长核对已保存。');});};
+$('load-drafts').onclick=()=>run(async()=>{const response=await fetch('/dev/api/textbooks');const data=await response.json();if(!response.ok)throw Error(data.error||'课本草稿读取失败');drafts.clear();for(const row of data.drafts)drafts.set(row.id,row);$('draft-id').replaceChildren(new Option('请选择课本',''),...data.drafts.map(row=>new Option((row.title||'未命名课本')+' · '+row.page_count+' 页',row.id)));});
+$('member').onchange=()=>{resetReview();$('records').replaceChildren();};$('new-review').onclick=resetReview;$('load-records').onclick=()=>run(records);$('refresh').onclick=()=>run(refresh);edit(null);run(refresh);
+})();

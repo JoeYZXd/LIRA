@@ -1,0 +1,38 @@
+{
+  "deployed": true,
+  "lira_host": "192.168.101.26",
+  "model": "kimi-k3",
+  "model_host": "api.moonshot.cn",
+  "conversation_path": "classic",
+  "key_configured": true,
+  "members": 4,
+  "voice_profiles": 3,
+  "task_states": {},
+  "source_files_verified": 29,
+  "tv": {
+    "interactive": true,
+    "foreground": true,
+    "instance": "a152a79f-704d-4b12-a8f8-42da7eb664f3",
+    "rendered_id": "",
+    "version": "0.3",
+    "audio": {
+      "status": "idle",
+      "music_volume": 4,
+      "music_muted": false
+    },
+    "capabilities": [
+      "clear_content_id",
+      "pcm_audio_v1",
+      "dictation_task_v1",
+      "dictation_task_v2"
+    ]
+  },
+  "tv_dictation_status": {
+    "state": "idle"
+  },
+  "apk_sha256": "44581f62992c0b89518ac2bffe8bfdbb2291d9539226cd385137f77b4aa10860",
+  "backup": "/home/orangepi/lira/deploy-backups/dictation-v2-20261021-183313",
+  "log": "/home/orangepi/lira/deploy-backups/dictation-v2-20261021-183313/test-session.log",
+  "regression": "506 passed in 40.48s",
+  "business_tasks_started": 0
+}

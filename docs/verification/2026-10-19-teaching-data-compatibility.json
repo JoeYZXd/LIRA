@@ -1,0 +1,16 @@
+{
+  "passed": true,
+  "script": "device/scripts/verify_teaching_migrations.py",
+  "live_database_read_only": true,
+  "pristine_backup": "/home/orangepi/lira/backups/pre-teaching-20261019-004534.sqlite",
+  "migration_test_copy": "/tmp/lira-teaching-migration-20261019-004534.sqlite",
+  "backup_mode": "0o600",
+  "test_mode": "0o600",
+  "additive_tables": ["teaching_content_versions", "teaching_member_sessions", "teaching_memories", "teaching_record_refs", "teaching_reviews"],
+  "existing_schema_and_row_counts_unchanged": true,
+  "repeated_migration_idempotent": true,
+  "quick_check": "ok",
+  "household_data_exported": false,
+  "service_restarted": false,
+  "production_migration_applied": false
+}

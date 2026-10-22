@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 
+import numpy as np
 from fastapi.testclient import TestClient
 
 from lira.appliances.store import ApplianceStore
@@ -125,12 +126,15 @@ class TestSkeletonAuth:
 
     def test_route_guard_all_dev_routes(self):
         """路由级守卫回归：全部 /dev/* 路由未鉴权一律 401/303（GET-only 路由的
-        POST 为 405 亦算守卫生效）；/dev/login 是鉴权入口本身，不参加 POST 守卫。"""
+        POST 为 405 亦算守卫生效）；/dev/login 是鉴权入口本身，不参加 POST 守卫。
+        /dev/static 是匿名静态挂载（Mount 无 methods），其匿名性由
+        TestStaticAssets 单独固定，不参加本守卫遍历。"""
         app, client, _rt = make_client()
         dev_routes = [
             route.path
             for route in app.routes
             if getattr(route, "path", "").startswith("/dev") and route.path != "/dev/login"
+            and getattr(route, "methods", None)
         ]
         assert dev_routes, "dev 路由应已注册"
         for path in dev_routes:
@@ -177,8 +181,8 @@ class TestSkeletonAuth:
         assert r.status_code == 303, r.status_code
         page = client.get("/dev")
         assert page.status_code == 200
-        assert "doLogin" in page.text, "旧会话应已失效（密钥轮换后落登录页）"
-        assert "sec-status" not in page.text, "控制台功能区块不得出现"
+        assert 'data-page="dev-login"' in page.text, "旧会话应已失效（密钥轮换后落登录页）"
+        assert 'data-page="dev-console"' not in page.text, "控制台功能区块不得出现"
         # 新口令可重新登录
         r = client.post("/dev/login", json={"passphrase": "new-pass-1234"})
         assert r.status_code == 200
@@ -572,8 +576,7 @@ class FakeCamera:
         if self.fail:
             raise OSError("no /dev/video0")
         import cv2
-        import numpy as np
-
+    
         image = np.full((60, 200, 3), 255, dtype=np.uint8)
         ok, jpeg = cv2.imencode(".jpg", image)
         assert ok
@@ -582,8 +585,7 @@ class FakeCamera:
 
 class FakeOcr:
     def detect(self, image):
-        import numpy as np
-
+    
         y = 10.0
         return [np.array([[5, y], [195, y], [195, y + 20], [5, y + 20]], dtype=np.float32)]
 
@@ -650,8 +652,7 @@ class TestVisionEndpoint:
 
     def test_orientation_transform_math(self):
         """旋转/翻转纯函数：形状与内容方向正确。"""
-        import numpy as np
-
+    
         from lira.hal.board.camera_isp import _apply_orientation
 
         img = np.zeros((4, 6, 3), dtype=np.uint8)
@@ -791,19 +792,20 @@ class TestBrowserLoginFlow:
         _app, client, _rt = make_client()
         page = client.get("/dev")
         assert page.status_code == 200
-        assert "设备口令" in page.text and "doLogin" in page.text
+        assert "设备口令" in page.text and 'data-page="dev-login"' in page.text
 
     def test_full_browser_flow_login_to_console(self):
         """浏览器全流程：登录页 -> POST /dev/login -> cookie -> 控制台。"""
         _app, client, _rt = make_client()
         page = client.get("/dev")  # 登录页
-        assert "doLogin" in page.text
+        assert 'data-page="dev-login"' in page.text
         r = client.post("/dev/login", json={"passphrase": PASSPHRASE})
         assert r.status_code == 200
         console = client.get("/dev")
         assert console.status_code == 200
-        assert "LIRA 开发者控制台</h1>" in console.text
-        assert "sec-status" in console.text  # 功能区块出现
+        assert "我的工作区</h1>" in console.text
+        assert 'id="app-launcher"' in console.text
+        assert 'data-page="dev-console"' in console.text  # 功能区块出现
 
     def test_no_passphrase_still_redirects_to_setup(self):
         """首启引导：口令未设 -> /dev 重定向设置页（不变）。"""
@@ -811,3 +813,416 @@ class TestBrowserLoginFlow:
         r = client.get("/dev", follow_redirects=False)
         assert r.status_code == 303
         assert "/passphrase/setup" in r.headers["location"]
+
+
+class TestConsoleErrorFeedback:
+    """控制台 JS 行为断言（U1 起 JS 外置为 /dev/static/dev-console.js，
+    断言对象从页面 HTML 改为静态 JS 本体，强度不变）。"""
+
+    @staticmethod
+    def _console_js(client) -> str:
+        return client.get("/dev/static/dev-console.js").text
+
+    def test_console_js_surfaces_network_failure(self):
+        """僵尸页面防护（2026-10-04 实机问题）：网络级失败不再静默——
+        api() 捕获 fetch 异常返回 status=0 + 可见错误文案。"""
+        _app, client, _rt = make_client()
+        login(client)
+        js = self._console_js(client)
+        assert "catch (e)" in js
+        assert "无法连接设备服务" in js
+        assert "status: 0" in js
+
+    def test_console_js_redirects_on_401(self):
+        """会话失效自愈：任一 API 401 -> 统一回 /dev 登录页（防僵尸页面停留）。"""
+        _app, client, _rt = make_client()
+        login(client)
+        js = self._console_js(client)
+        assert "r.status === 401" in js
+        assert "location.href = '/dev'" in js
+        assert "authRedirecting" in js  # 并发轮询只跳一次
+
+    def test_console_panels_show_failure_in_place(self):
+        """整机状态/实时观察面板：加载失败时面板主体显示原因，不停留占位符。"""
+        _app, client, _rt = make_client()
+        login(client)
+        js = self._console_js(client)
+        # loadStatus 失败路径写入面板主体（status-view）
+        assert "getElementById('status-view').textContent = '（' + msg + '）'" in js
+        # U5：实时观察失败退避时曲线状态行可见显示"已断连"，不停留占位符
+        assert "getElementById('curve-status').textContent" in js
+        assert "已断连" in js
+
+    def test_console_settings_readback_and_validation_in_js(self):
+        """U1 真实回读：JS 把 status 当前值/范围写入控件，保存前按范围预检，
+        失败路径保留输入（旧版恒 undefined 缺陷的回归防线）。"""
+        _app, client, _rt = make_client()
+        login(client)
+        js = self._console_js(client)
+        assert "applyStatusReadback" in js
+        assert "document.getElementById('vol').value = s.volume" in js
+        assert "document.getElementById('spd').value = s.tts_speed" in js
+        assert "volume_range" in js and "speed_range" in js
+        assert "settingProblem" in js  # 客户端范围校验（非法值不提交）
+
+    def test_console_pages_reference_external_script(self):
+        """回归防线（2026-10-05 实机问题，19fb8b8 丢 </script> 使页面 JS 整块
+        失效）：U1 起 JS 外置——登录页与控制台页必须各恰好引用一次
+        /dev/static/dev-console.js，script 标签成对且闭合先于 </body>；
+        JS 本体语法由 node --check 把关（CI/本地），页面侧只保结构完整。"""
+        _app, client, _rt = make_client()
+        pages = [client.get("/dev").text]  # 口令已设、未登录 -> 登录页
+        login(client)
+        pages.append(client.get("/dev").text)  # 控制台页
+        for html in pages:
+            assert html.count("<script") == html.count("</script>") >= 1
+            import re
+            from urllib.parse import urlsplit
+            scripts = re.findall(r'<script\b[^>]*\bsrc="([^"]+)"', html)
+            assert sum(urlsplit(src).path == '/dev/static/dev-console.js' for src in scripts) == 1
+            # 结构顺序：闭合标签必须在 </body> 之前（吞掉 </body> 即语法错误）
+            assert html.index("</script>") < html.index("</body>")
+
+
+# ---------- U1：真实设置回读 / 静态资源 / 磁贴结构 ----------
+
+
+class TestStatusReadback:
+    """U1 真实设置回读：/dev/api/status 暴露当前值与允许范围
+    （旧页音量/语速恒 undefined、从未回显的缺陷在服务端补齐）。"""
+
+    def test_status_carries_settings_values_and_ranges(self):
+        _app, client, rt = make_client()
+        login(client)
+        rt.settings.set_volume(1.3)
+        rt.settings.set_tts_speed(0.8)
+        s = client.get("/dev/api/status").json()
+        assert s["volume"] == 1.3
+        assert s["tts_speed"] == 0.8
+        assert s["volume_range"] == list(DeviceSettings.VOLUME_RANGE)
+        assert s["speed_range"] == list(DeviceSettings.SPEED_RANGE)
+
+    def test_status_loglevel_name_readback(self):
+        """日志级别回读为名字；调整端点改动后 status 如实跟随。"""
+        import logging as logging_mod
+
+        _app, client, _rt = make_client()
+        login(client)
+        assert client.get("/dev/api/status").json()["loglevel"] in {
+            "DEBUG", "INFO", "WARNING", "ERROR",
+        }
+        r = client.post("/dev/api/loglevel", json={"level": "debug"})
+        assert r.status_code == 200
+        assert client.get("/dev/api/status").json()["loglevel"] == "DEBUG"
+        client.post("/dev/api/loglevel", json={"level": "error"})
+        assert client.get("/dev/api/status").json()["loglevel"] == "ERROR"
+        # 还原级别，不向后续测试泄漏全局改动
+        client.post("/dev/api/loglevel", json={"level": "info"})
+        assert logging_mod.getLogger("lira").level == logging_mod.INFO
+
+    def test_status_camera_fields_when_camera_present(self):
+        """相机实际方向回读（FakeCamera 提供 rotation/hflip）。"""
+        _app, client, rt = make_vision_client()
+        login(client)
+        s = client.get("/dev/api/status").json()
+        assert s["camera_rotation"] == 0
+        assert s["camera_hflip"] is False
+        client.post("/dev/api/camera/orientation", json={"rotation": 90})
+        s = client.get("/dev/api/status").json()
+        assert s["camera_rotation"] == 90
+
+    def test_status_camera_fields_omitted_without_camera(self):
+        """相机缺失（未装配/不支持）时省略字段，不虚构默认值。"""
+        _app, client, _rt = make_client()
+        login(client)
+        s = client.get("/dev/api/status").json()
+        assert "camera_rotation" not in s
+        assert "camera_hflip" not in s
+
+
+class TestStaticAssets:
+    """U1 静态资源：随 dev 挂载（控制台关闭即不存在）；匿名可取——
+    CSS/JS 必须保持无敏感内容，本测试固定该事实作为将来的报警线。"""
+
+    def test_assets_served_anonymously(self):
+        """未登录即可获取（挂载不鉴权）；内容为控制台自有样式/脚本。"""
+        _app, client, _rt = make_client()  # 故意不登录
+        css = client.get("/dev/static/dev-console.css")
+        js = client.get("/dev/static/dev-console.js")
+        assert css.status_code == 200 and js.status_code == 200
+        assert "text/css" in css.headers["content-type"]
+        assert "javascript" in js.headers["content-type"]
+        assert "磁贴" in css.text, "CSS 应为控制台自有内容（非空壳）"
+        assert "function" in js.text, "JS 应为控制台自有内容（非空壳）"
+
+    def test_assets_absent_when_console_disabled(self):
+        """开关关闭 -> 静态挂载随控制台一起消失（不残留可取资源）。"""
+        _app, client, _rt = make_client(enabled=False)
+        assert client.get("/dev/static/dev-console.js").status_code == 404
+        assert client.get("/dev/static/dev-console.css").status_code == 404
+
+
+class TestConsoleTiles:
+    """U1/U5 磁贴结构（语义标记级；纯视觉样式不追加镜像测试）。
+
+    U5：运行日志磁贴并入实时区日志区（系统日志 tab），tile-logs 不复存在。"""
+
+    TILE_IDS = (
+        'tile-teaching',
+        'tile-voice-history',
+        "tile-costs",
+        "tile-doubao-lab",
+        "tile-jev", "tile-overview", "tile-voicelog", "tile-settings",
+        "tile-voice-candidates", "tile-voice",
+        "tile-vision", "tile-sync", "tile-replay",
+    )
+
+    def test_console_renders_tile_semantics(self):
+        """控制台渲染磁贴语义：可展开磁贴头（aria-expanded）+ 对应主体。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        assert 'data-page="dev-console"' in page
+        for tile_id in self.TILE_IDS:
+            assert f'id="{tile_id}"' in page, tile_id
+        heads = page.count('class="tile-head"')
+        assert heads == len(self.TILE_IDS)
+        assert page.count("aria-expanded") == heads, "每个磁贴头都带展开状态"
+        assert page.count('class="tile-body"') == heads
+
+    def test_tiles_reach_existing_entry_points(self):
+        """AE6：原有诊断操作在新外壳全部可达（操作函数 + 关键提示文案）。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        for marker in (
+            "loadStatus()", "loadLogs()", "setLevel()",
+            "postForm('/volume'", "postForm('/speed'",
+            "ttsSpeak()", "recordToggle()", "asrTest()",
+            "previewToggle()", "orientBy(", "flip()", "visionTest()",
+            "syncPull()", "replay(", "clearActiveLog()", "setLogTab(",
+        ):
+            assert marker in page, marker
+        # 关键提示保留：录音独占 / OCR 机位 / 曲线诚实标注（U5 起为真实曲线）
+        assert "独占设备" in page
+        assert "约 20 cm" in page
+        assert "不会伪造声音数据" in page
+        assert 'id="curve-canvas"' in page
+        assert 'id="log-pause"' in page, "日志区默认暂停滚动控件必须在页面结构中"
+
+    def test_settings_tile_defaults_expanded(self):
+        """常用参数原位展开（B3/B4）：运行参数磁贴默认 aria-expanded=true。"""
+        _app, client, _rt = make_client()
+        login(client)
+        page = client.get("/dev").text
+        settings_head = page[page.index('id="tile-settings"'):]
+        settings_head = settings_head[: settings_head.index("tile-body")]
+        assert 'aria-expanded="true"' in settings_head
+        overview_head = page[page.index('id="tile-overview"'):]
+        overview_head = overview_head[: overview_head.index("tile-body")]
+        assert 'aria-expanded="false"' in overview_head
+        candidates_head = page[page.index('id="tile-voice-candidates"'):]
+        candidates_head = candidates_head[: candidates_head.index("tile-body")]
+        assert 'aria-expanded="false"' in candidates_head
+
+
+# ---------- U7：声纹候选快照与同名关联确认 ----------
+
+
+def _vc_samples(seconds: float, seed: int):
+    """可控假音频（过质量门：4s、RMS≈0.2；内容与向量无关）。"""
+
+    rng = np.random.default_rng(seed)
+    return (rng.standard_normal(int(16000 * seconds)) * 0.2).astype(np.float32)
+
+
+def make_voice_memory_client(tmp_path):
+    """挂真实 PersonalMemory + VoiceCandidates（共享连接）的替身 runtime。
+
+    与生产装配同构（memory.db 即 ChatStore 连接）；隐私谓词与 rt.privacy
+    同源，便于翻转联锁。
+    """
+
+    from lira.config import SpeakerConfig
+    from lira.personal_memory import PersonalMemory
+    from lira.speaker_candidates import VoiceCandidates
+
+    rt = FakeRuntime()
+    memory = PersonalMemory(tmp_path / "device.db", None, "kimi-k2.6",
+                            lambda: rt.privacy.is_on)
+    rt.personal_memory = memory
+    rt.speaker_candidates = VoiceCandidates(
+        memory.db, fingerprint="test-fp:2", profiles_provider=memory.profiles,
+        params=SpeakerConfig(), privacy=lambda: rt.privacy.is_on)
+    app, client, rt_out = make_client(runtime=rt)
+    return app, client, rt_out
+
+
+class TestVoiceCandidatesEndpoints:
+    def test_delete_profile_requires_confirmation_privacy_and_idle(self,tmp_path):
+        _app,client,rt=make_voice_memory_client(tmp_path)
+        m=rt.personal_memory
+        member=m.register_voice('成员','称呼',[1.,0.])
+        url=f'/dev/api/voice-profiles/{member}/delete'
+        payload={'confirm':True,'revision':m.voice_revision(member)}
+        assert client.post(url,json=payload).status_code==401
+        login(client)
+        assert client.post(url,json={'revision':payload['revision']}).status_code==400
+        rt.privacy._on=True
+        assert client.post(url,json=payload).status_code==403
+        rt.privacy._on=False
+        rt.dev_handle.recording_active=True
+        assert client.post(url,json=payload).status_code==409
+        rt.dev_handle.recording_active=False
+        assert len(m.profiles())==1
+        assert client.post(url,json=payload).status_code==200
+        assert not m.profiles() and m.people.get_member(member)
+
+    def test_delete_unfinished_candidate_removes_evidence_not_members(self, tmp_path):
+        import numpy as np
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store=rt.speaker_candidates
+        cid=store.observe(np.array([1.,0.],np.float32),_vc_samples(4,91)).candidate_id
+        member=rt.personal_memory.enroll('已登记',np.array([0.,1.],np.float32))
+        response=client.delete(f'/dev/api/voice-candidates/{cid}')
+        assert response.status_code==200
+        assert store.db.execute('SELECT count(*) FROM voice_candidates WHERE candidate_id=?',(cid,)).fetchone()[0]==0
+        assert store.db.execute('SELECT count(*) FROM voice_candidate_evidence WHERE candidate_id=?',(cid,)).fetchone()[0]==0
+        assert rt.personal_memory.people.get_member(member) and len(rt.personal_memory.profiles())==1
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==404
+
+    def test_delete_candidate_requires_session_and_preserves_promoted(self, tmp_path):
+        import numpy as np
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        store=rt.speaker_candidates
+        cid=store.observe(np.array([1.,0.],np.float32),_vc_samples(4,92)).candidate_id
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==401
+        login(client)
+        rt.privacy._on = True
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==403
+        rt.privacy._on = False
+        store.db.execute("UPDATE voice_candidates SET status='promoted', member_id=42 WHERE candidate_id=?",(cid,))
+        store.db.commit()
+        assert client.delete(f'/dev/api/voice-candidates/{cid}').status_code==409
+        assert store.db.execute('SELECT count(*) FROM voice_candidates WHERE candidate_id=?',(cid,)).fetchone()[0]==1
+        for invalid in ('bad','0','-1',str(2**80)):
+            assert client.delete(f'/dev/api/voice-candidates/{invalid}').status_code==400
+
+    def test_delete_failure_rolls_back_candidate_evidence(self, tmp_path):
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store=rt.speaker_candidates
+        cid=store.observe(np.array([1.,0.],np.float32),_vc_samples(4,93)).candidate_id
+        store.db.execute("CREATE TRIGGER reject_delete BEFORE DELETE ON voice_candidates BEGIN SELECT RAISE(ABORT,'test'); END")
+        response=client.delete(f'/dev/api/voice-candidates/{cid}')
+        assert response.status_code==500
+        assert store.db.execute('SELECT count(*) FROM voice_candidates WHERE candidate_id=?',(cid,)).fetchone()[0]==1
+        assert store.db.execute('SELECT count(*) FROM voice_candidate_evidence WHERE candidate_id=?',(cid,)).fetchone()[0]==1
+
+    def test_not_assembled_returns_503(self):
+        """未装配（无 personal_memory/候选）→ 503 诚实降级，前端显示降级文案。"""
+        _app, client, _rt = make_client()
+        login(client)
+        r = client.get("/dev/api/voice-candidates")
+        assert r.status_code == 503
+        assert "声纹候选未装配" in r.json()["error"]
+        r = client.post("/dev/api/voice-candidates/1/confirm", json={"member_id": 1})
+        assert r.status_code == 503
+
+    def test_auth_and_privacy_matrix(self, tmp_path):
+        """新端点鉴权矩阵：未登录 401（路由守卫遍历自动覆盖）；隐私开启时
+        确认 POST 403（禁止身份确认操作），GET 快照仍可用（磁贴结构可见）。"""
+    
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        assert client.get("/dev/api/voice-candidates").status_code == 401
+        assert client.post("/dev/api/voice-candidates/1/confirm",
+                           json={"member_id": 1}).status_code == 401
+        login(client)
+        rt.privacy._on = True
+        assert client.post("/dev/api/voice-candidates/1/confirm",
+                           json={"member_id": 1}).status_code == 403
+        rt.privacy._on = False
+        assert client.get("/dev/api/voice-candidates").status_code == 200
+
+    def test_snapshot_payload_and_established_semantics(self, tmp_path):
+        """AE2：established 只按真实 voice_profiles 统计；就绪 100% 未确认
+        候选不进入已建立人数；awaiting_console 明细带提议关联的成员名。"""
+    
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store = rt.speaker_candidates
+        mama = rt.personal_memory.enroll("妈妈", np.array([0.0, 1.0], np.float32))
+        assert mama is not None
+        vec_a = np.array([1.0, 0.0], np.float32)
+        v1 = store.observe(vec_a, _vc_samples(4.0, 1))
+        store.observe(vec_a, _vc_samples(4.0, 2))
+        store.observe(vec_a, _vc_samples(4.0, 3))  # 就绪（3 段 12s，一致性过）
+        # 50° 方向：与妈妈(0,1) cos≈0.77<0.80、与 A cos≈0.64<0.73——互不相扰
+        vec_b = np.array([np.cos(np.radians(50.0)), np.sin(np.radians(50.0))], np.float32)
+        v2 = store.observe(vec_b, _vc_samples(4.0, 4))
+        baba = rt.personal_memory.people.create_member("爸爸")["id"]
+        store.create_association_request(v2.candidate_id, baba)
+        body = client.get("/dev/api/voice-candidates").json()
+        assert body["summary"]["established_count"] == 1, "只算真实 profile"
+        assert body["summary"]["ready_count"] == 1, "就绪未确认不算已建立"
+        assert body["summary"]["awaiting_console_count"] == 1
+        names = {m["name"]: m for m in body["members"]}
+        assert names["妈妈"]["has_profile"] is True
+        assert names["爸爸"]["has_profile"] is False
+        assert v1.candidate_id != v2.candidate_id
+        pending = body["pending_confirmations"]
+        assert len(pending) == 1
+        assert pending[0]["candidate_id"] == v2.candidate_id
+        assert pending[0]["proposed_member_id"] == baba
+        assert pending[0]["member_name"] == "爸爸"
+
+    def test_confirm_success_retry_idempotent_and_conflicts(self, tmp_path):
+        """确认 POST：成功 200、重试幂等不重复插声纹、成员已有声纹 409 不覆盖、
+        候选不存在 404、状态不符 409、参数非法 400。"""
+    
+        _app, client, rt = make_voice_memory_client(tmp_path)
+        login(client)
+        store = rt.speaker_candidates
+        vec_a = np.array([1.0, 0.0], np.float32)
+        v1 = store.observe(vec_a, _vc_samples(4.0, 1))
+        baba = rt.personal_memory.people.create_member("爸爸")["id"]
+        store.create_association_request(v1.candidate_id, baba)
+        url = f"/dev/api/voice-candidates/{v1.candidate_id}/confirm"
+        assert client.post(url, json={}).status_code == 400
+        assert client.post(url, json={"member_id": "x"}).status_code == 400
+        # 路径参数非整数 → 400（手动 int 解析承诺的兑现点，U8 评审钉住）
+        assert client.post("/dev/api/voice-candidates/abc/confirm",
+                           json={"member_id": baba}).status_code == 400
+        # 畸形 JSON body → 400 {"error"}（原裸 request.json() 为 500 纯文本）
+        assert client.post(url, content=b"{not json",
+                           headers={"Content-Type": "application/json"}).status_code == 400
+        assert client.post("/dev/api/voice-candidates/999/confirm",
+                           json={"member_id": baba}).status_code == 404
+        # 状态不符：新候选没有挂请求
+        vec_b = np.array([np.cos(np.radians(50.0)), np.sin(np.radians(50.0))], np.float32)
+        v2 = store.observe(vec_b, _vc_samples(4.0, 2))
+        assert client.post(f"/dev/api/voice-candidates/{v2.candidate_id}/confirm",
+                           json={"member_id": baba}).status_code == 409
+        # 成功：200 + 落一份 profile
+        r = client.post(url, json={"member_id": baba})
+        assert r.status_code == 200
+        assert r.json() == {"ok": True, "member_id": baba, "already": False}
+        assert len(rt.personal_memory.profiles()) == 1
+        # AE4 确认重试：幂等可见，不重复插 profile/成员
+        r = client.post(url, json={"member_id": baba})
+        assert r.status_code == 200 and r.json()["already"] is True
+        assert len(rt.personal_memory.profiles()) == 1
+        assert len(rt.personal_memory.people.list_members()) == 1
+        # 成员已有声纹：409 且不覆盖（另一候选再次指向同一成员）
+        store.create_association_request(v2.candidate_id, baba)
+        r = client.post(f"/dev/api/voice-candidates/{v2.candidate_id}/confirm",
+                        json={"member_id": baba})
+        assert r.status_code == 409
+        assert "已有声纹" in r.json()["error"]
+        expected = rt.personal_memory.profiles()[0][1]
+        aggregate = store.db.execute(
+            "SELECT aggregate_vector FROM voice_candidates WHERE candidate_id=?",
+            (v1.candidate_id,)).fetchone()[0]
+        assert np.allclose(expected, np.frombuffer(aggregate, np.float32)), \
+            "既有声纹仍是首次确认写入的聚合向量，未被覆盖"

@@ -1,0 +1,62 @@
+[
+  {
+    "path": "lira/dictation_settings.py",
+    "before": "7b83c7ecb1555ac603d8b612e6dc7af561004671b162997f35b8141ed1373b63",
+    "sha256": "ef4685f9b2f05f25961437b2266d3ef3277f93e6c572f823e90e28d0427d6907"
+  },
+  {
+    "path": "lira/dictation_task_contract.py",
+    "before": "81b2305a5fd5a0ecaf50de5a2f4532552a1f89d0d33f539504975a713cd53952",
+    "sha256": "f2917e68732db9db826b3083954d2316db717b9248104245ab4aab917411b3ad"
+  },
+  {
+    "path": "lira/dictation_service.py",
+    "before": "5c61c7c0e679b4603028930176d9d6d3c6250d9081ba83697ec569ba1bf44f88",
+    "sha256": "ca6ca22d3b9fc86036883c010b6e476ef3060fbe7770c6ac63c51e03b002a822"
+  },
+  {
+    "path": "lira/conversation_paths.py",
+    "before": "d140d3cd2636518a11f47aacc379eb5c1babe4943337c07a7c3a19df00701392",
+    "sha256": "a3d5a4eb0eb61f7deafc8e36c286b709c7f2d67b2085be70f8128db255f0511a"
+  },
+  {
+    "path": "lira/dictation_transport.py",
+    "before": "4e6557dd054ca7fd50f7f48c73636f761f0bc575eb99e3e8f1488b1f71eae4b2",
+    "sha256": "826ba4e1810c451bcc56fd674bc0bceeed8367580bc3e879f6c7f1c3c2912b66"
+  },
+  {
+    "path": "lira/dictation_repository.py",
+    "before": "e08bc8c7c2aaa1d9cf02e270ad6573297b851df040a7a0570c297f707cc4a5bf",
+    "sha256": "316c507886e759a50fad00ec798b5585bfda8cac949810b81632b3cb46363847"
+  },
+  {
+    "path": "lira/dictation_tools.py",
+    "before": "860d21acde7d4d1f53e77e13cafcc83937958b2b5bd6d9b4ade115bcf327a023",
+    "sha256": "50d5f0d997cb4a19e749f92e28c7d623e73a99cfbfc47ec3cf0ebdb91bdbb18e"
+  },
+  {
+    "path": "lira/ui/dictation.py",
+    "before": "970a5c27e3a337ba1514108ac35e31eb07d9c58a7e4cf9138b5bda949add7391",
+    "sha256": "f976df7e858109af1fd84b1432f87da634c13afa65d8fe20c263528c96e42c23"
+  },
+  {
+    "path": "lira/ui/static/dictation.js",
+    "before": "83cf2ea6e96db9e878d60bf083f06a5bb64eb54301c7b09dc4be1f1b1a531b65",
+    "sha256": "92809e92af9d62766aceb63106c73a32fb10474e6319e92691f7adc014b60bb8"
+  },
+  {
+    "path": "lira/ui/templates/dictation.html",
+    "before": "101ac68bce1f7a4386a0a7c041ebb7cb638bf17444fb7c4f41813500458f9024",
+    "sha256": "96803076fdd408e62f9ce7db4f20392c92e2769ad84069b86e4c77292af4bb97"
+  },
+  {
+    "path": "lira/llm/chinese_dictation_skill.md",
+    "before": "d6c979ca899fe2d0c57cb0c9ac0f1581bc88a2475f5d5f0aae3b2685f3f6e583",
+    "sha256": "34514aa70fdf7798f658255700ae186c0ffe41d4fc453894e4832bb3f1b6b28b"
+  },
+  {
+    "path": "lira/dictation_cloud_tts.py",
+    "before": null,
+    "sha256": "33430d73d37009dad189a5af6c4c80c1ebc410d1e064239573e6cbc6067eab0e"
+  }
+]

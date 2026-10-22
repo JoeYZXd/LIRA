@@ -1,0 +1,72 @@
+[
+  {
+    "word": "山顶。",
+    "settings": {
+      "speaker": "zh_female_vv_uranus_bigtts",
+      "resource_id": "seed-tts-2.0",
+      "pitch": 0,
+      "speech_rate": -20,
+      "loudness_rate": 30,
+      "context_texts": [
+        "朗读 播音 拉长音 着重强调 标准普通话"
+      ]
+    },
+    "request": {
+      "user": {
+        "uid": "lira-preview"
+      },
+      "req_params": {
+        "text": "山顶。",
+        "speaker": "zh_female_vv_uranus_bigtts",
+        "audio_params": {
+          "format": "pcm",
+          "sample_rate": 24000,
+          "speech_rate": -20,
+          "loudness_rate": 30
+        },
+        "additions": "{\"post_process\": {\"pitch\": 0}, \"context_texts\": [\"朗读 播音 拉长音 着重强调 标准普通话\"]}"
+      }
+    },
+    "api_seconds": 0.634,
+    "first_audio_seconds": 0.577,
+    "audio_seconds": 1.25,
+    "pcm_bytes": 60000,
+    "terminal_success": true,
+    "sha256": "3ca6dd9805a8689f2ad06411cd95f9de6eb072ffe0bc4450ed53b0286f4b70b4"
+  },
+  {
+    "word": "形状。",
+    "settings": {
+      "speaker": "zh_female_vv_uranus_bigtts",
+      "resource_id": "seed-tts-2.0",
+      "pitch": 0,
+      "speech_rate": -20,
+      "loudness_rate": 30,
+      "context_texts": [
+        "朗读 播音 拉长音 着重强调 标准普通话"
+      ]
+    },
+    "request": {
+      "user": {
+        "uid": "lira-preview"
+      },
+      "req_params": {
+        "text": "形状。",
+        "speaker": "zh_female_vv_uranus_bigtts",
+        "audio_params": {
+          "format": "pcm",
+          "sample_rate": 24000,
+          "speech_rate": -20,
+          "loudness_rate": 30
+        },
+        "additions": "{\"post_process\": {\"pitch\": 0}, \"context_texts\": [\"朗读 播音 拉长音 着重强调 标准普通话\"]}"
+      }
+    },
+    "api_seconds": 0.571,
+    "first_audio_seconds": 0.495,
+    "audio_seconds": 1.4615416666666667,
+    "pcm_bytes": 70154,
+    "terminal_success": true,
+    "sha256": "f34683bce8c5997692212af8715499819e9d66b60c1dd35d494368bc1071638d"
+  }
+]

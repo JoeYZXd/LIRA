@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "checks": {
+    "index_no_store": true,
+    "published_and_draft_ids_disjoint": true,
+    "has_existing_book": true,
+    "editor_opened": true,
+    "no_not_found_message": true,
+    "lesson_editing_enabled": true,
+    "original_pages_accessible": true,
+    "inside_same_card": true,
+    "no_failed_textbook_requests": true,
+    "no_javascript_errors": true
+  },
+  "read_only": true,
+  "household_content_not_exported": true
+}

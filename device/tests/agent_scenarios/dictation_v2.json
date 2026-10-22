@@ -1,0 +1,12 @@
+[
+  {
+    "id": "dictation_v2_tc1_one_shot",
+    "evidence_only": true,
+    "utterances": ["帮测试孩子默写第二课"],
+    "required_calls": ["get_dictation_context", "prepare_dictation_task", "control_dictation_task"],
+    "forbidden_calls": ["start_dictation", "pause_agent_task"],
+    "review": "只读取一次真实模型+正式服务+本地H5报告；范围不清可先澄清，准备前必须读真实上下文。核对同一task/hash、实际暂停先于解释、回答实际排空及真实孩子确认先于恢复，照片/核对事实回流；失败报告不能机械通过，H5不能证明实体电视或声学。不得用旧fixture工具或新开第二场替代。",
+    "entrypoint": "device/scripts/run_dictation_h5_regression.py",
+    "inspection": "device/scripts/evaluate_teaching_agent.py --dictation-report REPORT.json"
+  }
+]

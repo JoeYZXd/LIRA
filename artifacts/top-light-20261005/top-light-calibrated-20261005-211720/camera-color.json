@@ -1,0 +1,28 @@
+{
+  "gains_bgr": [
+    2.1290323734283447,
+    1.0,
+    1.1578947305679321
+  ],
+  "sensor_exposure": 6400,
+  "sensor_gain": 128,
+  "white_roi_native": [
+    2020,
+    1150,
+    35,
+    160
+  ],
+  "white_bgr": [
+    93.0,
+    198.0,
+    171.0
+  ],
+  "reference": "User-confirmed printed white border under added overhead light",
+  "sensor_gain_limit": 128,
+  "white_roi_oriented": [
+    1160,
+    2180,
+    50,
+    12
+  ]
+}

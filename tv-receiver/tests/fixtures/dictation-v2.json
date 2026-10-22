@@ -1,0 +1,69 @@
+{
+  "schema_version": 2,
+  "task_id": "task-v2",
+  "content_hash": "04d32d6a9d115ff6d9c04fd47076ed3205a22af8add621108db36d550cfacf0e",
+  "config_revision": 1,
+  "skill_revision": 1,
+  "callback_registration_id": "callback-1",
+  "lessons": [
+    {
+      "lesson_id": "lesson-1",
+      "source": {
+        "book_id": "book-1",
+        "unit": 1,
+        "number": 1,
+        "revision": 1
+      },
+      "two_targets": [
+        "清"
+      ],
+      "four_targets": [
+        "晴"
+      ]
+    }
+  ],
+  "phases": [
+    {
+      "phase_id": "recognition",
+      "type": "recognition",
+      "items": [
+        {
+          "item_id": "recognize-1",
+          "lesson_id": "lesson-1",
+          "text": "清",
+          "covers": [
+            "清"
+          ],
+          "audio_asset_id": null
+        }
+      ]
+    },
+    {
+      "phase_id": "dictation",
+      "type": "dictation",
+      "items": [
+        {
+          "item_id": "dictate-1",
+          "lesson_id": "lesson-1",
+          "text": "晴天",
+          "covers": [
+            "晴"
+          ],
+          "audio_asset_id": "audio-2"
+        }
+      ]
+    }
+  ],
+  "audio_assets": [
+    {
+      "asset_id": "audio-2",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "media_type": "audio/pcm"
+    }
+  ],
+  "playback": {
+    "repeat_count": 2,
+    "interval_ms": 3000,
+    "speech_rate": 1
+  }
+}

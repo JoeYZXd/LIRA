@@ -1,0 +1,223 @@
+{
+  "status": "complete",
+  "verdict": "Ready with fixes",
+  "scope": {
+    "base": "63a52f926b44e4dcdfeceeba71c9b9d04a5bf8b6",
+    "branch": "codex/camera-quality-verification",
+    "head_sha": "5d2d8008dcf854c140cae36f40aa060ac321af2a",
+    "pr_url": null,
+    "files_changed": 7
+  },
+  "intent": "Deliver independent controlled camera capture, same-batch stage replay and real production OCR/CER evidence while preserving production behavior. Retain failed samples and restore camera state before relinquishing ownership.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "testing",
+    "maintainability",
+    "reliability",
+    "adversarial"
+  ],
+  "findings": [
+    {
+      "#": 1,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "file": "device/lira/diagnostics/camera_quality.py",
+      "first_evidence": "device/lira/diagnostics/camera_quality.py:148 --                 await asyncio.wait_for(proc.wait(), 1)",
+      "independent_reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "line": 148,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move process-group termination and leader reaping into an async cleanup task, await it with the same repeated-cancellation shield pattern used by finish_restore, then re-raise cancellation. Add a test that cancels run_process twice while cleanup is awaiting proc.wait() and verifies no descendant survives.",
+      "title": "Repeated cancellation can skip child process cleanup",
+      "evidence": [
+        "device/lira/diagnostics/camera_quality.py:148 --                 await asyncio.wait_for(proc.wait(), 1)",
+        "device/lira/diagnostics/camera_quality.py:153-154 --         with contextlib.suppress(ProcessLookupError): /             os.killpg(proc.pid, signal.SIGKILL)",
+        "device/lira/diagnostics/camera_quality.py:342-353 -- finish_restore shields restoration from repeated cancellation, but run_process does not.",
+        "device/lira/diagnostics/camera_quality.py:149 --             except TimeoutError:",
+        "device/lira/diagnostics/camera_quality.py:481 --                 await finish_restore(session.restore())",
+        "Reproduced on Ubuntu with real run_process and a Python subprocess that ignores SIGTERM: cancel task once after startup, cancel again 100ms later during cleanup; task raises CancelledError with proc.returncode None and os.kill(pid, 0) succeeding. The reproduction then explicitly SIGKILLed and awaited the leftover process.",
+        "A second CancelledError is not caught by the TimeoutError handler, so execution skips both the escalation at lines 150-152 and final process-group SIGKILL at lines 153-154. The protected restoration is outside this unprotected teardown boundary.",
+        "Existing test_repeated_cancel_waits_for_restore_completion covers only finish_restore; test_timeout_and_cancel_reap_child_process_group sends only one cancellation."
+      ],
+      "why_it_matters": "A second cancellation while the subprocess leader is being reaped can exit this finally block before the final process-group SIGKILL. A v4l2-ctl child or descendant can keep the camera open while capture proceeds to restore controls and then releases its lock, so a later capture can overlap the abandoned stream. Keep cleanup in a shielded task that completes group termination and reaping before cancellation is re-raised."
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/diagnostics/ocr_compare.py",
+      "first_evidence": "device/lira/diagnostics/ocr_compare.py:448 --                         rois = validate_rois(",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 448,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "After full-page evidence and score are stored, run optional ROI validation/inference in its own try/except. Preserve sample.success and sample.score on ROI failure, record auxiliary_roi_error, and add a test with a valid image plus invalid ROI JSON that retains the CER denominator.",
+      "title": "Optional ROI errors discard valid full-page OCR scores",
+      "evidence": [
+        "device/lira/diagnostics/ocr_compare.py:448 --                         rois = validate_rois(",
+        "device/lira/diagnostics/ocr_compare.py:442-443 --                         sample[\"score\"] = score(reference, evidence[\"text\"])",
+        "device/lira/diagnostics/ocr_compare.py:464-465 --                 except Exception as exc: /                     sample.update(success=False, error=f\"{type(exc).__name__}: {exc}\")",
+        "device/lira/diagnostics/ocr_compare.py:336-340 -- summarize only includes scores when sample.success is true."
+      ],
+      "why_it_matters": "An unreadable or invalid optional ROI file causes an otherwise successful full-page OCR sample to be marked failed and excluded from CER statistics. This loses the primary comparison because auxiliary crop setup shares the sample's error handler. Handle ROI failures in a separate auxiliary error field after retaining the full-page result."
+    }
+  ],
+  "actionable_findings": [
+    {
+      "#": 1,
+      "autofix_class": "manual",
+      "confidence": 100,
+      "file": "device/lira/diagnostics/camera_quality.py",
+      "first_evidence": "device/lira/diagnostics/camera_quality.py:148 --                 await asyncio.wait_for(proc.wait(), 1)",
+      "independent_reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "line": 148,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "adversarial",
+        "reliability"
+      ],
+      "severity": "P1",
+      "suggested_fix": "Move process-group termination and leader reaping into an async cleanup task, await it with the same repeated-cancellation shield pattern used by finish_restore, then re-raise cancellation. Add a test that cancels run_process twice while cleanup is awaiting proc.wait() and verifies no descendant survives.",
+      "title": "Repeated cancellation can skip child process cleanup",
+      "evidence": [
+        "device/lira/diagnostics/camera_quality.py:148 --                 await asyncio.wait_for(proc.wait(), 1)",
+        "device/lira/diagnostics/camera_quality.py:153-154 --         with contextlib.suppress(ProcessLookupError): /             os.killpg(proc.pid, signal.SIGKILL)",
+        "device/lira/diagnostics/camera_quality.py:342-353 -- finish_restore shields restoration from repeated cancellation, but run_process does not.",
+        "device/lira/diagnostics/camera_quality.py:149 --             except TimeoutError:",
+        "device/lira/diagnostics/camera_quality.py:481 --                 await finish_restore(session.restore())",
+        "Reproduced on Ubuntu with real run_process and a Python subprocess that ignores SIGTERM: cancel task once after startup, cancel again 100ms later during cleanup; task raises CancelledError with proc.returncode None and os.kill(pid, 0) succeeding. The reproduction then explicitly SIGKILLed and awaited the leftover process.",
+        "A second CancelledError is not caught by the TimeoutError handler, so execution skips both the escalation at lines 150-152 and final process-group SIGKILL at lines 153-154. The protected restoration is outside this unprotected teardown boundary.",
+        "Existing test_repeated_cancel_waits_for_restore_completion covers only finish_restore; test_timeout_and_cancel_reap_child_process_group sends only one cancellation."
+      ],
+      "why_it_matters": "A second cancellation while the subprocess leader is being reaped can exit this finally block before the final process-group SIGKILL. A v4l2-ctl child or descendant can keep the camera open while capture proceeds to restore controls and then releases its lock, so a later capture can overlap the abandoned stream. Keep cleanup in a shielded task that completes group termination and reaping before cancellation is re-raised."
+    },
+    {
+      "#": 2,
+      "autofix_class": "gated_auto",
+      "confidence": 100,
+      "file": "device/lira/diagnostics/ocr_compare.py",
+      "first_evidence": "device/lira/diagnostics/ocr_compare.py:448 --                         rois = validate_rois(",
+      "independent_reviewers": [
+        "reliability"
+      ],
+      "line": 448,
+      "owner": "downstream-resolver",
+      "pre_existing": false,
+      "requires_verification": true,
+      "reviewers": [
+        "reliability"
+      ],
+      "severity": "P2",
+      "suggested_fix": "After full-page evidence and score are stored, run optional ROI validation/inference in its own try/except. Preserve sample.success and sample.score on ROI failure, record auxiliary_roi_error, and add a test with a valid image plus invalid ROI JSON that retains the CER denominator.",
+      "title": "Optional ROI errors discard valid full-page OCR scores",
+      "evidence": [
+        "device/lira/diagnostics/ocr_compare.py:448 --                         rois = validate_rois(",
+        "device/lira/diagnostics/ocr_compare.py:442-443 --                         sample[\"score\"] = score(reference, evidence[\"text\"])",
+        "device/lira/diagnostics/ocr_compare.py:464-465 --                 except Exception as exc: /                     sample.update(success=False, error=f\"{type(exc).__name__}: {exc}\")",
+        "device/lira/diagnostics/ocr_compare.py:336-340 -- summarize only includes scores when sample.success is true."
+      ],
+      "why_it_matters": "An unreadable or invalid optional ROI file causes an otherwise successful full-page OCR sample to be marked failed and excluded from CER statistics. This loses the primary comparison because auxiliary crop setup shares the sample's error handler. Handle ROI failures in a separate auxiliary error field after retaining the full-page result."
+    }
+  ],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": {
+    "plan_source": "explicit",
+    "readiness": "implementation-ready",
+    "requirements": {
+      "R1": "partial: fixed book scene tested; A4 ordinary body and complete-page acceptance remain pending",
+      "R2": "partial: ROI tools implemented; three complete-page distances and five-region examination pending",
+      "R3": "met: request/ranges/readback/format/scene/error manifests implemented",
+      "R4": "met: preserved NV12/PNG and same-batch stages with source hashes",
+      "R5": "partial: unique invalid records implemented; repeated cancellation cleanup defect remains",
+      "R6": "partial: production input/crops and CER implemented; repeated matched-scene comparison pending",
+      "R7": "partial: independent tools/report present; no evidence-supported recommended config yet",
+      "R8": "partial: snapshot/restore/readback implemented; repeated cancellation ordering defect remains and ownership coverage is limited"
+    },
+    "units": {
+      "U1": "partial: host tests and documented board smoke; cleanup finding remains",
+      "U2": "met: offline source-verified stages and ROIs",
+      "U3": "partial: host scoring/evidence tested; repeated board acceptance pending",
+      "U4": "partial: initial book-scene sweeps documented; A4/three distances/repeated CER pending"
+    },
+    "intentional_omissions": "Unfinished hardware acceptance is explicitly reported and accepted as current experimental scope; no code defect inferred solely from these acknowledged pending experiments."
+  },
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Selected device/sensor/media nodes require manual topology confirmation; capture records media topology but does not verify their association.",
+    "Visible /proc ownership checking can be incomplete. Stable control reads before/after streaming do not exclude hidden controllers that temporarily alter settings and return them; operator service isolation remains required.",
+    "Full Range NV12 is decoded using production OpenCV limited-range conversion. Explicit conversion/documentation warnings are retained; decoded PNG is not an equivalent sensor-luminance measurement."
+  ],
+  "testing_gaps": [],
+  "coverage": {
+    "scope_mode": "local-aligned; explicit focus-path override",
+    "excluded": "All unrelated preexisting base changes and dev-console changes; untracked .codegraph, jpg samples and plan are outside diff review. Experiment doc was explicitly authorized.",
+    "scope_helper": "Bundled helper executed; whole-base signals include unrelated changes and were used only to conservatively disqualify lite mode. Exact scoped diff retained separately.",
+    "project_standards": "not run: successful search found no applicable criteria files",
+    "cross_model": {
+      "status": "not run",
+      "reason": "Bundled runner transports git diff base without path restriction; full base diff includes unrelated files outside authorized review scope. Scope safety boundary required local adversarial fallback. No peer job started or content sent.",
+      "cross_model_route": null,
+      "model_requested": null,
+      "effort_requested": null,
+      "receipt_supported": false,
+      "model_actual": "unverified",
+      "effort_actual": "unverified",
+      "independence_verified": false
+    },
+    "validator_shortcut_count": 0,
+    "validator_batch": [
+      {
+        "#": 1,
+        "validated": true,
+        "reason": "A second cancellation during the unshielded proc.wait() at line 148 escapes the TimeoutError handler and skips both SIGKILL paths, allowing a subprocess that ignores SIGTERM to survive."
+      },
+      {
+        "#": 2,
+        "validated": true,
+        "reason": "ROI validation at lines 445-452 shares the full-page sample exception handler, which resets success to false after scoring; summarize then excludes that valid score from the CER denominator."
+      },
+      {
+        "#": 3,
+        "validated": false,
+        "reason": "The suite lacks successful capture() integration tests, but the finding identifies no demonstrated lifecycle failure, while component tests cover restoration and serialization and the experiment records successful controlled and baseline captures on the board."
+      }
+    ],
+    "validator_drop_count": 1,
+    "suppressed_by_confidence": {},
+    "mode_aware_demotions": 0,
+    "semantic_reconciliation": "Two cancellation reports merged; two capture testing reports consolidated into one subsystem umbrella.",
+    "host_tests": "41 passed: camera-quality diagnostics, OCR comparison, existing ISP quality",
+    "hardware_validation": "No hardware rerun in this review. Board smoke/experiment facts read from supplied documentation; full acceptance pending.",
+    "boundary": "Only diagnostic modules/tests, experiment doc and SETUP link reviewed; no production file changed by this review.",
+    "failed_reviewers": [],
+    "settlement_suppression": "Explicit plan reviewed; no preference-only settlement conflicts retained.",
+    "run_dir_posix": "/tmp/compound-engineering-1000/ce-code-review/20261005-004409-e888832e"
+  },
+  "artifact_path": "/tmp/compound-engineering-1000/ce-code-review/20261005-004409-e888832e",
+  "run_id": "20261005-004409-e888832e"
+}

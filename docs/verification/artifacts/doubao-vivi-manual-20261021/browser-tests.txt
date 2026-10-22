@@ -1,0 +1,42 @@
+.........                                                                [100%]
+============================== warnings summary ===============================
+tests/browser/test_dictation_management_ui.py::test_management_persists_edits_and_preserves_conflict[chromium-390]
+  C:\Users\Joey\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\starlette\formparsers.py:12: PendingDeprecationWarning: Please use `import python_multipart` instead.
+    import multipart
+
+tests/browser/test_dictation_management_ui.py::test_management_persists_edits_and_preserves_conflict[chromium-390]
+tests/browser/test_dictation_management_ui.py::test_management_persists_edits_and_preserves_conflict[chromium-1440]
+tests/browser/test_dictation_management_ui.py::test_photos_review_and_facts_are_real_service_roundtrip[chromium]
+tests/browser/test_dictation_management_ui.py::test_task_navigation_discards_only_confirmed_review[chromium]
+tests/browser/test_dictation_management_ui.py::test_busy_save_locks_inputs_and_restores_disabled_controls[chromium]
+tests/browser/test_dictation_management_ui.py::test_task_summary_uses_repository_current_item[chromium]
+tests/browser/test_dictation_management_ui.py::test_prepared_task_auto_load_respects_review_draft[chromium-False]
+tests/browser/test_dictation_management_ui.py::test_prepared_task_auto_load_respects_review_draft[chromium-True]
+tests/browser/test_dictation_management_ui.py::test_manual_cloud_parameters_roundtrip[chromium]
+  D:\Projects\LIRA\device\lira\ui\dictation.py:186: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    @app.on_event('shutdown')
+
+tests/browser/test_dictation_management_ui.py::test_management_persists_edits_and_preserves_conflict[chromium-390]
+tests/browser/test_dictation_management_ui.py::test_management_persists_edits_and_preserves_conflict[chromium-1440]
+tests/browser/test_dictation_management_ui.py::test_photos_review_and_facts_are_real_service_roundtrip[chromium]
+tests/browser/test_dictation_management_ui.py::test_task_navigation_discards_only_confirmed_review[chromium]
+tests/browser/test_dictation_management_ui.py::test_busy_save_locks_inputs_and_restores_disabled_controls[chromium]
+tests/browser/test_dictation_management_ui.py::test_task_summary_uses_repository_current_item[chromium]
+tests/browser/test_dictation_management_ui.py::test_prepared_task_auto_load_respects_review_draft[chromium-False]
+tests/browser/test_dictation_management_ui.py::test_prepared_task_auto_load_respects_review_draft[chromium-True]
+tests/browser/test_dictation_management_ui.py::test_manual_cloud_parameters_roundtrip[chromium]
+  C:\Users\Joey\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.10_qbz5n2kfra8p0\LocalCache\local-packages\Python310\site-packages\fastapi\applications.py:4495: DeprecationWarning: 
+          on_event is deprecated, use lifespan event handlers instead.
+  
+          Read more about it in the
+          [FastAPI docs for Lifespan Events](https://fastapi.tiangolo.com/advanced/events/).
+          
+    return self.router.on_event(event_type)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+9 passed, 19 warnings in 18.98s

@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>LIRA 开发者控制台 - 登录</title>
+  <link rel="stylesheet" href="/dev/static/dev-console.css">
+</head>
+<body>
+<main class="login-wrap">
+  <form class="login-card" id="dev-login-form" data-page="dev-login">
+    <h1>LIRA 开发者控制台</h1>
+    <input id="pass" type="password" placeholder="设备口令" autocomplete="current-password">
+    <button type="submit">登录</button>
+    <div id="err" class="err" role="alert"></div>
+    <p class="muted">首次使用请先在 <a href="/passphrase/setup">设备面板</a> 设置口令</p>
+  </form>
+</main>
+<script src="/dev/static/dev-console.js"></script>
+</body>
+</html>

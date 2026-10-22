@@ -1,6 +1,7 @@
 """mock 红外：send 只记录码值到内存列表（U1 测试场景 3）；learn 从预置队列注入。
 
-板上实现（U10）将替换为 `ir-ctl -r/-s` 子进程调用。
+板上实现（M5 已交付）为 `lira/hal/board/ir_broadlink.py`（BroadLink RM4 Mini，
+2026-10-03 改道，gpio-ir/ir-ctl 方案废弃）；未配置 hal.ir_host 时板上同样回退本 mock。
 """
 
 from __future__ import annotations

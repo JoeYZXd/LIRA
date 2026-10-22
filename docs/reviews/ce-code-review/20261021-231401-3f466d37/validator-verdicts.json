@@ -1,0 +1,14 @@
+{
+  "verdicts": [
+    {
+      "#": 1,
+      "validated": false,
+      "reason": "Current intent handling recognizes previous-word navigation and next-word child acknowledgment; pending explanation gates block navigation, with targeted regressions."
+    },
+    {
+      "#": 2,
+      "validated": false,
+      "reason": "Current model instructions, task status and dialogue system expose playback from the frozen task; regression keeps it pinned after latest settings change."
+    }
+  ]
+}

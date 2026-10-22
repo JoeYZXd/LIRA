@@ -1,0 +1,8 @@
+{
+  "reviewer": "security",
+  "findings": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "Cloud privacy coverage checks only an initially denied request. Add a mocked streaming response that flips allowed to false after its first audio row and assert synthesis aborts without returning or publishing PCM; this exercises the new per-row and post-stream privacy guards."
+  ]
+}

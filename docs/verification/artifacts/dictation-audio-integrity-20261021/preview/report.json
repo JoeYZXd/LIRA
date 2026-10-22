@@ -1,0 +1,20 @@
+[
+  {
+    "word": "山顶",
+    "speed": 0.75,
+    "source_text": "山顶。",
+    "speech_seconds": 0.721,
+    "total_seconds": 1.471,
+    "sample_rate": 24000,
+    "sha256": "2df903b035be7849b2a25952eaf5d09aafe6cdb3c5fcb41defe58bb04427447e"
+  },
+  {
+    "word": "形状",
+    "speed": 0.75,
+    "source_text": "形状。",
+    "speech_seconds": 0.7145,
+    "total_seconds": 1.4645000000000001,
+    "sample_rate": 24000,
+    "sha256": "c96e04a7eb43822b8ae85fe79922c91b8850eec4b6880a8e76faddc0c9d34f9d"
+  }
+]

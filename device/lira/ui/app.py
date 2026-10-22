@@ -3,9 +3,14 @@
 定位（计划 U7 Approach）：设备本地小 Web 服务，板上绑屏即 kiosk。
 
 页面（服务端渲染 Jinja2，无前端构建链，无 HTMX——表单 + 重定向已够用）：
-  - `/`        状态卡（网络/远程可用/隐私）+ 隐私开关 + 音量/语速 + 设备列表只读
+  - `/`        首页（时段问候 + 聊天入口 + 音量/语速快捷步进 + 隐私开关 +
+               折叠收纳的设备状态/家电只读表/开发者控制台——home-console U5；
+               R4：既有端点/表单参数/`/status` 全部不变，纯呈现层重排）
   - `/passphrase/setup`  设备本地口令首启设置（无默认值，fail-closed）
   - `/status`  只读状态 JSON（kiosk 轮询用，不鉴权）
+  - `/dev`     开发者控制台（dev_console.enabled 时挂载；页面模板与
+               /dev/static 静态资源由 lira.ui.dev 自管实例，不共享本模块
+               templates——避免 ui.app <-> ui.dev 循环导入）
 
 鉴权纪律：
   - 隐私开关的 UI 路径必须出示设备本地口令（`PassphraseVault.verify`，
@@ -20,18 +25,32 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import TYPE_CHECKING, Callable
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from lira.appliances.store import ApplianceStore
+from lira.dialog.phrasebook import CHAT_OFFLINE_NOTE
 from lira.privacy import PassphraseVault, PrivacyState
 from lira.settings import DeviceSettings
+from lira.ui.chat import mount_chat
 
-__all__ = ["DeviceSettings", "UiServices", "create_app", "TEMPLATES_DIR"]
+if TYPE_CHECKING:
+    from lira.chat.service import ChatService
+
+__all__ = [
+    "DeviceSettings",
+    "HOME_WELCOME",
+    "UiServices",
+    "create_app",
+    "greeting_for_hour",
+    "home_greeting",
+    "TEMPLATES_DIR",
+]
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +73,14 @@ class UiServices:
     network_ok: Callable[[], bool] = lambda: False
     #: 开发者控制台句柄（dev_console.enabled 时由装配层注入；None = 不挂载）
     dev: object | None = None
+    #: 聊天服务（home-console U3 的 ChatService；None = 未装配——聊天入口
+    #: 显式"暂不可用"，不 404、不隐藏、不 500）。字符串注解保持运行时惰性
+    #: 导入（TYPE_CHECKING 块，不引入新的运行时依赖）
+    chat: "ChatService | None" = None
     #: 整机状态提供者（R1 状态面；/status JSON 合并其返回的枚举/布尔/数值字段）
     status_provider: Callable[[], dict] = lambda: {}
+    # Await runtime context invalidation before member deletion succeeds.
+    member_deleted: object | None = None
 
 
 def _appliance_rows(services: UiServices) -> list[dict[str, object]]:
@@ -75,14 +100,41 @@ def _appliance_rows(services: UiServices) -> list[dict[str, object]]:
     return rows
 
 
+#: 首页固定欢迎语（跟在时段问候后的一句；home-console U5 首屏）
+HOME_WELCOME = "我是小丽拉，您的家庭小助手。"
+
+
+def greeting_for_hour(hour: int) -> str:
+    """时段问候语（home-console U5）：5-11 点早上 / 12-17 点下午 / 其余晚上。
+
+    其余 = 18-23 点与 0-4 点（深夜凌晨归晚上），三分支覆盖全部 24 小时。
+    """
+    if 5 <= hour < 12:
+        return "早上好"
+    if 12 <= hour < 18:
+        return "下午好"
+    return "晚上好"
+
+
+def home_greeting(hour: int) -> str:
+    """首页首屏问候整句：时段问候 + 固定欢迎语（单一出处，可按小时单测）。"""
+    return f"{greeting_for_hour(hour)}，{HOME_WELCOME}"
+
+
 def _index_context(services: UiServices, **extra: object) -> dict[str, object]:
     return {
+        "greeting": home_greeting(datetime.now().hour),
+        "chat_available": services.chat is not None,
+        "chat_unavailable_note": CHAT_OFFLINE_NOTE,
         "privacy_on": services.privacy.is_on,
         "remote_available": services.remote_available(),
         "network_ok": services.network_ok(),
         "passphrase_set": services.vault.is_set(),
         "volume": services.settings.volume,
         "tts_speed": services.settings.tts_speed,
+        # 步进器边界单一出处（settings 类常量；模板钳制与范围提示皆由此渲染）
+        "volume_range": DeviceSettings.VOLUME_RANGE,
+        "speed_range": DeviceSettings.SPEED_RANGE,
         "appliances": _appliance_rows(services),
         "dev_console": services.dev is not None,
         **extra,
@@ -97,6 +149,9 @@ def create_app(services: UiServices) -> FastAPI:
         from lira.ui.dev import mount_dev
 
         mount_dev(app, services.dev)
+
+    # 聊天路由恒挂载：chat=None 时入口显式"暂不可用"（不隐藏）
+    mount_chat(app, services, templates)
 
     @app.get("/")
     async def index(request: Request):
@@ -228,14 +283,41 @@ def create_app(services: UiServices) -> FastAPI:
 
 
 def _demo_services() -> UiServices:  # pragma: no cover - 本地浏览用
-    """x86 本地浏览用 mock 装配（内存库，无 HAL 依赖）。"""
+    """x86 本地浏览用 mock 装配（内存库，无 HAL 依赖，含聊天演示数据）。"""
     store = ApplianceStore(":memory:")
+
+    from lira.chat.service import ChatService
+    from lira.chat.store import ChatStore
+
+    class _DemoLlm:
+        """演示桩：恒定回复，不发网络请求。"""
+
+        async def chat(self, prompt: str, **kwargs: object) -> str:
+            return "好的，我在听你说呢。（本地演示回复）"
+
+    chat_store = ChatStore(":memory:")
+    member = chat_store.create_member("妈妈", emoji="👩")
+    chat_store.append_messages(
+        member["id"],
+        [
+            ("user", "今天天气怎么样？"),
+            ("assistant", "我这边看不到实时天气，不过你可以看看窗外呀。（本地演示回复）"),
+        ],
+    )
+    chat_store.create_member("小明", emoji="🧒")
+    chat_service = ChatService(
+        chat_store,
+        _DemoLlm(),  # type: ignore[arg-type]
+        privacy=lambda: False,
+        remote_available=lambda: True,
+    )
     return UiServices(
         privacy=PrivacyState(),
         vault=PassphraseVault(store),
         store=store,
         remote_available=lambda: True,
         network_ok=lambda: True,
+        chat=chat_service,
     )
 
 

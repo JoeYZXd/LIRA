@@ -1,0 +1,8 @@
+{
+  "reviewer": "reliability",
+  "findings": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "The new _v4l2 cleanup branch has no timeout/cancellation test verifying that a running child is killed and reaped while the original timeout or cancellation propagates."
+  ]
+}

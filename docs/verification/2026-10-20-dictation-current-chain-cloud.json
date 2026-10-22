@@ -1,0 +1,214 @@
+{
+  "model": "1.2.6.1",
+  "production_pid_before": "60961",
+  "extended_capabilities_flag": "false",
+  "scope": "real cloud audio, deployed default instructions/tools, real TV tools and published textbook reads; silent playback; no household identity/memory loaded",
+  "turns": [
+    {
+      "index": 1,
+      "input": "给开心默写第七课。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "李开心默写第 7 课。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "暂时没查到已导入的教材，没法直接准备第7课的默写内容哦。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "list_practice_textbooks",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "books": []
+          },
+          "seconds": 0.001
+        }
+      ]
+    },
+    {
+      "index": 2,
+      "input": "电视已经打开了。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "鞭尸已经打开了。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "设备当前是实时对话模式，要是想做默写投屏，得先确认有没有导入对应的语文教材哦。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "get_device_status",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "mode": "doubao_realtime",
+            "test_context": "isolated synthetic audio; no live identity or device power evidence supplied"
+          },
+          "seconds": 0.0
+        }
+      ]
+    },
+    {
+      "index": 3,
+      "input": "已经打开了。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": false,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "已经打开了。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "目前没查到已导入的教材文件，就算设备打开了，也没法调出第7课的默写内容，你可以先确认下教材有没有成功导入呀。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": []
+    },
+    {
+      "index": 4,
+      "input": "请查询已导入的语文课本，查看第七课的四会字和二会字。",
+      "input_kind": "synthetic user utterance; TV-open statements requested by user, not independently verified hardware facts",
+      "diagnostic_followup": true,
+      "events": [
+        {
+          "kind": "input_started",
+          "text": ""
+        },
+        {
+          "kind": "user_text",
+          "text": "请查询已导入的语文课本，查看第 7 课的四会字和二会字。"
+        },
+        {
+          "kind": "assistant_text",
+          "text": "目前没有查询到已导入的语文课本，暂时没法查看第7课的四会字和二会字哦。"
+        },
+        {
+          "kind": "audio_done",
+          "text": ""
+        },
+        {
+          "kind": "response_done",
+          "text": ""
+        }
+      ],
+      "tools": [
+        {
+          "name": "list_practice_textbooks",
+          "arguments": {},
+          "result": {
+            "status": "ok",
+            "books": []
+          },
+          "seconds": 0.001
+        }
+      ]
+    }
+  ],
+  "tool_names": [
+    "get_device_status",
+    "end_conversation",
+    "list_infrared_devices",
+    "prepare_infrared_learning",
+    "start_infrared_learning",
+    "get_infrared_learning_status",
+    "cancel_infrared_learning",
+    "control_infrared_device",
+    "start_voice_enrollment",
+    "set_voice_enrollment_details",
+    "start_voice_sample",
+    "check_voice_sample",
+    "get_voice_enrollment_status",
+    "save_voice_enrollment",
+    "cancel_voice_enrollment",
+    "reset_voice_samples",
+    "identify_current_speaker",
+    "get_speaker_continuity_context",
+    "report_speaker_continuity",
+    "request_identity_confirmation",
+    "submit_identity_feedback",
+    "get_recent_device_conversation",
+    "get_personal_memory",
+    "prepare_tv_display",
+    "list_practice_textbooks",
+    "prepare_pinyin_practice",
+    "list_tv_images",
+    "confirm_tv_display",
+    "cancel_tv_display",
+    "get_tv_display_status"
+  ],
+  "textbooks": {
+    "status": "ok",
+    "books": []
+  },
+  "draft_inventory": [
+    {
+      "id": "4e28c92b626b4f29ae3affe194525579",
+      "status": "review",
+      "pages": 14
+    }
+  ],
+  "lesson7_inventory": [],
+  "independent_tv_probe": {
+    "status": "unavailable",
+    "error_type": "ConnectError"
+  },
+  "output_audio_bytes": 1439412,
+  "production_pid_after": "60961",
+  "service_unchanged": true,
+  "probe_script_sha256": "ec9587c1e487e6d6741392ce4f3d0c49ddbdc72d8756c78d4e12ab61ecd54195",
+  "validation_limits": [
+    "Synthetic local TTS input, not the child's microphone.",
+    "Silent output consumer, not acoustic speaker verification.",
+    "Only production TV/catalog handlers used directly; household identity, personal memory and IR were not loaded.",
+    "Turns 2 and 3 are requested synthetic user assertions, not verified TV state.",
+    "Turn 4 explicitly requests textbook lookup and is diagnostic, not spontaneous workflow compliance."
+  ]
+}

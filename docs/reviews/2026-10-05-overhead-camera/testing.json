@@ -1,0 +1,9 @@
+{
+  "reviewer": "testing",
+  "findings": [],
+  "residual_risks": [],
+  "testing_gaps": [
+    "The calibrated production path is not covered end to end: test_camera_isp_quality.py checks malformed/missing calibration and _apply_color_gains directly, but never opens a valid calibration and captures. Add a valid temporary calibration test asserting stored gains, sensor exposure/gain, and decoded JPEG color on a synthetic white/pale-yellow page; this guards against production silently using neutral gains while the helper test still passes.",
+    "The new highlight cap in _capture_batch_adaptive has no behavioral test. Add a mocked dark batch containing a near-white patch and assert no higher-gain recapture, plus a uniformly dark batch that does raise gain; this proves shadow compensation preserves bright paper details at the sensor stage as well as in _digital_exposure."
+  ]
+}

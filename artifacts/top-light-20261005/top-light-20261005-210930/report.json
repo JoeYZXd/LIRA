@@ -1,0 +1,32 @@
+[
+  {
+    "round": 1,
+    "image": "light-1.jpg",
+    "gain": 512,
+    "source_luma": 136.74917602539062,
+    "random_luma_noise": 2.3461874646414045,
+    "source_clipped_fraction": 0.3608774386885436,
+    "output_clipped_fraction": 0.4794667467484153,
+    "text": "好\n、，头人"
+  },
+  {
+    "round": 2,
+    "image": "light-2.jpg",
+    "gain": 512,
+    "source_luma": 136.76158142089844,
+    "random_luma_noise": 2.3454787379824094,
+    "source_clipped_fraction": 0.36084097612766697,
+    "output_clipped_fraction": 0.47960746354649814,
+    "text": "2、3，头"
+  },
+  {
+    "round": 3,
+    "image": "light-3.jpg",
+    "gain": 512,
+    "source_luma": 136.76307678222656,
+    "random_luma_noise": 2.3465606325976784,
+    "source_clipped_fraction": 0.3608796279520331,
+    "output_clipped_fraction": 0.4797110383571042,
+    "text": "好\n2、3，头"
+  }
+]

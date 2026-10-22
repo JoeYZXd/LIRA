@@ -1,0 +1,1222 @@
+/* LIRA 开发者控制台（U1 磁贴外壳 + U5 实时区三工作区）——原生 JS，无构建链、无框架、无 CDN。
+ *
+ * 页面分派：登录页（#dev-login-form）只绑口令提交；控制台页（#dev-console）
+ * 装配全部诊断操作。与旧内嵌版行为一一对应：
+ *   - api()：401 -> 统一回 /dev 登录页（僵尸页面自愈，只跳一次）；
+ *     网络级失败 -> status=0 + 可见错误，不静默。
+ *   - 录音状态机（独占设备）、预览 ~0.5fps 单帧轮询、整机回放等照旧。
+ * U1 真实回读：音量/语速/日志级别/相机方向从 /dev/api/status 写入控件，
+ *   提交前按真实范围客户端预检，失败保留输入并显示原因。
+ * U5 实时区（KTD4 纪律）：
+ *   - observe 客户端：250ms 节拍 + 最多一个在途请求（节拍到点在途则跳拍，
+ *     不排队）；事件满页立即续拉；失败按 1/2/4/8s 指数退避（成功复位）；
+ *     隐私 403 -> 清空敏感展示并停拉（手动"重新连接"或刷新恢复）；
+ *     401 沿 api() 跳转；页面隐藏停节拍，恢复可见重新首拉建基线；
+ *     实时区磁贴折叠即停订阅（KTD4"未展开实时区停订阅"）。
+ *   - reset=true（实例不匹配/游标越界/区间淘汰）-> 清空曲线/轮卡/日志缓冲，
+ *     用整窗快照整体重建，绝不凭旧数据补出声音或回复。
+ *   - 声音曲线：Canvas 2D 画最近 10 秒真实包络（min~max 竖带 + RMS 折线），
+ *     gap 画间断虚线并标原因；无帧/静音/停更/断连/隐私各态可辨——绘制停顿
+ *     不伪造数据（没有新帧就明确显示停更，不延续旧曲线假装实时）。
+ *   - 同轮交互：按 turn_id 归并 语句→路由→模型→播报，首段/总耗时由事件
+ *     t_mono 差计算；无 turn_id 的 llm_* 事件归"未关联轮次"，不丢弃。
+ *   - 日志区：语音事件 / 模型交互 / 系统日志三 tab，共用暂停滚动（默认暂停，
+ *     跟随时仅在已滚到底时贴底）/ 类别与关键字筛选 / 清空当前展示（仅前端
+ *     缓冲，服务端环不受影响）。旧 /dev/api/voice-log 1s 轮询移除，页面统一
+ *     走 observe 事件流。
+ * U7 声纹小档案磁贴：候选/已建立成员快照 + 同名关联确认（领域操作 POST）。
+ *   低频单拉（展开时/确认后），不进 observe 节拍；未装配诚实降级；进度依据
+ *   文案给出段数/秒数/一致性，已建立人数只看真实 profile（AE2）。
+ */
+
+'use strict';
+
+/* ---------- 登录页（口令提交；Enter 由表单原生触发 submit） ---------- */
+
+async function doLogin() {
+  const r = await fetch('/dev/login', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({passphrase: document.getElementById('pass').value})
+  });
+  if (r.ok) { location.href = '/dev'; return; }
+  const j = await r.json().catch(() => ({error: 'HTTP ' + r.status}));
+  document.getElementById('err').textContent = j.error || ('HTTP ' + r.status);
+}
+
+/* ---------- 控制台页：共享状态与工具 ---------- */
+
+let recording = false, recBusy = false, previewOn = false, previewTimer = null, fetching = false;
+let recTimer = null, recLeft = 0, flipped = false, authRedirecting = false;
+/* 运行参数允许范围（/dev/api/status 的 volume_range / speed_range 回读） */
+const ranges = { volume: null, speed: null };
+
+async function api(path, opts) {
+  let r;
+  try {
+    r = await fetch(path, Object.assign({headers: {'Content-Type': 'application/json'}}, opts||{}));
+  } catch (e) {
+    // 网络级失败（服务重启/断连）：不再静默，调用方面板直接显示错误
+    return {status: 0, body: {error: '无法连接设备服务（服务可能已重启，请刷新页面重新登录）'}};
+  }
+  if (r.status === 401 && !authRedirecting) {
+    // 会话缺失/过期/签名失效：统一回登录页，不停留在僵尸页面
+    authRedirecting = true;
+    location.href = '/dev';
+    return {status: 401, body: {error: '会话已失效，正在返回登录页…'}};
+  }
+  const t = await r.text();
+  let j; try { j = JSON.parse(t); } catch { j = {raw: t}; }
+  return {status: r.status, body: j};
+}
+
+function out(id, msg, cls) {
+  const el = document.getElementById(id);
+  el.textContent = msg; el.className = cls || 'muted';
+}
+
+function vlEscape(s) { const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+
+function hhmmss(wallMs) {
+  return new Date(wallMs).toLocaleTimeString('zh-CN', {hour12: false});
+}
+
+/* ---------- 概览磁贴 ---------- */
+
+async function loadStatus() {
+  const r = await api('/dev/api/status');
+  if (r.status !== 200) {
+    const msg = r.body.error || ('加载失败: ' + r.status);
+    document.getElementById('status-view').textContent = '（' + msg + '）';
+    return out('status-out', msg, 'err');
+  }
+  const s = r.body;
+  document.getElementById('status-view').textContent = JSON.stringify(s, null, 2);
+  applyStatusReadback(s);
+  fillOverviewSummary(s);
+  out('status-out', '引擎=' + s.engine + ' 路由=' + s.route +
+    (s.privacy_on ? ' [隐私开启：采集类测试将被拒绝]' : ''), 'ok');
+}
+
+/* 真实回读：只在字段存在时写入控件（相机缺失时服务端省略字段） */
+function applyStatusReadback(s) {
+  if (typeof s.volume === 'number') {
+    document.getElementById('vol').value = s.volume;
+  }
+  if (typeof s.tts_speed === 'number') {
+    document.getElementById('spd').value = s.tts_speed;
+  }
+  if (Array.isArray(s.volume_range) && s.volume_range.length === 2) {
+    ranges.volume = s.volume_range;
+    document.getElementById('vol').min = s.volume_range[0];
+    document.getElementById('vol').max = s.volume_range[1];
+  }
+  if (Array.isArray(s.speed_range) && s.speed_range.length === 2) {
+    ranges.speed = s.speed_range;
+    document.getElementById('spd').min = s.speed_range[0];
+    document.getElementById('spd').max = s.speed_range[1];
+  }
+  if (typeof s.loglevel === 'string') {
+    const sel = document.getElementById('lvl');
+    for (const opt of sel.options) {
+      if (opt.value === s.loglevel) { sel.value = opt.value; break; }
+    }
+  }
+  if (typeof s.camera_rotation === 'number') {
+    flipped = !!s.camera_hflip;
+    out('orient-out', '当前方向: ' + s.camera_rotation + '°' +
+      (flipped ? '（已翻转）' : ''), 'muted');
+  }
+}
+
+/* 概览磁贴头摘要行：折叠时也能看到引擎/路由/隐私/同步 */
+function fillOverviewSummary(s) {
+  const el = document.getElementById('overview-summary');
+  if (!el) { return; }
+  const parts = ['引擎=' + s.engine, '路由=' + s.route,
+    '隐私' + (s.privacy_on ? '开' : '关')];
+  if (s.sync && s.sync.session) { parts.push('同步=' + s.sync.session); }
+  el.textContent = parts.join(' · ');
+}
+
+/* ---------- 运行参数磁贴：客户端范围校验 + 既有端点提交 ---------- */
+
+/* 范围来自 status 真实能力；非法值不发起请求、输入保留、字段错误可见
+   （服务端 /volume /speed 校验仍兜底）。 */
+function settingProblem(input, range, label) {
+  const v = Number(input.value);
+  if (input.value.trim() === '' || Number.isNaN(v)) {
+    return label + '数值无效';
+  }
+  if (range && (v < range[0] || v > range[1])) {
+    return label + '须在 ' + range[0] + ' ~ ' + range[1] + ' 之间';
+  }
+  return null;
+}
+
+async function postForm(path, inputId, label, rangeKey, outId) {
+  const input = document.getElementById(inputId);
+  const problem = settingProblem(input, ranges[rangeKey], label);
+  if (problem) { return out(outId, problem, 'err'); }
+  const fd = new FormData();
+  fd.append('value', input.value);
+  try {
+    const r = await fetch(path, {method: 'POST', body: fd});
+    out(outId, r.ok ? '已提交' : '失败: ' + r.status, r.ok ? 'ok' : 'err');
+  } catch (e) {
+    // 网络/服务失败：错误可见，输入值原样保留
+    out(outId, '无法连接设备服务（请刷新页面重新登录）', 'err');
+  }
+}
+
+async function setLevel() {
+  const r = await api('/dev/api/loglevel', {method: 'POST', body: JSON.stringify({level: document.getElementById('lvl').value})});
+  out('lvl-out', r.status === 200 ? '已调整' : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
+}
+
+/* ---------- 声纹小档案磁贴（U7）：候选/成员快照 + 同名关联确认 ----------
+ * 数据获取纪律：展开磁贴时 + 确认操作后单拉 /dev/api/voice-candidates
+ * （低频数据，不进 250ms observe 节拍）；503=未装配 → 诚实降级文案。
+ * 状态徽标映射候选 status；进度依据文案给出"几段/几秒/一致性"，让
+ * 百分比可解释（E4a：进度 ≠ 身份确认，已建立只看真实 profile）。 */
+
+const VC_STATUS_LABELS = {
+  accumulating: '采集中', ready: '采集就绪待命名', awaiting_console: '同名待确认',
+  promoted: '已建立', stale: '已失效（模型/策略变化，需重新积累）', expired: '已过期'
+};
+
+function vcProgressBasis(c) {
+  const t = c.targets || {};
+  return c.segment_count + '/' + (t.segments ?? '?') + ' 段 · ' +
+    (Math.round(c.total_seconds * 10) / 10) + '/' + (t.seconds ?? '?') + ' 秒 · ' +
+    (c.consistency_passed ? '一致性通过' : '一致性未过（进度封顶 99%）');
+}
+
+function vcStatusBadge(status) {
+  const label = VC_STATUS_LABELS[status] || status;
+  return '<span class="vc-badge vc-badge--' + vlEscape(status) + '">' + vlEscape(label) + '</span>';
+}
+
+function renderVoiceCandidates(data) {
+  const s = data.summary || {};
+  const summary = document.getElementById('voice-candidates-summary');
+  summary.textContent = '已建立 ' + (s.established_count ?? 0) + ' · 采集中 ' +
+    (s.accumulating_count ?? 0) + ' · 待命名 ' + (s.ready_count ?? 0) +
+    ' · 同名待确认 ' + (s.awaiting_console_count ?? 0);
+  const parts = [];
+  // 已建立成员卡（E2）：真实成员名单 + 声纹状态
+  window.voiceProfileMembers = data.members || [];
+  const memberCards = (data.members || []).map(m =>
+    '<div class="vc-member">' + vlEscape(m.emoji || '🙂') + ' ' + vlEscape(m.name) +
+    '<span class="vc-member-state">' + (m.has_profile ? '声纹已建立' : '无声纹（文字聊天成员）') + '</span>' +
+    '<button type="button" onclick="rerecordVoiceProfile(' + m.member_id + ')">' + (m.has_profile ? '重新录制' : '录制声纹') + '</button>' +
+    (m.has_profile ? '<button type="button" onclick="testVoiceProfile(' + m.member_id + ')">测试</button>' : '') +
+    (m.has_profile ? '<button type="button" onclick="deleteVoiceProfile(' + m.member_id + ')">删除声纹</button>' : '') + '</div>'
+  ).join('');
+  parts.push('<div class="vc-block"><div class="vc-block-title">已建立成员 ' + (data.members || []).length + '</div>' +
+    (memberCards || '<p class="muted">（还没有成员）</p>') + '</div>');
+  // 候选卡（E3/E4）：状态徽标 + 可解释进度；待确认卡带确认按钮
+  // （U8 化简审查：只留 Map 一个索引——Set 与 Map 键集合恒同，双份会漂移）
+  const pendingByCid = new Map((data.pending_confirmations || []).map(p => [p.candidate_id, p]));
+  const candidateCards = (data.candidates || []).map(c => {
+    const pct = Math.round((c.progress || 0) * 100);
+    let extra = '';
+    if (c.status === 'awaiting_console') {
+      const p = pendingByCid.get(c.candidate_id);
+      const name = p && p.member_name ? p.member_name : ('成员 ' + (p ? p.proposed_member_id : '?'));
+      extra = '<div class="vc-await">与已有成员「' + vlEscape(name) + '」同名——确认前不读取该成员记忆' +
+        '<button type="button" id="vc-confirm-btn-' + c.candidate_id +
+        '" onclick="confirmAssociation(' + c.candidate_id + ',' +
+        (p ? p.proposed_member_id : 'null') + ')">确认关联</button><span id="vc-confirm-out-' +
+        c.candidate_id + '" class="muted"></span></div>';
+    }
+    if (c.member_id !== null && c.member_id !== undefined) {
+      const m = (data.members || []).find(x => x.member_id === c.member_id);
+      extra += '<div class="vc-await">已关联成员：' + (m ? vlEscape(m.emoji + ' ' + m.name) : ('#' + c.member_id)) + '</div>';
+    } else if (c.status !== 'promoted') {
+      extra += '<div class="vc-await"><button type="button" class="vc-delete" id="vc-delete-btn-' +
+        c.candidate_id + '" onclick="deleteVoiceCandidate(' + c.candidate_id +
+        ')">删除未完成声纹</button><span id="vc-delete-out-' + c.candidate_id +
+        '" role="status" aria-live="polite"></span></div>';
+    }
+    return '<div class="vc-card' + (pendingByCid.has(c.candidate_id) ? ' is-awaiting' : '') + '">' +
+      '<div class="vc-card-head">待认识的声音 ' + String(c.candidate_id).padStart(2, '0') +
+      vcStatusBadge(c.status) + '</div>' +
+      '<div class="vc-progress"><div class="vc-progress-fill" style="width:' + pct + '%"></div></div>' +
+      '<div class="vc-meta">' + pct + '% · ' + vlEscape(vcProgressBasis(c)) + '</div>' + extra + '</div>';
+  }).join('');
+  parts.push('<div class="vc-block"><div class="vc-block-title">历史声音候选 ' + (data.candidates || []).length + '</div>' +
+    (candidateCards || '<p class="muted">（暂无旧候选；请对 LIRA 说“录入声纹”，按提示确认后保存）</p>') + '</div>');
+  document.getElementById('voice-candidates-view').innerHTML = parts.join('');
+}
+
+async function loadVoiceCandidates() {
+  const r = await api('/dev/api/voice-candidates');
+  if (r.status === 503) {
+    // 未装配（LIRA_PERSONAL_MEMORY=1 / 声纹模型缺失）：诚实降级，不假装空态
+    document.getElementById('voice-candidates-summary').textContent = '未装配';
+    document.getElementById('voice-candidates-view').innerHTML =
+      '<p class="muted">声纹候选未装配（需 LIRA_PERSONAL_MEMORY=1 与声纹模型）</p>';
+    return out('voice-candidates-out', r.body.error || '未装配', 'muted');
+  }
+  if (r.status !== 200) {
+    document.getElementById('voice-candidates-view').innerHTML =
+      '<p class="muted">（加载失败：' + vlEscape(r.body.error || String(r.status)) + '）</p>';
+    return out('voice-candidates-out', r.body.error || r.status, 'err');
+  }
+  renderVoiceCandidates(r.body);
+  out('voice-candidates-out', '已更新', 'ok');
+}
+
+async function confirmAssociation(candidateId, memberId) {
+  if (memberId === null || memberId === undefined) { return; }
+  // 在途防护（U8 前端竞态评审 FR-7）：确认进行中禁用按钮，双击不双 POST
+  const btn = document.getElementById('vc-confirm-btn-' + candidateId);
+  const buttons = btn ? btn.closest('.vc-card').querySelectorAll('button') : [];
+  buttons.forEach(button => { button.disabled = true; });
+  try {
+    await confirmAssociationInner(candidateId, memberId);
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+  }
+}
+
+async function deleteVoiceCandidate(candidateId) {
+  const btn = document.getElementById('vc-delete-btn-' + candidateId);
+  if (!btn || btn.disabled) { return; }
+  if (!window.confirm('删除这条未完成声纹及其采样记录？已登记成员和聊天记忆不会删除。')) { return; }
+  const buttons = btn.closest('.vc-card').querySelectorAll('button');
+  buttons.forEach(button => { button.disabled = true; });
+  btn.textContent = '正在删除…';
+  const target = document.getElementById('vc-delete-out-' + candidateId);
+  try {
+    const r = await api('/dev/api/voice-candidates/' + candidateId, {method: 'DELETE'});
+    if (r.status === 200) {
+      await loadVoiceCandidates();
+      out('voice-candidates-out', '未完成声纹已删除', 'ok');
+      document.getElementById('app-tile-voice-candidates').focus();
+    } else {
+      target.textContent = (r.body && r.body.error) || ('删除失败：HTTP ' + r.status);
+      target.className = 'err';
+    }
+  } catch (_) {
+    target.textContent = '连接失败，请重试'; target.className = 'err';
+  } finally {
+    buttons.forEach(button => { button.disabled = false; });
+    btn.textContent = '删除未完成声纹';
+  }
+}
+
+async function confirmAssociationInner(candidateId, memberId) {
+  const r = await api('/dev/api/voice-candidates/' + candidateId + '/confirm',
+    {method: 'POST', body: JSON.stringify({member_id: memberId})});
+  if (r.status === 200) {
+    // 成功 → 局部刷新整块（成员/候选/统计同源一次往返）
+    out('voice-candidates-out', '已确认关联（成员 ' + r.body.member_id + '）', 'ok');
+    return loadVoiceCandidates();
+  }
+  const msg = (r.body && r.body.error) || ('HTTP ' + r.status);
+  const target = document.getElementById('vc-confirm-out-' + candidateId);
+  if (target) { target.textContent = msg; target.className = 'err'; }
+  else { out('voice-candidates-out', msg, 'err'); }
+}
+
+/* ---------- 语音链路测试磁贴 ---------- */
+
+async function ttsSpeak() {
+  const text = document.getElementById('tts-text').value;
+  const r = await api('/dev/api/tts', {method: 'POST', body: JSON.stringify({text})});
+  out('tts-out', r.status === 200 ? ('已播报 ' + r.body.elapsed_ms + 'ms') : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
+}
+
+async function recordToggle() {
+  const btn = document.getElementById('rec-btn');
+  if (recBusy) { return; } // 在途防护（U8 FR-5）：双击不双 POST
+  recBusy = true;
+  if (!recording) {
+    const r = await api('/dev/api/record/start', {method: 'POST', body: '{}'});
+    if (r.status !== 200) { recBusy = false; return out('rec-out', r.body.error || r.status, 'err'); }
+    recording = true;
+    btn.textContent = '结束录音';
+    recLeft = 0;
+    recTimer = setInterval(() => { recLeft += 1; out('rec-out', '录音中… ' + recLeft + 's（上限 60s）'); }, 1000);
+    out('rec-out', '录音中…', 'ok');
+  } else {
+    clearInterval(recTimer);
+    const r = await api('/dev/api/record/stop', {method: 'POST', body: '{}'});
+    recording = false;
+    recBusy = false;
+    btn.textContent = '开始录音';
+    if (r.status !== 200) return out('rec-out', r.body.error || r.status, 'err');
+    if (r.body.discarded) return out('rec-out', '已按隐私联锁丢弃本次录音', 'err');
+    out('rec-out', '完成 ' + r.body.seconds + 's / ' + r.body.bytes + 'B', 'ok');
+    const clip = document.getElementById('clip');
+    clip.src = '/dev/api/clip?ts=' + Date.now(); clip.style.display = 'block'; clip.play();
+  }
+}
+
+async function asrTest() {
+  const r = await api('/dev/api/asr', {method: 'POST', body: '{}'});
+  out('asr-out', r.status === 200 ? ('文本: ' + r.body.text + ' | 意图: ' + JSON.stringify(r.body.intent)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
+}
+
+/* ---------- 视觉链路磁贴 ---------- */
+
+/* 方向响应收口（U8 化简审查：orientBy/flip 尾部三行不再各自手抄） */
+async function applyOrientation(r) {
+  flipped = !!r.body.hflip;
+  out('orient-out', '方向: ' + r.body.rotation + '°' + (flipped ? '（已翻转）' : ''), 'ok');
+  if (previewOn) { await fetchFrame(); }
+}
+
+async function orientBy(delta) {
+  // delta=0 复位；90/-90 相对当前方向累加（可多次点击循环）
+  const payload = delta === 0 ? {rotation: 0} : {rotate_by: delta};
+  const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify(payload)});
+  if (r.status !== 200) return out('orient-out', r.body.error || r.status, 'err');
+  await applyOrientation(r);
+}
+
+async function flip() {
+  // 水平翻转（U1 补实现）：同一方向端点，hflip 为绝对 set——先本地翻转再
+  // 发送（U8 FR-6：读 stale 值发绝对量会让双击第二次把翻转翻回去），失败回滚
+  flipped = !flipped;
+  const r = await api('/dev/api/camera/orientation', {method: 'POST', body: JSON.stringify({hflip: flipped})});
+  if (r.status !== 200) {
+    flipped = !flipped;
+    return out('orient-out', r.body.error || r.status, 'err');
+  }
+  await applyOrientation(r);
+}
+
+async function visionTest() {
+  out('vis-out', '拍摄识别中…（慢速单帧，约数秒）');
+  const r = await api('/dev/api/vision', {method: 'POST', body: '{}'});
+  if (r.status !== 200) return out('vis-out', r.body.error || r.status, 'err');
+  const img = document.getElementById('vis-img');
+  img.src = r.body.image; img.style.display = 'block';
+  document.getElementById('vis-view').textContent = r.body.text || '（无文字）';
+  out('vis-out', '耗时: ' + JSON.stringify(r.body.timings_ms), 'ok');
+}
+
+/* 预览取帧（提升为顶层：预览轮询与方向变更后的刷新共用） */
+let previewGen = 0, previewUrl = null;
+
+async function fetchFrame() {
+  // 代数令牌（U8 前端竞态评审 FR-2）：await 后校验代数——停止预览/方向
+  // 变更后到达的旧响应不得复活已关闭的预览为冻结帧
+  const gen = ++previewGen;
+  let r;
+  try {
+    r = await fetch('/dev/api/vision/frame?ts=' + Date.now());
+  } catch (e) {
+    if (gen === previewGen) { stopPreview('无法连接设备服务，预览已停止', 'err'); }
+    return;
+  }
+  if (gen !== previewGen) { return; } // 旧代响应：丢弃
+  if (r.status === 200) {
+    const blob = await r.blob();
+    if (gen !== previewGen) { return; }
+    const img = document.getElementById('preview-img');
+    // blob URL 用一收一（U8 FR-3）：长挂预览不再无限积累
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); }
+    previewUrl = URL.createObjectURL(blob);
+    img.src = previewUrl; img.style.display = 'block';
+    out('preview-out', '预览中…');
+  } else {
+    stopPreview('取帧失败已停止: ' + r.status, 'err');
+  }
+}
+
+function stopPreview(msg, cls) {
+  previewOn = false;
+  previewGen += 1; // 在途旧响应全部作废
+  clearInterval(previewTimer);
+  document.getElementById('preview-btn').textContent = '开启实时预览（~0.5fps）';
+  document.getElementById('preview-img').style.display = 'none';
+  if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+  if (msg) { out('preview-out', msg, cls); }
+}
+
+async function previewToggle() {
+  if (previewOn) { return stopPreview('预览已停止'); }
+  previewOn = true;
+  document.getElementById('preview-btn').textContent = '停止预览';
+  await fetchFrame();
+  // U8 COR-4：首帧在途时被停止——previewOn 已复位，不得再挂 interval
+  //（原实现僵尸 interval 常驻，再次开启后双倍轮询打相机）
+  if (!previewOn) { return; }
+  previewTimer = setInterval(async () => {
+    if (!previewOn || fetching) return;
+    fetching = true;
+    try { await fetchFrame(); } finally { fetching = false; }
+  }, 2200);
+}
+
+/* ---------- 同步 / 整机回放磁贴 ---------- */
+
+async function syncPull() {
+  const r = await api('/dev/api/sync/pull', {method: 'POST', body: '{}'});
+  out('sync-out', r.status === 200 ? ('状态: ' + JSON.stringify(r.body.sync)) : (r.body.error || r.status), r.status === 200 ? 'ok' : 'err');
+}
+
+async function replay(confirm) {
+  const text = document.getElementById('replay-text').value;
+  const r = await api('/dev/api/replay', {method: 'POST', body: JSON.stringify({text, confirm})});
+  if (r.status !== 200) return out('replay-out', r.body.error || r.status, 'err');
+  document.getElementById('replay-view').textContent =
+    '迁移: ' + (r.body.transitions || []).join(' -> ') + '\n播报: ' + (r.body.spoken || []).join(' | ');
+  out('replay-out', '完成', 'ok');
+}
+
+/* ---------- 实时区（U5）：observe 客户端（KTD4 纪律） ---------- */
+
+const OBSERVE_TICK_MS = 250;                        // 默认节拍（KTD4）
+const OBSERVE_BACKOFF_MS = [1000, 2000, 4000, 8000]; // 失败退避档位（成功复位）
+const OBSERVE_AUDIO_WINDOW = 10;                    // 曲线窗口秒数（=遥测音频环）
+const LOG_BUFFER_LIMIT = 500;                       // 日志缓冲上限（淘汰最旧）
+const LOG_RENDER_LIMIT = 200;                       // 单次渲染上限（缓冲仍有界）
+const TURN_CARD_LIMIT = 20;                         // 轮卡展示上限（新轮在前）
+
+const observe = {
+  timer: null,          // 节拍 setTimeout 句柄（单一定时器，随时可停）
+  inFlight: false,      // 单飞：最多一个在途请求
+  instanceId: null,     // 遥测实例（请求参数 + reset 判定）
+  audioCursor: null, eventCursor: null,
+  failCount: 0,         // 连续失败次数（退避档位）
+  stopped: false,       // 隐私 403 后停拉（不自动重试）
+  liveOpen: false,      // 实时区磁贴展开态（折叠即停订阅）
+  idlePolls: 0          // 成功拉取但无新音频帧的连续次数（停更判定）
+};
+
+/* 数据缓冲：reset / 隐私 403 时整体清空，再由整窗快照重建 */
+const audioFrames = [];        // 音频帧（envelope/gap 混排，t_mono 时间轴）
+const markerEvents = [];       // 曲线轴标记事件（wake/utterance/speak*）
+const turnCards = new Map();   // turn_id -> 轮卡聚合
+const unlinkedLlm = [];        // 无 turn_id 的 llm_* 事件（未关联轮次）
+const logBuffers = { voice: [], model: [], sys: [] }; // 日志区三 tab 数据源
+let logTab = 'voice';
+/* 日志脏标记按 tab 分账（U8 效率审查：全局标记会让未变化的 tab 全量重建） */
+const logDirty = { voice: false, model: false, sys: false };
+let turnDirty = false;
+let lastKindSig = '';
+let lastAudioAt = 0;           // 最近一次见到新音频帧的本地墙钟（ms）
+
+const LOG_KIND_LABELS = {
+  state: '状态', wake: '唤醒', asr: '识别', asr_partial: '识别中',
+  audio: '收音', audio_gate: '输入门控', kws: '关键词', command: '指令',
+  playback: '播放控制', llm: 'LLM', llm_reply: 'LLM', llm_fail: 'LLM',
+  speak: '播报', privacy: '隐私',
+  utterance: '语句', turn: '轮次', route: '路由',
+  speak_done: '播报完成', speak_interrupt: '播报中断',
+  llm_request: '模型请求', llm_first_delta: '模型首段',
+  llm_text: '模型快照', llm_done: '模型完成', llm_cancel: '模型取消'
+};
+const MARKER_KINDS = { wake: '唤', utterance: '语', speak: '播', speak_interrupt: '断' };
+const MARKER_COLORS = { wake: '#B45309', utterance: '#5F7A4E', speak: '#6F5B8E', speak_interrupt: '#A63D2F' };
+const ROUTE_LABELS = {
+  local_rule: '本地规则', local_llm: '本地模型',
+  remote_llm: '远程模型', unavailable: '不可用'
+};
+
+function isModelKind(kind) { return kind.indexOf('llm_') === 0; }
+
+/* ---- 状态机：节拍 / 单飞 / 退避 / 可见性 / 展开态 ---- */
+
+function observeSchedule(delayMs) {
+  clearTimeout(observe.timer);
+  observe.timer = setTimeout(observeTick, delayMs);
+}
+
+function observeTick() {
+  if (observe.stopped || !observe.liveOpen || document.hidden) { return; }
+  if (observe.inFlight) { observeSchedule(OBSERVE_TICK_MS); return; } // 跳拍，不排队
+  observePull();
+}
+
+async function observePull() {
+  const q = [];
+  if (observe.instanceId) { q.push('instance=' + encodeURIComponent(observe.instanceId)); }
+  if (observe.audioCursor !== null) { q.push('audio_cursor=' + observe.audioCursor); }
+  if (observe.eventCursor !== null) { q.push('event_cursor=' + observe.eventCursor); }
+  observe.inFlight = true;
+  let r;
+  try {
+    r = await api('/dev/api/observe' + (q.length ? '?' + q.join('&') : ''), {
+      // 拉取超时（U8 对抗评审残留风险）：服务端挂起时 inFlight 永真会让
+      // 轮询静默停摆——5s 超时走 AbortError → api() 的网络失败路径 → 退避
+      signal: (typeof AbortSignal !== 'undefined' && AbortSignal.timeout)
+        ? AbortSignal.timeout(5000) : undefined,
+    });
+  } finally {
+    observe.inFlight = false;
+  }
+  if (r.status === 200) {
+    observe.failCount = 0;
+    // U8 前端竞态评审 FR-1：形状异常的 200（如代理返回 HTML，api() 降级为
+    // {raw:…}）绝不能永久杀死节拍链——走与网络失败相同的退避路径，状态行可见
+    try {
+      applyObserve(r.body);
+    } catch (e) {
+      const delay = OBSERVE_BACKOFF_MS[Math.min(observe.failCount, OBSERVE_BACKOFF_MS.length - 1)];
+      observe.failCount += 1;
+      updateCurveMeta({text: '响应异常（' + Math.round(delay / 1000) + ' 秒后重试）', cls: 'err'});
+      if (!observe.liveOpen || document.hidden || observe.stopped) { return; }
+      observeSchedule(delay);
+      return;
+    }
+    if (!observe.liveOpen || document.hidden || observe.stopped) { return; } // 态已变：不续排
+    // 事件满页（==服务端回显页长）可能还有续页：立即续拉（仍受单飞约束；
+    // 页长以响应 events.page 为准——U8 化简审查：不再与服务端各自硬编码）
+    const page = (r.body.events && r.body.events.page) || 100;
+    if (r.body.events.items.length >= page) { observeTick(); return; }
+    observeSchedule(OBSERVE_TICK_MS);
+    return;
+  }
+  if (r.status === 403) { observePrivacyStop(r.body.error || '隐私模式开启'); return; }
+  if (r.status === 401) { return; } // api() 已统一跳登录页（僵尸页面自愈）
+  // 网络失败（status=0）/ 503 / 5xx：指数退避后重试，状态行可见
+  const delay = OBSERVE_BACKOFF_MS[Math.min(observe.failCount, OBSERVE_BACKOFF_MS.length - 1)];
+  observe.failCount += 1;
+  updateCurveMeta({text: '已断连（' + Math.round(delay / 1000) + ' 秒后重试）', cls: 'err'});
+  observeSchedule(delay);
+}
+
+/* 隐私联锁（AE5）：清空敏感展示并停拉；恢复靠手动"重新连接"或刷新页面 */
+function observePrivacyStop(msg) {
+  observe.stopped = true;
+  clearTimeout(observe.timer);
+  clearLocalBuffers();
+  drawCurve();
+  renderTurns();
+  renderLog(true);
+  document.getElementById('privacy-banner-text').textContent =
+    msg + '：已清空敏感展示并停止观察（关闭隐私后点击"重新连接"或刷新页面恢复）。';
+  document.getElementById('privacy-banner').hidden = false;
+}
+
+/* 手动恢复入口：清游标重新首拉；隐私未关则再次 403 再停（诚实不绕闸） */
+function observeResume() {
+  observe.stopped = false;
+  observe.failCount = 0;
+  observe.audioCursor = null;
+  observe.eventCursor = null;
+  observe.instanceId = null;
+  document.getElementById('privacy-banner').hidden = true;
+  if (!observe.liveOpen || document.hidden) { return; }
+  observeSchedule(0);
+}
+
+/* 重新首拉建基线（展开/恢复可见时）：清游标 → 服务端整窗 + reset 重建，
+   防隐藏期间 10 秒窗外出现假连续 */
+function observeRebaseline() {
+  observe.audioCursor = null;
+  observe.eventCursor = null;
+  observe.failCount = 0;
+  observeSchedule(0);
+}
+
+/* KTD4：未展开实时区停订阅——展开即首拉+节拍，折叠即停节拍 */
+function observeLiveChange(open) {
+  observe.liveOpen = open;
+  clearTimeout(observe.timer);
+  if (!open || observe.stopped || document.hidden) { return; }
+  observeRebaseline();
+}
+
+function initObserveVisibility() {
+  document.addEventListener('visibilitychange', function () {
+    if (document.hidden) {
+      clearTimeout(observe.timer); // 停节拍；在途请求自然完成、结果照常并入
+      if (previewOn) { stopPreview(); } // 预览轮询同样不受隐形页持续打相机（U8 FR-4）
+    } else if (observe.liveOpen && !observe.stopped) {
+      observeRebaseline(); // 恢复可见：重新首拉建基线
+    }
+  });
+}
+
+/* ---- 增量归并与 reset 重建 ---- */
+
+function clearLocalBuffers() {
+  audioFrames.length = 0;
+  markerEvents.length = 0;
+  turnCards.clear();
+  unlinkedLlm.length = 0;
+  logBuffers.voice.length = 0;
+  logBuffers.model.length = 0;
+  observe.idlePolls = 0;
+  lastAudioAt = 0;
+  logDirty.voice = logDirty.model = true;
+  turnDirty = true;
+  lastKindSig = '';
+}
+
+function applyObserve(body) {
+  // reset（实例不匹配/游标越界/区间淘汰/首拉）：清空旧状态整体重建
+  const didReset = body.audio.reset || body.events.reset;
+  if (didReset) { clearLocalBuffers(); }
+  observe.instanceId = body.instance_id;
+  if (body.audio.items.length) {
+    observe.idlePolls = 0;
+    lastAudioAt = Date.now();
+    for (const f of body.audio.items) { audioFrames.push(f); }
+    trimAudioFrames();
+  } else {
+    observe.idlePolls += 1; // 有响应无新帧：停更判定计数（不假装实时）
+  }
+  observe.audioCursor = body.audio.next_cursor;
+  const markersBefore = markerEvents.length;
+  for (const ev of body.events.items) { ingestEvent(ev); }
+  observe.eventCursor = body.events.next_cursor;
+  // U8 效率审查：静默拍（无新帧、无新标记、非 reset）跳过全画布重绘——
+  // 250ms 节拍下停更时段不再空转；updateCurveMeta 便宜，保持每拍刷新状态行
+  if (didReset || body.audio.items.length || markerEvents.length !== markersBefore) {
+    drawCurve();
+  }
+  updateCurveMeta();
+  // reset 后即使快照为空也必须重渲染（旧轮卡不得残留）
+  // 轮卡与日志同样按需重绘（U8 性能评审：对话中 events 每拍非空，
+  // 无脏标记时 4Hz 全量重建 20 张轮卡）
+  if (didReset || turnDirty) {
+    renderTurns();
+    turnDirty = false;
+  }
+  if (didReset || body.events.items.length) {
+    renderLog(didReset);
+  }
+}
+
+function trimAudioFrames() {
+  const newest = audioFrames[audioFrames.length - 1].t_mono;
+  while (audioFrames.length &&
+         audioFrames[0].t_mono < newest - OBSERVE_AUDIO_WINDOW - 0.5) {
+    audioFrames.shift();
+  }
+}
+
+function ingestEvent(ev) {
+  if (MARKER_KINDS[ev.kind]) {
+    markerEvents.push(ev);
+    if (markerEvents.length > 60) { markerEvents.shift(); }
+  }
+  if (ev.turn_id !== null && ev.turn_id !== undefined) {
+    applyEventToTurn(ev);
+    turnDirty = true;
+  } else if (isModelKind(ev.kind)) {
+    // 无轮次关联的模型事件（如阅读白话）：归"未关联轮次"，不丢弃
+    unlinkedLlm.push(ev);
+    if (unlinkedLlm.length > 20) { unlinkedLlm.shift(); }
+    turnDirty = true;
+  }
+  const bucket = isModelKind(ev.kind) ? logBuffers.model : logBuffers.voice;
+  const audio = captureSummary(ev);
+  const previous = bucket[bucket.length - 1];
+  if (audio && previous?.audioSummary?.key === audio.key) {
+    bucket[bucket.length - 1] = {...ev, audioSummary: {
+      ...previous.audioSummary, count: previous.audioSummary.count + 1
+    }};
+  } else {
+    bucket.push(audio ? {...ev, audioSummary: audio} : ev);
+  }
+  if (bucket.length > LOG_BUFFER_LIMIT) { bucket.splice(0, bucket.length - LOG_BUFFER_LIMIT); }
+  logDirty[isModelKind(ev.kind) ? 'model' : 'voice'] = true;
+}
+
+function applyEventToTurn(ev) {
+  let card = turnCards.get(ev.turn_id);
+  if (!card) {
+    card = {turnId: ev.turn_id, userText: null, route: null, reply: null,
+            replyFromDone: false, requestMono: null, firstDeltaMono: null,
+            turnMono: null, endMono: null, speakResult: null,
+            fail: null, cancelled: false, interrupted: false,
+            clientSeenAt: Date.now() / 1000};
+    turnCards.set(ev.turn_id, card);
+  }
+  switch (ev.kind) {
+    case 'turn':
+      card.userText = ev.text;
+      if (card.turnMono === null) { card.turnMono = ev.t_mono; }
+      break;
+    case 'route': card.route = ev.text; break;
+    case 'llm_request': card.requestMono = ev.t_mono; break;
+    case 'llm_first_delta': card.firstDeltaMono = ev.t_mono; break;
+    case 'llm_text': if (!card.replyFromDone) { card.reply = ev.text; } break;
+    case 'llm_done': card.reply = ev.text; card.replyFromDone = true; break;
+    case 'llm_fail': card.fail = ev.text; break;
+    case 'llm_cancel': card.cancelled = true; break;
+    case 'speak_done':
+      card.endMono = ev.t_mono; card.speakResult = '播报完成'; break;
+    case 'speak_interrupt':
+      card.endMono = ev.t_mono; card.speakResult = '播报被打断';
+      card.interrupted = true; break;
+    default: break; // 其余镜像类不进轮卡（可在日志区查看）
+  }
+  if (turnCards.size > TURN_CARD_LIMIT * 2) {
+    // 有界：超出展示两倍的旧轮先淘汰（新轮在前渲染时只取 TURN_CARD_LIMIT）
+    const ids = Array.from(turnCards.keys()).sort((a, b) => a - b);
+    while (turnCards.size > TURN_CARD_LIMIT * 2) { turnCards.delete(ids.shift()); }
+  }
+}
+
+/* ---- 声音曲线（Canvas 2D；只在数据到达时重绘，无动画循环、不伪造数据） ---- */
+
+function drawCurve() {
+  const canvas = document.getElementById('curve-canvas');
+  if (!canvas) { return; }
+  const empty = document.getElementById('curve-empty');
+  const gapsEl = document.getElementById('curve-gaps');
+  const cssW = canvas.clientWidth || 900;
+  if (canvas.width !== Math.round(cssW)) { canvas.width = Math.round(cssW); canvas.height = 150; }
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  if (!audioFrames.length) {
+    empty.hidden = false;
+    empty.textContent = observe.stopped
+      ? '观察已停止（隐私开启中，展示已清空）'
+      : '等待数据…（展开实时区后自动开始观察）';
+    gapsEl.hidden = true;
+    return;
+  }
+  empty.hidden = true;
+  const tEnd = audioFrames[audioFrames.length - 1].t_mono;
+  const tStart = tEnd - OBSERVE_AUDIO_WINDOW;
+  const mid = H / 2, amp = H / 2 - 16;
+  // 淡网格（每 2 秒）与零线
+  ctx.lineWidth = 1;
+  ctx.strokeStyle = 'rgba(73,61,53,.10)';
+  for (let i = 0; i <= 5; i++) {
+    const x = Math.round(i / 5 * W) + 0.5;
+    ctx.beginPath(); ctx.moveTo(x, 12); ctx.lineTo(x, H - 12); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(73,61,53,.28)';
+  ctx.beginPath(); ctx.moveTo(0, mid + 0.5); ctx.lineTo(W, mid + 0.5); ctx.stroke();
+  // 真实包络：min~max 竖带 + RMS 折线（同一线性标度）
+  const bucketW = Math.max(2, W / 100 - 1);
+  ctx.fillStyle = 'rgba(95,122,78,.40)';
+  ctx.strokeStyle = '#5F7A4E';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  let rmsStarted = false;
+  for (const f of audioFrames) {
+    if (f.kind !== 'envelope' || f.t_mono < tStart) { continue; }
+    const x = (f.t_mono - tStart) / OBSERVE_AUDIO_WINDOW * W;
+    const lo = Math.max(-1, Math.min(1, f.min)), hi = Math.max(-1, Math.min(1, f.max));
+    const yTop = mid - hi * amp, yBot = mid - lo * amp;
+    ctx.fillRect(x - bucketW / 2, yTop, bucketW, Math.max(1, yBot - yTop));
+    const yRms = mid - Math.max(0, Math.min(1, f.rms)) * amp;
+    if (!rmsStarted) { ctx.moveTo(x, yRms); rmsStarted = true; } else { ctx.lineTo(x, yRms); }
+  }
+  ctx.stroke();
+  // 间断：红色虚线 + 下方原因短语（gap 是真实标记，绝不画成静音）
+  const recentGaps = [];
+  for (const f of audioFrames) {
+    if (f.kind !== 'gap' || f.t_mono < tStart) { continue; }
+    const x = Math.round((f.t_mono - tStart) / OBSERVE_AUDIO_WINDOW * W) + 0.5;
+    ctx.save();
+    ctx.strokeStyle = '#A63D2F';
+    ctx.setLineDash([4, 3]);
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x, 6); ctx.lineTo(x, H - 6); ctx.stroke();
+    ctx.restore();
+    if (recentGaps.length < 3) { recentGaps.push(f); }
+  }
+  if (recentGaps.length) {
+    gapsEl.hidden = false;
+    gapsEl.textContent = '间断：' + recentGaps.slice().reverse().map(f =>
+      f.reason + '（' + hhmmss(f.ts * 1000) + '）').join(' · ');
+  } else {
+    gapsEl.hidden = true;
+  }
+  // 激活标记：唤/语/播/断 落同一 t_mono 时间轴
+  ctx.font = '11px system-ui, sans-serif';
+  ctx.lineWidth = 2;
+  for (const ev of markerEvents) {
+    if (ev.t_mono < tStart) { continue; }
+    const x = Math.round((ev.t_mono - tStart) / OBSERVE_AUDIO_WINDOW * W);
+    ctx.fillStyle = MARKER_COLORS[ev.kind] || '#493D35';
+    ctx.fillText(MARKER_KINDS[ev.kind], Math.max(1, x - 5), 11);
+    ctx.fillRect(x, 14, 1.5, H * 0.25);
+  }
+}
+
+/* 曲线状态行（优先级：外部覆盖 > 无帧 > 停更 > 间断 > 静音 > 实时） */
+function updateCurveMeta(override) {
+  let text, cls = 'ok';
+  if (override) {
+    text = override.text; cls = override.cls;
+  } else if (!audioFrames.length) {
+    text = '等待数据（未见到音频帧）'; cls = 'muted';
+  } else if (observe.idlePolls >= 8) {
+    text = '音频停更（可能独占录音/采集中断）——绘制停顿不代表静音'; cls = 'err';
+  } else if (audioFrames[audioFrames.length - 1].kind === 'gap') {
+    text = '间断：' + (audioFrames[audioFrames.length - 1].reason || '未知原因'); cls = 'err';
+  } else if (audioFrames[audioFrames.length - 1].rms <= 0.001) {
+    text = '静音中（有数据，电平≈0）'; cls = 'muted';
+  } else {
+    text = '实时';
+  }
+  document.getElementById('curve-status').textContent = text;
+  document.getElementById('curve-status').className = cls;
+  const lastText = '最后更新：' + (lastAudioAt ? hhmmss(lastAudioAt) : '--:--:--');
+  document.getElementById('curve-last').textContent = lastText;
+  document.getElementById('curve-canvas').setAttribute('aria-label',
+    '实时声音曲线（最近 10 秒包络）。' + text + '。' + lastText + '。');
+}
+
+/* ---- 同轮交互（按 turn 合并；耗时从事件 t_mono 差计算） ---- */
+
+function fmtMs(ms) {
+  return ms >= 1000 ? (ms / 1000).toFixed(2) + ' s' : Math.round(ms) + ' ms';
+}
+
+function routeText(card) {
+  if (!card.route) { return '（尚未知实际路由）'; }
+  return (ROUTE_LABELS[card.route] || card.route) + '（' + card.route + '）';
+}
+
+function turnCardHtml(c) {
+  const first = (c.requestMono !== null && c.firstDeltaMono !== null)
+    ? fmtMs((c.firstDeltaMono - c.requestMono) * 1000) : '—';
+  const total = (c.turnMono !== null && c.endMono !== null)
+    ? fmtMs((c.endMono - c.turnMono) * 1000) : '—';
+  let reply;
+  if (c.reply !== null) { reply = vlEscape(c.reply); }
+  else if (c.fail !== null) { reply = '<span class="err">模型失败：' + vlEscape(c.fail) + '</span>'; }
+  else if (c.cancelled) { reply = '<span class="muted">已取消</span>'; }
+  else { reply = '<span class="muted">（等待回复…）</span>'; }
+  // 僵尸卡兜底（U8 对抗评审 F4）：被打断的播报不落终态事件——超过 60s
+  // 仍无 speak_done/interrupt 的卡如实标注，不永久假装"等待中"
+  const pendingForever = c.endMono === null &&
+    (Date.now() / 1000 - (c.clientSeenAt || 0)) > 60;
+  const speak = c.speakResult ? vlEscape(c.speakResult)
+    : (pendingForever ? '<span class="muted">（无结束回执——被新会话接管或被打断）</span>'
+                      : '（等待播报结束）');
+  return '<div class="turn-card' + (c.interrupted ? ' is-interrupted' : '') +
+    '" data-turn="' + c.turnId + '">' +
+    '<div class="turn-line"><span class="turn-role">用户</span>' +
+    vlEscape(c.userText || '（未捕获语句文本）') + '</div>' +
+    '<div class="turn-line"><span class="turn-role">路由</span>' + vlEscape(routeText(c)) + '</div>' +
+    '<div class="turn-line"><span class="turn-role">回复</span>' + reply + '</div>' +
+    '<div class="turn-meta">首段 ' + first + ' · 语句→播报结束 ' + total +
+    ' · ' + speak + '</div></div>';
+}
+
+function renderTurns() {
+  const view = document.getElementById('turns-view');
+  const ids = Array.from(turnCards.keys()).sort((a, b) => b - a).slice(0, TURN_CARD_LIMIT);
+  view.innerHTML = ids.length
+    ? ids.map(id => turnCardHtml(turnCards.get(id))).join('')
+    : '<p class="muted">（暂无语音轮次，与 LIRA 说一句话试试）</p>';
+  const unlinkedBlock = document.getElementById('unlinked-block');
+  const unlinkedView = document.getElementById('unlinked-view');
+  if (unlinkedLlm.length) {
+    unlinkedBlock.hidden = false;
+    unlinkedView.innerHTML = unlinkedLlm.slice().reverse().map(ev => rowHtml(ev)).join('');
+  } else {
+    unlinkedBlock.hidden = true;
+    unlinkedView.innerHTML = '';
+  }
+}
+
+/* ---- 日志区（语音事件 / 模型交互 / 系统日志） ---- */
+
+function captureSummary(ev) {
+  if (ev.kind !== 'audio') return null;
+  const m = ev.text.match(/^收到处理后音频：RMS=(-?[\d.]+) dBFS，峰值=([\d.]+)，削波=([\d.]+)%，路由=(\w+)，播报占用=(True|False)；唤醒 KWS 持续检测（未报告新命中）$/);
+  if (!m || ![m[1], m[2], m[3]].every(x => Number.isFinite(Number(x))) || Number(m[3]) !== 0) return null;
+  const level = Number(m[2]) === 0 ? '静音' : '有输入';
+  const route = {wake: '待唤醒', asr: '识别中', playback: '播放控制'}[m[4]] || m[4];
+  return {key: [m[4], m[5], level].join('/'), count: 1, firstTs: ev.ts,
+    id: String(ev.seq) + '-' + ev.ts,
+    label: route + ' · ' + level + (m[5] === 'True' ? ' · 播报中' : '') + ' · KWS 检测中'};
+}
+
+function rowHtml(ev) {
+  const label = LOG_KIND_LABELS[ev.kind] || ev.kind;
+  if (ev.audioSummary) {
+    const a = ev.audioSummary;
+    return '<details class="vl-row vl-audio-summary" data-kind="audio" data-group="' + vlEscape(a.id) +
+      '"><summary><span class="vl-ts">' + hhmmss(ev.ts * 1000) +
+      '</span> <span class="vl-kind">[收音]</span> ' + vlEscape(a.label) +
+      ' · 共 ' + a.count + ' 次 <span class="vl-ts">（' + hhmmss(a.firstTs * 1000) +
+      '—' + hhmmss(ev.ts * 1000) + '）</span></summary><div class="vl-audio-detail">最近一次明细：' +
+      vlEscape(ev.text) + '</div></details>';
+  }
+  return '<div class="vl-row ' + rowClass(ev.kind) + '" data-kind="' + vlEscape(ev.kind) +
+    '"><span class="vl-ts">' + hhmmss(ev.ts * 1000) +
+    '</span> <span class="vl-kind">[' + label + ']</span> ' + vlEscape(ev.text) + '</div>';
+}
+
+function rowClass(kind) {
+  if (kind === 'llm_fail' || kind === 'llm_cancel' || kind === 'speak_interrupt' || kind === 'privacy') {
+    return 'vl-bad';
+  }
+  if (kind === 'wake') { return 'vl-wake'; }
+  if (isModelKind(kind) || kind === 'llm') { return 'vl-llm'; }
+  if (kind === 'speak' || kind === 'speak_done') { return 'vl-speak'; }
+  return '';
+}
+
+function logRowMatches(item, kw, kindSel) {
+  // 筛选值由 renderLog 取一次传入（U8 效率审查：逐行 getElementById 在
+  // 500 行缓冲下单次渲染多达上千次 DOM 查询）
+  if (logTab === 'sys') { return !kw || item.indexOf(kw) !== -1; }
+  if (kindSel && item.kind !== kindSel) { return false; }
+  return !kw || item.text.indexOf(kw) !== -1;
+}
+
+function rebuildKindOptions(buf) {
+  const sel = document.getElementById('log-kind');
+  if (logTab === 'sys') {
+    sel.innerHTML = '<option value="">全部</option>';
+    sel.disabled = true;
+    lastKindSig = '';
+    return;
+  }
+  sel.disabled = false;
+  const kinds = [];
+  for (const ev of buf) { if (kinds.indexOf(ev.kind) === -1) { kinds.push(ev.kind); } }
+  const sig = kinds.join(',');
+  if (sig === lastKindSig) { return; } // 种类未变不重建，避免打断选择
+  lastKindSig = sig;
+  const current = sel.value;
+  sel.innerHTML = '<option value="">全部</option>' + kinds.map(k =>
+    '<option value="' + vlEscape(k) + '">' + (LOG_KIND_LABELS[k] || k) + '</option>').join('');
+  sel.value = (current === '' || kinds.indexOf(current) !== -1) ? current : '';
+}
+
+function renderLog(force) {
+  // 脏标记按 tab 分账（U8 效率审查：全局脏标记会让未变化 tab 全量重建）
+  if (!force && !logDirty[logTab]) { return; }
+  logDirty[logTab] = false;
+  const view = document.getElementById('log-view');
+  const buf = logBuffers[logTab];
+  document.getElementById('log-refresh-btn').hidden = logTab !== 'sys';
+  rebuildKindOptions(buf);
+  // 暂停滚动（默认勾选）时绝不自动滚；跟随时仅当已滚到底才贴底
+  const follow = !document.getElementById('log-pause').checked &&
+    view.scrollTop + view.clientHeight >= view.scrollHeight - 8;
+  const kw = document.getElementById('log-filter').value.trim();
+  const kindSel = document.getElementById('log-kind').value;
+  const rows = [];
+  const expanded = new Set(Array.from(view.querySelectorAll('details[data-group][open]'), el => el.dataset.group));
+  for (let i = buf.length - 1; i >= 0 && rows.length < LOG_RENDER_LIMIT; i--) {
+    if (logRowMatches(buf[i], kw, kindSel)) {
+      rows.push(logTab === 'sys'
+        ? '<div class="vl-row"><span class="vl-sys-line">' + vlEscape(buf[i]) + '</span></div>'
+        : rowHtml(buf[i]));
+    }
+  }
+  view.innerHTML = rows.length ? rows.join('') : '<p class="muted">（暂无匹配事件）</p>';
+  for (const detail of view.querySelectorAll('details[data-group]')) {
+    detail.open = expanded.has(detail.dataset.group);
+  }
+  if (follow) { view.scrollTop = view.scrollHeight; }
+  const captures = buf.reduce((n, item) => n + (item.audioSummary ? item.audioSummary.count - 1 : 0), 0);
+  out('log-out', buf.length + ' 条缓冲' + (captures ? '（重复收音已合并 ' + captures + ' 条）' : '') +
+    (rows.length < buf.length ? '（显示最近 ' + rows.length + ' 条）' : ''), 'muted');
+}
+
+function setLogTab(tab) {
+  logTab = tab;
+  lastKindSig = '';
+  for (const t of ['voice', 'model', 'sys']) {
+    document.getElementById('tab-' + t).setAttribute('aria-selected', t === tab ? 'true' : 'false');
+  }
+  renderLog(true);
+  saveWorkspace();
+}
+
+/* vlClear 语义并入：只清前端展示缓冲（服务端环不受影响） */
+function clearActiveLog() {
+  logBuffers[logTab].length = 0;
+  renderLog(true);
+}
+
+async function loadLogs() {
+  const r = await api('/dev/api/logs');
+  if (r.status !== 200) {
+    const msg = r.body.error || ('加载失败: ' + r.status);
+    logBuffers.sys = ['（' + msg + '）'];
+    renderLog(true);
+    return out('log-out', msg, 'err');
+  }
+  logBuffers.sys = r.body.lines || [];
+  renderLog(true);
+  out('log-out', logBuffers.sys.length + ' 条', 'ok');
+}
+
+function initLogControls() {
+  document.getElementById('log-filter').addEventListener('input', function () { renderLog(true); });
+  document.getElementById('log-kind').addEventListener('change', function () { renderLog(true); });
+}
+
+/* ---------- 磁贴展开/收起（键盘语义见文件头注释） ---------- */
+
+const WORKSPACE_KEY = 'lira.dev.workspace.v1';
+let workspaceReady = false;
+
+function workspaceTiles() {
+  return [...document.querySelectorAll('#workspace > .tile')];
+}
+
+function saveWorkspace() {
+  if (!workspaceReady) return;
+  const tiles = workspaceTiles();
+  const details = {};
+  for (const tile of tiles) {
+    details[tile.id] = [...tile.querySelectorAll('details:not([data-group])')].map(d => d.open);
+  }
+  const state = {version:1, order:tiles.map(t => t.id),
+    open:tiles.filter(t => !t.hidden).map(t => t.id), details, logTab,
+    scrollY:window.scrollY, sidebarScroll:document.querySelector('.app-center').scrollTop};
+  try { localStorage.setItem(WORKSPACE_KEY, JSON.stringify(state)); } catch (_) {}
+}
+
+function restoreWorkspace() {
+  let saved = null;
+  try {
+    const state = JSON.parse(localStorage.getItem(WORKSPACE_KEY));
+    if (state?.version === 1 && Array.isArray(state.open) && Array.isArray(state.order)) saved = state;
+  } catch (_) {}
+  if (saved) {
+    const tiles = new Map(workspaceTiles().map(t => [t.id,t]));
+    for (const id of new Set(saved.order)) {
+      const tile = tiles.get(id);
+      if (tile) document.getElementById('workspace').appendChild(tile);
+    }
+    for (const tile of workspaceTiles()) {
+      setTileOpen(tile, saved.open.includes(tile.id));
+      const states = saved.details?.[tile.id];
+      if (Array.isArray(states)) [...tile.querySelectorAll('details:not([data-group])')].forEach((d,i) => {d.open = states[i] === true;});
+    }
+    if (['voice','model','sys'].includes(saved.logTab)) setLogTab(saved.logTab);
+  }
+  workspaceReady = true;
+  document.getElementById('workspace').addEventListener('toggle', saveWorkspace, true);
+  new MutationObserver(saveWorkspace).observe(document.getElementById('workspace'), {childList:true});
+  window.addEventListener('pagehide', saveWorkspace);
+  let scrollTimer;
+  const onScroll = () => { clearTimeout(scrollTimer); scrollTimer = setTimeout(saveWorkspace,150); };
+  window.addEventListener('scroll',onScroll,{passive:true});
+  document.querySelector('.app-center').addEventListener('scroll',onScroll,{passive:true});
+  if (saved) requestAnimationFrame(() => {
+    if (Number.isFinite(saved.sidebarScroll)) document.querySelector('.app-center').scrollTop = Math.max(0,saved.sidebarScroll);
+    if (Number.isFinite(saved.scrollY)) window.scrollTo(0,Math.max(0,saved.scrollY));
+  });
+}
+
+function setTileOpen(tile, open) {
+  const head = tile.querySelector('.tile-head');
+  const body = tile.querySelector('.tile-body');
+  if (!head || !body) { return; }
+  head.setAttribute('aria-expanded', open ? 'true' : 'false');
+  body.hidden = !open;
+  tile.hidden = !open;
+  const launcher = document.getElementById('app-' + tile.id);
+  if (launcher) {
+    launcher.setAttribute('aria-pressed', open ? 'true' : 'false');
+    launcher.querySelector('.app-state').textContent = open ? '已打开' : '打开';
+  }
+  updateWorkspaceCount();
+  if (tile.id === 'tile-voicelog') { observeLiveChange(open); }
+  if (tile.id === 'tile-voice-candidates' && open) { loadVoiceCandidates(); }
+  // 视觉磁贴收起即停预览（U8 对抗评审 F6：0.45fps 相机拉取不随折叠停止
+  // 是僵尸拉取；隐藏页场景已由 visibilitychange 覆盖）
+  if (tile.id === 'tile-vision' && !open && previewOn) { stopPreview('预览已随磁贴收起停止'); }
+  document.dispatchEvent(new CustomEvent('lira:tile-visibility', {detail: {id: tile.id, open}}));
+  saveWorkspace();
+}
+
+function updateWorkspaceCount() {
+  const count = document.querySelectorAll('#workspace > .tile:not([hidden])').length;
+  document.getElementById('workspace-count').textContent = count + ' 个 App 已打开';
+  document.getElementById('workspace-empty').hidden = count !== 0;
+}
+
+function initTiles() {
+  const apps = {
+    'tile-teaching': ['教学管理', 'M3 4h7l2 2 2-2h7v16h-7l-2 2-2-2H3z M12 6v16', 'var(--sage)'],
+    'tile-costs': ['费用与用量', 'M4 5h16v14H4z M4 9h16 M14 14h3', 'var(--sage)'],
+    'tile-voice-history': ['聊天记录', 'M4 4h16v16H4z M8 8h8M8 12h8M8 16h5', 'var(--lavender)'],
+    'tile-doubao-lab': ['豆包对话', 'M4 4h16v12H9l-5 4z M8 8h8M8 12h5', 'var(--sage)'],
+    'tile-jev': ['Jev 测试', 'M4 7h16v10H4z M8 11h1m3 0h1m3 0h1 M8 15h8 M12 4v3', 'var(--apricot)'],
+    'tile-overview': ['运行概览', 'M3 12h4l3-8 4 16 3-8h4', 'var(--apricot)'],
+    'tile-settings': ['运行参数', 'M4 6h16M4 12h16M4 18h16 M8 3v6m8 0v6M10 15v6', 'var(--sage)'],
+    'tile-voicelog': ['实时交互', 'M4 8v8m4-12v16m4-13v10m4-13v16m4-12v8', 'var(--lavender)'],
+    'tile-voice-candidates': ['声纹档案', 'M8 8a4 4 0 1 0 8 0a4 4 0 1 0-8 0 M4 21v-2a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v2', 'var(--sage)'],
+    'tile-voice': ['语音链路', 'M9 5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0z M5 10v1a7 7 0 0 0 14 0v-1 M12 18v4m-4 0h8', 'var(--apricot)'],
+    'tile-vision': ['视觉链路', 'M3 7h4l2-3h6l2 3h4v13H3z M8 13a4 4 0 1 0 8 0a4 4 0 1 0-8 0', 'var(--lavender)'],
+    'tile-sync': ['设备同步', 'M4 9a8 8 0 0 1 13-5l3 3 M20 3v4h-4 M20 15a8 8 0 0 1-13 5l-3-3 M4 21v-4h4', 'var(--sage)'],
+    'tile-replay': ['场景回放', 'M5 4h14v16H5z M10 8l6 4-6 4z', 'var(--lavender)']
+  };
+  const nav = document.getElementById('app-launcher');
+  for (const head of document.querySelectorAll('.tile-head')) {
+    const tile = head.closest('.tile');
+    const [name, path, accent] = apps[tile.id];
+    const button = document.createElement('button');
+    button.type = 'button'; button.id = 'app-' + tile.id; button.className = 'app-launch';
+    button.setAttribute('aria-controls', tile.id);
+    button.title = head.querySelector('.tile-title').textContent;
+    const icon = document.createElement('span'); icon.className = 'app-icon';
+    icon.style.setProperty('--app-accent', accent);
+    const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+    svg.setAttribute('viewBox', '0 0 24 24'); svg.setAttribute('fill', 'none');
+    svg.setAttribute('stroke', 'currentColor'); svg.setAttribute('stroke-width', '1.6');
+    svg.setAttribute('stroke-linecap', 'round'); svg.setAttribute('stroke-linejoin', 'round');
+    svg.setAttribute('aria-hidden', 'true');
+    const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+    shape.setAttribute('d', path); svg.appendChild(shape); icon.appendChild(svg);
+    const label = document.createElement('span'); label.className = 'app-label'; label.textContent = name;
+    const state = document.createElement('span'); state.className = 'app-state';
+    button.append(icon, label, state); nav.appendChild(button);
+    const open = head.getAttribute('aria-expanded') === 'true';
+    tile.hidden = !open; button.setAttribute('aria-pressed', String(open));
+    state.textContent = open ? '已打开' : '打开';
+    head.title = '关闭 ' + name;
+    head.setAttribute('aria-label', '关闭 ' + name);
+    button.addEventListener('click', () => setTileOpen(tile, tile.hidden));
+    head.addEventListener('click', function () {
+      setTileOpen(tile, false);
+      button.focus();
+    });
+  }
+  updateWorkspaceCount();
+  // Escape closes the current window and returns focus to its launcher.
+  document.addEventListener('keydown', function (e) {
+    if (e.key !== 'Escape') { return; }
+    const launcher = e.target?.closest?.('.app-launch');
+    const tile = e.target?.closest?.('.tile') ||
+      (launcher ? document.getElementById(launcher.getAttribute('aria-controls')) : null);
+    if (!tile) { return; }
+    const head = tile.querySelector('.tile-head');
+    if (head && head.getAttribute('aria-expanded') === 'true') {
+      setTileOpen(tile, false);
+      document.getElementById('app-' + tile.id).focus();
+    }
+  });
+}
+
+/* ---------- 装配：按页面分派 ---------- */
+
+function initLogin() {
+  const form = document.getElementById('dev-login-form');
+  if (form) {
+    form.addEventListener('submit', function (e) { e.preventDefault(); doLogin(); });
+  }
+}
+
+function initConsole() {
+  initTiles();
+  initObserveVisibility();
+  initLogControls();
+  loadStatus();
+  // Other App listeners must be installed before restored visibility events.
+  setTimeout(restoreWorkspace, 0);
+  // 实时区默认折叠：展开磁贴才开始 observe 节拍（KTD4 停订阅纪律）
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  if (document.getElementById('dev-login-form')) { initLogin(); }
+  else if (document.getElementById('dev-console')) { initConsole(); }
+});

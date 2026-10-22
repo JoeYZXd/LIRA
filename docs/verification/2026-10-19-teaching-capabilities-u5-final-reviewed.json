@@ -1,0 +1,430 @@
+[
+  {
+    "case": "complete",
+    "passed": true,
+    "expected": "completed",
+    "actual": [
+      "completed"
+    ],
+    "pcm_frames": 229786,
+    "drains": [
+      16.181,
+      23.188
+    ],
+    "events": [
+      {
+        "at": 1.046,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.627,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报。青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 12.097,
+        "kind": "assistant_text",
+        "text": "已接收，正在准备逐字播报这段内容。"
+      },
+      {
+        "at": 12.574,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 16.049,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 16.181,
+        "kind": "assistant_delivered",
+        "text": "已接收，正在准备逐字播报这段内容。"
+      },
+      {
+        "at": 16.544,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 17.377,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 17.387,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.575,
+        "name": "start_exact_speech"
+      }
+    ],
+    "protocol": [
+      {
+        "at": 0.334,
+        "kind": "session.created"
+      },
+      {
+        "at": 1.046,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 9.627,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      },
+      {
+        "at": 10.575,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 10.625,
+        "kind": "session.updated"
+      },
+      {
+        "at": 11.902,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 12.097,
+        "kind": "response.output_text.done"
+      },
+      {
+        "at": 12.574,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 16.049,
+        "kind": "response.done"
+      },
+      {
+        "at": 16.544,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 17.377,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 17.387,
+        "kind": "response.done"
+      },
+      {
+        "at": 23.579,
+        "kind": "session.updated"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "99c6409576a44db6a7afca614e688cc4",
+        "status": "completed",
+        "name": "start_exact_speech",
+        "args_hash": "60332cd8a4166e68aab381bd6bc666c775d791d51400633b824ea6f2c986e907",
+        "result": {
+          "status": "completed",
+          "speech_id": "85db3b876d9f45729678ae59ad250484"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "interrupt",
+    "passed": true,
+    "expected": "interrupted",
+    "actual": [
+      "interrupted"
+    ],
+    "pcm_frames": 90818,
+    "drains": [
+      14.949
+    ],
+    "events": [
+      {
+        "at": 1.069,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.65,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报。青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 11.295,
+        "kind": "assistant_text",
+        "text": "已接收，正在排队准备逐字播报。"
+      },
+      {
+        "at": 11.718,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 14.757,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 14.949,
+        "kind": "assistant_delivered",
+        "text": "已接收，正在排队准备逐字播报。"
+      },
+      {
+        "at": 15.365,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝，这是一段合成播报测试"
+      },
+      {
+        "at": 16.16,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 16.162,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 16.166,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.187,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 18.94,
+        "kind": "user_text",
+        "text": "请先停一下，暂停这次播报。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.502,
+        "name": "start_exact_speech"
+      }
+    ],
+    "protocol": [
+      {
+        "at": 0.361,
+        "kind": "session.created"
+      },
+      {
+        "at": 1.069,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 9.65,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      },
+      {
+        "at": 10.502,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 10.547,
+        "kind": "session.updated"
+      },
+      {
+        "at": 10.94,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 11.295,
+        "kind": "response.output_text.done"
+      },
+      {
+        "at": 11.718,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 14.757,
+        "kind": "response.done"
+      },
+      {
+        "at": 15.365,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 16.159,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 16.162,
+        "kind": "response.done"
+      },
+      {
+        "at": 16.166,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 16.231,
+        "kind": "session.updated"
+      },
+      {
+        "at": 18.94,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "9d83c6fd8cc24861a7b56640dc62d7e1",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "6c8ee50220e39e17ede2ea15e7b905c1fb73d5ccf1a9933c08a660651a52a553",
+        "result": {
+          "status": "interrupted",
+          "speech_id": "7775c1f1cab44843b9d67224d756fcb8"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "expected": "cancelled",
+    "actual": [
+      "cancelled"
+    ],
+    "pcm_frames": 66471,
+    "drains": [
+      14.488
+    ],
+    "events": [
+      {
+        "at": 1.06,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.645,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，逐字播报。青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 11.288,
+        "kind": "assistant_text",
+        "text": "已接收，正在排队准备播报。"
+      },
+      {
+        "at": 11.642,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 14.457,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 14.488,
+        "kind": "assistant_delivered",
+        "text": "已接收，正在排队准备播报。"
+      },
+      {
+        "at": 14.874,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 14.877,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 14.933,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 14.936,
+        "kind": "input_started",
+        "text": ""
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.556,
+        "name": "start_exact_speech"
+      }
+    ],
+    "protocol": [
+      {
+        "at": 0.348,
+        "kind": "session.created"
+      },
+      {
+        "at": 1.06,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 9.645,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      },
+      {
+        "at": 10.556,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 10.615,
+        "kind": "session.updated"
+      },
+      {
+        "at": 11.004,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 11.288,
+        "kind": "response.output_text.done"
+      },
+      {
+        "at": 11.641,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 14.457,
+        "kind": "response.done"
+      },
+      {
+        "at": 14.874,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 14.929,
+        "kind": "session.updated"
+      },
+      {
+        "at": 14.929,
+        "kind": "response.canceled"
+      },
+      {
+        "at": 14.933,
+        "kind": "response.done"
+      },
+      {
+        "at": 14.936,
+        "kind": "conversation.item.input_audio_transcription.started"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "d5c32fa534b64ee4b9ac2c0463cc264c",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "60332cd8a4166e68aab381bd6bc666c775d791d51400633b824ea6f2c986e907"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  }
+]

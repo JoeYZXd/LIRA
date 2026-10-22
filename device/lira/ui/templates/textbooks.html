@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% set asset_versions = asset_versions|default({}) %}
+{% set embedded = request is defined and request.query_params.get("embedded") == "1" %}
+{% block extra %}<link rel="stylesheet" href="/dev/static/textbooks.css?v={{ asset_versions.get('textbooks.css','shelf-r9') }}"><script src="/dev/static/textbooks.js?v={{ asset_versions.get('textbooks.js','shelf-r9') }}" defer></script>{% if embedded %}<script src="/dev/static/teaching-embed.js?v={{ asset_versions.get('teaching-embed.js','shelf-r9') }}" defer></script><style>main{max-width:none;margin:0;padding:12px}body{background:var(--surface)}.card{box-shadow:none}#page-link{display:none}</style>{% endif %}{% endblock %}
+{% block content %}
+{% if not embedded %}<a href="/dev">返回控制台</a>
+<a href="/dev/teaching">返回教学管理</a>{% endif %}
+<p id="notice" role="status" aria-live="polite" aria-atomic="true"></p>
+<a id="login-link" href="/dev" hidden>重新登录</a>
+<section id="library-section" aria-labelledby="library-heading"><div class="book-editor-head"><h1 id="library-heading">我的课本</h1><button type="button" id="open-upload">导入课本</button></div><div id="library" class="book-shelf">正在读取…</div></section>
+<details class="card" id="upload-panel" hidden><summary id="upload-heading">导入新课本</summary><form id="upload-form"><label for="source-files">课本文件</label><input id="source-files" name="files" type="file" accept=".pdf,.png,.jpg,.jpeg" multiple required><p class="muted">PDF / 图片，最多 100 MB、200 页。</p><button type="submit" id="upload-button" class="primary">上传课本</button></form></details>
+<section id="editor" hidden aria-labelledby="editor-heading">
+<div class="book-editor-head"><h1 id="editor-heading" tabindex="-1">课本核对</h1><button id="back-library" type="button">返回书架</button></div>
+<p id="draft-state" class="muted"></p><button id="revise-book" type="button" hidden>建立修订草稿，逐课核对</button>
+<div class="book-tabs" role="tablist" aria-label="课本工作区">
+<button type="button" id="book-tab-results" role="tab" aria-selected="true" aria-controls="book-panel-results" data-book-tab="results">核对结果</button>
+<button type="button" id="book-tab-info" role="tab" aria-selected="false" tabindex="-1" aria-controls="book-panel-info" data-book-tab="info">课本信息</button>
+<button type="button" id="book-tab-pages" role="tab" aria-selected="false" tabindex="-1" aria-controls="book-panel-pages" data-book-tab="pages">课本书页</button>
+<button type="button" id="book-tab-lessons" role="tab" aria-selected="false" tabindex="-1" aria-controls="book-panel-lessons" data-book-tab="lessons">课文</button>
+</div>
+<fieldset id="edit-fields">
+<section id="book-panel-results" class="book-sheet" role="tabpanel" aria-labelledby="book-tab-results"><h2>核对结果</h2><p id="review-count"></p><ul id="warnings"></ul><div id="review-summary"></div><div class="actions"><button id="recognize" type="button">识别课本</button><button id="publish" class="primary" type="button">确认核对并保存教材</button></div></section>
+<section id="book-panel-info" class="book-sheet" role="tabpanel" aria-labelledby="book-tab-info" hidden><h2>课本信息</h2><label for="book-title">教材名称</label><input id="book-title" type="text" maxlength="160"><label for="cover-page">课本封面</label><select id="cover-page"><option value="">无封面</option></select><button type="button" id="save-cover">保存封面</button><div id="info-cover-preview" class="info-cover-preview"></div></section>
+<section id="book-panel-pages" class="book-sheet" role="tabpanel" aria-labelledby="book-tab-pages" hidden><h2>课本书页</h2><div class="page-toolbar"><button type="button" id="previous-page">上一页</button><label for="source-page">书页</label><select id="source-page"></select><button type="button" id="next-page">下一页</button><button type="button" id="set-page-cover">设为封面</button><span id="page-cover-state"></span></div><p id="empty-pages" hidden>暂无导入书页</p><div class="page-browser"><nav id="page-thumbnails" class="page-thumbnails" aria-label="课本书页缩略图"></nav><div class="page-workspace"><div class="source-pane"><a id="page-link" target="_blank" rel="noopener">放大原页</a><img id="page-image" alt="" hidden><details><summary>识别文字</summary><pre id="page-text"></pre></details></div><div class="page-association"><h3>本页关联</h3><p id="page-linked-units"></p><div id="page-linked-lessons" class="page-linked-lessons"></div><label for="page-unit">单元（选填）</label><input id="page-unit" type="number" min="1" max="999"><label for="page-lessons">课次（可多选）</label><select id="page-lessons" multiple size="8"></select><button type="button" id="save-page-links">保存本页关联</button><p id="page-association-state" class="muted"></p></div></div></div></section>
+<section id="book-panel-lessons" class="book-sheet" role="tabpanel" aria-labelledby="book-tab-lessons" hidden><div class="lesson-heading"><h2>课文</h2><button id="return-source-page" type="button" hidden>返回原书页</button></div><div class="lesson-workspace"><nav id="lesson-directory" class="lesson-directory" aria-label="按单元选择课次"></nav><div><div id="lessons"></div><div class="actions"><button id="previous-lesson" type="button">上一课</button><button id="next-lesson" type="button">下一课</button><button id="review-lesson" type="button">核对本课并保存草稿</button><button id="add-lesson" type="button">添加课文</button></div></div></div></section>
+<div class="book-savebar"><span id="dirty-state" role="status"></span><button id="save" type="button">保存草稿</button></div>
+</fieldset></section>
+{% endblock %}

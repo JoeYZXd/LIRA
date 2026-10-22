@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% block extra %}
+<style>
+  /* 聊天页补充样式：仅组合 base.html 设计令牌，不新造色板 */
+  .chat-members {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: var(--space-3);
+  }
+  .chat-member-card {
+    display: flex; align-items: center; gap: var(--space-3);
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: var(--radius-lg); padding: var(--space-4);
+    box-shadow: var(--shadow-sm); text-decoration: none;
+    color: var(--ink); font-size: var(--fs-body); font-weight: 600;
+  }
+  .chat-avatar { font-size: 40px; line-height: 1; }
+  .chat-head { display: flex; align-items: center; gap: var(--space-3); margin-bottom: var(--space-4); }
+  .chat-head .chat-name { font-size: var(--fs-h2); font-weight: 700; }
+  .chat-log {
+    max-height: 60vh; overflow-y: auto;
+    display: flex; flex-direction: column; gap: var(--space-2);
+  }
+  .chat-msg { display: flex; }
+  .chat-msg.me { justify-content: flex-end; }
+  .chat-msg.lira { justify-content: flex-start; }
+  .chat-bubble {
+    max-width: 80%; padding: var(--space-2) var(--space-4);
+    border-radius: var(--radius-lg);
+    background: var(--surface); border: 1px solid var(--border);
+    white-space: pre-wrap; word-break: break-word;
+  }
+  .chat-msg.me .chat-bubble {
+    background: var(--brand); color: var(--surface); border: none;
+    border-bottom-right-radius: var(--radius-sm);
+  }
+  .chat-msg.lira .chat-bubble { border-bottom-left-radius: var(--radius-sm); }
+  .chat-meta { font-size: var(--fs-small); color: var(--ink-soft); margin: 0 var(--space-2); }
+  .chat-msg.me .chat-meta { text-align: right; }
+  .chat-meta .chat-degrade { color: var(--danger); }
+  .chat-retry { margin-left: var(--space-2); }
+  .chat-more-row { text-align: center; margin: var(--space-3) 0; }
+  .emoji-row { display: flex; flex-wrap: wrap; gap: var(--space-2); margin: var(--space-2) 0; }
+  .emoji-opt {
+    display: flex; align-items: center; gap: var(--space-1);
+    background: var(--surface); border: 2px solid var(--border-strong);
+    border-radius: var(--radius-md); padding: var(--space-1) var(--space-2);
+    cursor: pointer; font-size: 24px;
+  }
+  .emoji-opt input { margin: 0; width: auto; accent-color: var(--brand); }
+  #chat-form { display: flex; gap: var(--space-3); align-items: stretch; }
+  #chat-form input { flex: 1; margin: 0; }
+</style>
+{% endblock %}
+{% block content %}
+{% if not chat_available %}
+  <section class="card">
+    <h1>和小丽拉聊天</h1>
+    <p class="muted">{{ unavailable_note }}</p>
+    <p><a href="/">返回设备面板</a></p>
+  </section>
+{% elif mode == 'picker' %}
+  <h1>和小丽拉聊天</h1>
+  <p class="muted">选一位家人，进入和 TA 的聊天。</p>
+  {% if error %}<p class="error">{{ error }}</p>{% endif %}
+  {% if members %}
+  <section class="card">
+    <div class="chat-members">
+      {% for m in members %}
+      <a class="chat-member-card" href="/chat/{{ m.id }}">
+        <span class="chat-avatar">{{ m.emoji }}</span>
+        <span class="chat-name">{{ m.name }}</span>
+      </a>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+  <section class="card">
+    <h2>{{ '创建第一位家人' if not members else '添加家人' }}</h2>
+    <form method="post" action="/chat/members">
+      <input type="text" name="name" placeholder="家人的称呼，比如：妈妈" maxlength="{{ max_name_chars }}" required>
+      <div class="emoji-row">
+        {% for e in emoji_presets %}
+        <label class="emoji-opt">
+          <input type="radio" name="emoji" value="{{ e }}" {% if loop.first %}checked{% endif %}>
+          <span>{{ e }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <button class="primary" type="submit">创建</button>
+    </form>
+  </section>
+{% else %}
+  <div class="chat-head">
+    <a href="/chat">← 选人</a>
+    <span class="chat-avatar">{{ member.emoji }}</span>
+    <span class="chat-name">{{ member.name }}</span>
+  </div>
+  <div id="chat-root" data-member-id="{{ member.id }}" data-oldest-id="{{ oldest_id }}">
+    <div id="chat-log" class="card chat-log">
+      {% if not messages %}<p class="muted">{{ greeting }}</p>{% endif %}
+      {%- for msg in messages %}
+      <div class="chat-msg {{ 'me' if msg.role == 'user' else 'lira' }}" data-id="{{ msg.id }}">
+        <div class="chat-bubble">{{ msg.content }}</div>
+      </div>
+      {%- endfor %}
+    </div>
+    <div class="chat-more-row">
+      <button id="btn-more" class="small" type="button" {% if not has_more %}hidden{% endif %}>加载更多</button>
+    </div>
+    <section class="card">
+      <form id="chat-form">
+        <input type="text" id="chat-input" name="text" placeholder="想说什么就打给我吧" autocomplete="off" maxlength="{{ max_message_chars }}">
+        <button id="btn-send" class="primary" type="submit">发送</button>
+      </form>
+      <p id="chat-err" class="error" hidden></p>
+    </section>
+    <details class="card">
+      <summary>管理这位家人</summary>
+      {% if rename_error %}<p class="error">{{ rename_error }}</p>{% endif %}
+      <form method="post" action="/chat/{{ member.id }}/rename" class="inline">
+        <label for="rename-input">称呼</label>
+        <input id="rename-input" type="text" name="name" value="{{ member.name }}" maxlength="{{ max_name_chars }}" required>
+        <button class="small primary" type="submit">改名</button>
+      </form>
+      <form method="post" action="/chat/{{ member.id }}/delete" id="form-delete" style="margin-top: var(--space-3)">
+        <button id="del-ask" class="small danger" type="button">删除这位家人（连同聊天记录）</button>
+        <span id="del-confirm" hidden>
+          <span class="error">聊天记录会一起删掉，确定吗？</span>
+          <button class="small danger" type="submit">确定删除</button>
+          <button id="del-cancel" class="small" type="button">先不删</button>
+        </span>
+      </form>
+    </details>
+  </div>
+{% endif %}
+{% if mode == 'conversation' %}
+{# 会话页专属脚本：选人页 / 暂不可用页不携带（页内自判分支已无必要） #}
+<script>
+(function () {
+  'use strict';
+  var root = document.getElementById('chat-root');
+  var log = document.getElementById('chat-log');
+  if (!root || !log) { return; } // 会话元素缺失时的防御性退出（正常仅在会话视图渲染本脚本）
+  var form = document.getElementById('chat-form');
+  var input = document.getElementById('chat-input');
+  var btn = document.getElementById('btn-send');
+  var errEl = document.getElementById('chat-err');
+  var btnMore = document.getElementById('btn-more');
+  var memberId = Number(root.dataset.memberId); // 数值 ID 只走 dataset
+  var oldestId = Number(root.dataset.oldestId);
+  var sending = false; // 单飞：在途期间忽略再次提交（服务端另有全局单飞）
+  var SEND_TIMEOUT_MS = 90000; // 单次请求总时限：fetch 无默认超时，需显式兜底
+
+  function abortLater(ctrl) {
+    var timer = setTimeout(function () { ctrl.abort(); }, SEND_TIMEOUT_MS);
+    return timer;
+  }
+
+  // 转义纪律：动态文本一律 createElement + textContent 进 DOM（元素内容
+  // 位置）；不拼 HTML 字符串注入节点，动态值绝不拼进属性字符串。
+  function scrollBottom() { log.scrollTop = log.scrollHeight; }
+
+  function bubbleEl(role) {
+    var wrap = document.createElement('div');
+    wrap.className = 'chat-msg ' + (role === 'user' ? 'me' : 'lira');
+    var b = document.createElement('div');
+    b.className = 'chat-bubble';
+    wrap.appendChild(b);
+    return wrap;
+  }
+
+  function bubbleText(wrap) { return wrap.querySelector('.chat-bubble').textContent; }
+
+  function addBubble(text, role) {
+    var wrap = bubbleEl(role);
+    wrap.querySelector('.chat-bubble').textContent = text;
+    log.appendChild(wrap);
+    scrollBottom();
+    return wrap;
+  }
+
+  // meta 行多态：发送中（pending）/ 未发送 + 降级文案 + 重发 / 已保存未回复
+  // （无重发）/ 已回复但未存历史（常驻标注）/ 清除（null）
+  function renderMeta(wrap, opts) {
+    var old = wrap.querySelector('.chat-meta');
+    if (old) { old.parentNode.removeChild(old); }
+    if (!opts) { return; }
+    var meta = document.createElement('div');
+    meta.className = 'chat-meta';
+    meta.textContent = opts.label;
+    if (opts.copy) {
+      var line = document.createElement('span');
+      line.className = 'chat-degrade';
+      line.textContent = opts.copy; // 降级文案（服务端 phrasebook 原样惰性呈现）
+      meta.appendChild(line);
+    }
+    if (opts.retry) {
+      var retry = document.createElement('button');
+      retry.type = 'button';
+      retry.className = 'small chat-retry';
+      retry.textContent = '重发';
+      retry.addEventListener('click', function () { performSend(bubbleText(wrap), wrap); });
+      meta.appendChild(retry);
+    }
+    wrap.appendChild(meta);
+  }
+
+  function performSend(text, existing) {
+    if (sending) { return; }
+    text = String(text || '').replace(/^\s+|\s+$/g, '');
+    if (!text) { return; }
+    sending = true;
+    btn.disabled = true;
+    btn.textContent = '思考中';
+    errEl.hidden = true;
+    var wrap = existing || addBubble(text, 'user'); // 乐观待定气泡
+    renderMeta(wrap, { label: '发送中…' });
+    scrollBottom();
+    var ctrl = new AbortController(); // 90s 兜底；超时走下方网络异常分支（中止即 reject）
+    var timer = abortLater(ctrl);
+    fetch('/chat/' + memberId + '/messages', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text: text }),
+      signal: ctrl.signal
+    }).then(function (r) {
+      return r.json().catch(function () { return null; });
+    }).then(function (j) {
+      if (j && j.state === 'ok') {
+        if (j.message) {
+          // 落库失败（saved=False）：回复照常展示，meta 常驻标注；不给重发
+          // ——再发一次生成的是新回复，找不回本条
+          renderMeta(wrap, { label: '已回复', copy: String(j.message) });
+        } else {
+          renderMeta(wrap, null);
+        }
+        // 仅当输入框仍是发出的那句时清空（等待期间用户新打的内容保留）
+        if (input.value.replace(/^\s+|\s+$/g, '') === text) { input.value = ''; }
+        if (j.reply) { addBubble(String(j.reply), 'assistant'); }
+        return;
+      }
+      // 任一降级态：保留气泡、附降级文案；已落库轮（隐私拦截，saved=true）
+      // 标注"已保存（未回复）"且不给重发——重发会把同一条文本再存一遍
+      var saved = !!(j && j.saved);
+      var copy = (j && j.message) ? String(j.message) : '发送失败，请稍后再试。';
+      renderMeta(wrap, {
+        label: saved ? '已保存（未回复）' : '未发送',
+        copy: copy,
+        retry: !saved
+      });
+      errEl.textContent = copy;
+      errEl.hidden = false;
+    }).catch(function () {
+      renderMeta(wrap, { label: '未发送', copy: '网络异常，消息没有发出去。', retry: true });
+      errEl.textContent = '网络异常，消息没有发出去。';
+      errEl.hidden = false;
+    }).finally(function () {
+      clearTimeout(timer);
+      sending = false;
+      btn.disabled = false;
+      btn.textContent = '发送';
+    });
+  }
+
+  form.addEventListener('submit', function (ev) {
+    ev.preventDefault();
+    performSend(input.value, null);
+  });
+
+  if (btnMore) {
+    btnMore.addEventListener('click', function () {
+      if (btnMore.disabled) { return; }
+      btnMore.disabled = true;
+      var ctrl = new AbortController(); // 与发送同款 90s 兜底（中止走网络异常分支）
+      var timer = abortLater(ctrl);
+      fetch('/chat/' + memberId + '/messages?before=' + oldestId, { signal: ctrl.signal })
+        .then(function (r) { return r.json(); })
+        .then(function (j) {
+          var items = (j && j.messages) ? j.messages : [];
+          var anchor = log.scrollHeight; // prepend 保持滚动锚点不跳
+          for (var i = items.length - 1; i >= 0; i--) { // 倒序前插：整页旧→新落在已有气泡之上
+            var m = items[i];
+            var wrap = bubbleEl(m.role === 'user' ? 'user' : 'assistant');
+            wrap.querySelector('.chat-bubble').textContent = String(m.content);
+            wrap.dataset.id = m.id;
+            log.insertBefore(wrap, log.firstChild);
+          }
+          log.scrollTop += log.scrollHeight - anchor;
+          if (items.length) { oldestId = Number(items[0].id); }
+          if (!j || !j.has_more) { btnMore.hidden = true; } // 服务端 has_more 即尽头信号，永久隐藏
+        })
+        .catch(function () {
+          errEl.textContent = '加载更早的聊天失败，请再试一次。';
+          errEl.hidden = false;
+        })
+        .finally(function () {
+          clearTimeout(timer);
+          btnMore.disabled = false;
+        });
+    });
+  }
+
+  // 删除成员：页内确认后才提交（无浏览器原生 confirm）
+  var delAsk = document.getElementById('del-ask');
+  var delConfirm = document.getElementById('del-confirm');
+  var delCancel = document.getElementById('del-cancel');
+  var formDelete = document.getElementById('form-delete');
+  if (delAsk && delConfirm && formDelete) {
+    delAsk.addEventListener('click', function () {
+      delAsk.hidden = true;
+      delConfirm.hidden = false;
+    });
+    if (delCancel) {
+      delCancel.addEventListener('click', function () {
+        delConfirm.hidden = true;
+        delAsk.hidden = false;
+      });
+    }
+    formDelete.addEventListener('submit', function (ev) {
+      if (delConfirm.hidden) { ev.preventDefault(); } // 未确认不提交
+    });
+  }
+
+  scrollBottom(); // 初始视图停在新消息端
+})();
+</script>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,15 @@
+{
+  "run_id": "2026-10-16-jev-cache-probe",
+  "branch": "feat/home-console-chat",
+  "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+  "verdict": "Ready to merge",
+  "completed_at": "2026-10-16T03:23:46.686909+00:00",
+  "status": "degraded",
+  "scope": "Explicit uncommitted feature only; seven named files plus new TestJevProbe browser class",
+  "review_type": "Static read-only review; full skill orchestration prerequisites not met",
+  "cross_model": "Not run: fixed route could not bind explicit narrow scope including untracked files",
+  "independent_reviewers": "Two existing reviewers reused with combined correctness/security/API and testing/reliability/frontend lenses; not a complete per-persona structured roster",
+  "validators": "One independent candidate check returned false because current tree already fixes successor-expiry race",
+  "product_edits": false,
+  "tests_run": false
+}

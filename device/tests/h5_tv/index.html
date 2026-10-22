@@ -1,0 +1,6 @@
+<!doctype html><html lang="zh"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>本地电视模拟 · TC1</title>
+<style>*{box-sizing:border-box}body{margin:0;background:#102330;color:#edf6ff;font-family:system-ui,sans-serif}header{padding:12px;background:#21475a}h1{font-size:19px;margin:0}#state{padding:12px}#recognition{height:260px;display:flex;flex-wrap:wrap;align-content:center;justify-content:center;gap:12px;padding:14px}#recognition span{line-height:1.15}#controls{display:flex;flex-wrap:wrap;gap:8px;padding:12px}button{font:inherit;padding:12px;min-height:46px;background:#d5edf3;border:0;border-radius:8px}#logs{padding:12px;font-size:12px;height:116px;overflow:auto}#counter{padding:8px 12px}</style>
+<header><h1>本地电视模拟 · 单次默写回归</h1><small>H5 音频回调证据，不代表实体电视声学验收</small></header>
+<div id="state">等待连接</div><div id="recognition"></div><div id="counter"></div>
+<div id="controls"><button id="unlock">启用测试音频</button><button data-action="start">准备好了，开始</button><button data-action="confirm">看完／写好了</button><button data-action="replay">再读一次</button><button data-action="pause">暂停</button><button data-action="resume">继续／重试</button></div><div id="logs" role="log"></div>
+<script src="/tv-simulator.js"></script></html>

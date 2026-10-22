@@ -1,0 +1,7 @@
+{
+  "mode": "doubao_realtime",
+  "state": "listening",
+  "realtime_audio_output": "device_with_tv_dictation",
+  "cloud_active": true,
+  "error": ""
+}

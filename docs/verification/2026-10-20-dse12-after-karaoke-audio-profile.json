@@ -1,0 +1,31 @@
+{
+  "android": "6.0.1",
+  "audio_inputs": [
+    {
+      "id": 9,
+      "type": 11,
+      "name": "USB-Audio - 1080P USB Camera"
+    }
+  ],
+  "camera_count": 1,
+  "camera_api": "Camera2 JPEG ImageReader",
+  "camera_error": "android.hardware.camera2.CameraAccessException: The camera device is removable and has been disconnected from the Android device, or the camera service has shut down the connection due to a higher-priority access request for the camera device.",
+  "camera_disconnected": true,
+  "audio_finished": true,
+  "sample_rate": 16000,
+  "channels": 1,
+  "audio_attempts": [
+    {
+      "source": 1,
+      "rate": 16000,
+      "channels": 1,
+      "state": 1,
+      "recording_state": 3,
+      "samples": 9760,
+      "peak": 6,
+      "rms": 0.812744288622519,
+      "actual_type": 11,
+      "actual_name": "USB-Audio - 1080P USB Camera"
+    }
+  ]
+}

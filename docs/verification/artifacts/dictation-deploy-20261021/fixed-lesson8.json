@@ -1,0 +1,78 @@
+{
+  "task_id": "8cb890b5160a43dd94d67995ef919375",
+  "content_hash": "8a6ebd6909785930a5fa5012e18213f6a1c9f23df33515d84a0b161f8f5baed5",
+  "model": "kimi-k3",
+  "skill_revision": 2,
+  "state": "completed",
+  "recognition_words": [
+    "远近闻名",
+    "风景",
+    "山区",
+    "省份",
+    "秀丽",
+    "神奇",
+    "神仙",
+    "盘子",
+    "手指",
+    "巨石",
+    "伸手",
+    "都是",
+    "著名",
+    "抢走",
+    "形状",
+    "岩石"
+  ],
+  "dictation_words": 7,
+  "event_count": 79,
+  "sequence": true,
+  "completion_events": 1,
+  "replay_events": 1,
+  "pause_events": 1,
+  "review_status": "unreviewed",
+  "pcm": [
+    {
+      "asset": "speech.7bd9d53b62f054cb4c7066875a9465c9dcfbe03b",
+      "rms": 0.1199963134604072,
+      "peak": 0.424530029296875
+    },
+    {
+      "asset": "speech.8a63274ae9d3b1c69594771f61aca3be63ce7841",
+      "rms": 0.1199963161907712,
+      "peak": 0.737884521484375
+    },
+    {
+      "asset": "speech.52b1a0bb17e79a9b5babe5eddfa33810ea2bd210",
+      "rms": 0.1199962865365859,
+      "peak": 0.43011474609375
+    },
+    {
+      "asset": "speech.c2f71c1b10ef9d80fd9451fda2a3fbcf4d5dfe82",
+      "rms": 0.11999636535123305,
+      "peak": 0.463226318359375
+    },
+    {
+      "asset": "speech.c687c64eecc48c5d658368b13f23a7db30f36d3b",
+      "rms": 0.11999628910413793,
+      "peak": 0.65277099609375
+    },
+    {
+      "asset": "speech.53a0f1ba4d74fbf5697ed262fca8239b148e700d",
+      "rms": 0.11999651052435621,
+      "peak": 0.531402587890625
+    },
+    {
+      "asset": "speech.291b0888f1c619c377d6bea46669ec27ef8a4ffd",
+      "rms": 0.11999620851140114,
+      "peak": 0.59674072265625
+    }
+  ],
+  "notes": "Assistant-operated demonstration. No child answers or mastery claimed. Acoustic audibility still subject to user hearing; route/drain and microphone signal observed.",
+  "completion_action": "task_completed",
+  "final_apk_sha256": "9857b2b7dcd5ba010cc21ba4d9f6048ad412d05bf954fbba23f1518c32e21f33",
+  "regression": {
+    "python_311": "509 passed in 40.20s",
+    "final_transport_and_agent": "7 passed",
+    "java_entrypoints": 9,
+    "offline_h5": "1 passed in 51.70s"
+  }
+}

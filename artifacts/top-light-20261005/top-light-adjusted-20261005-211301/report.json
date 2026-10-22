@@ -1,0 +1,35 @@
+[
+  {
+    "round": 1,
+    "image": "light-1.jpg",
+    "gain": 128,
+    "exposure": 6400,
+    "source_luma": 48.63892364501953,
+    "random_luma_noise": 1.272870324967326,
+    "source_clipped_fraction": 2.717706400742115e-06,
+    "output_clipped_fraction": 0.04645164173623995,
+    "text": "1、2、3，木头人\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。"
+  },
+  {
+    "round": 2,
+    "image": "light-2.jpg",
+    "gain": 128,
+    "exposure": 3200,
+    "source_luma": 24.29427146911621,
+    "random_luma_noise": 0.9295154408641483,
+    "source_clipped_fraction": 6.794266001855287e-07,
+    "output_clipped_fraction": 1.509836889301175e-06,
+    "text": "1、2、3，木头人\n动物们正在玩\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里"
+  },
+  {
+    "round": 3,
+    "image": "light-3.jpg",
+    "gain": 192,
+    "exposure": 3200,
+    "source_luma": 36.2177734375,
+    "random_luma_noise": 1.3044324678745043,
+    "source_clipped_fraction": 1.5853287337662339e-06,
+    "output_clipped_fraction": 2.8686900896722326e-06,
+    "text": "1、2、3，木头人\n动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n把数量最多的图形贴纸贴在方框里。"
+  }
+]

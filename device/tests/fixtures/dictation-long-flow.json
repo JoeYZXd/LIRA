@@ -1,0 +1,99 @@
+{
+  "case": "TC1",
+  "max_seconds": 900,
+  "max_child_turns": 60,
+  "initial_request": "帮测试孩子默写第二课",
+  "clarification_reply": "使用《合成语文甲》第二课，教材编号 tc1-a。",
+  "book_id": "tc1-a",
+  "owner_id": 1,
+  "two": [
+    "登",
+    "鹳",
+    "雀",
+    "楼",
+    "依",
+    "尽",
+    "黄",
+    "层",
+    "更",
+    "瀑",
+    "遥",
+    "挂",
+    "前",
+    "川",
+    "炉",
+    "烟",
+    "紫",
+    "日"
+  ],
+  "four": [
+    "晴",
+    "清",
+    "情",
+    "请",
+    "睛",
+    "蜻",
+    "声",
+    "生",
+    "升",
+    "深",
+    "身",
+    "晨"
+  ],
+  "words": [
+    "晴天",
+    "清水",
+    "心情",
+    "请问",
+    "眼睛",
+    "蜻蜓",
+    "声音",
+    "生活",
+    "升起",
+    "深水",
+    "身体",
+    "早晨"
+  ],
+  "prior_wrong_words": [
+    "清水",
+    "声音"
+  ],
+  "playback": {
+    "repeat_count": 3,
+    "interval_ms": 1000,
+    "speech_rate": 1
+  },
+  "viewport": {
+    "width": 540,
+    "height": 640
+  },
+  "faults": [
+    "replay",
+    "wait_reminder",
+    "question_followup",
+    "ordinary_pause",
+    "lease_disconnect",
+    "reload",
+    "playback_failure"
+  ],
+  "recognition_words": [
+    "登高",
+    "鹳鸟",
+    "麻雀",
+    "高楼",
+    "依靠",
+    "尽头",
+    "黄河",
+    "楼层",
+    "更好",
+    "瀑布",
+    "遥远",
+    "挂图",
+    "前方",
+    "山川",
+    "香炉",
+    "烟花",
+    "紫色",
+    "日出"
+  ]
+}

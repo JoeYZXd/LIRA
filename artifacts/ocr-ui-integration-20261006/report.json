@@ -1,0 +1,13 @@
+{
+  "text": "好玩的\n数学\n美丽街区大改造\n李一婧设计\n美丽街区的空地上要盖新房子了。号码为单数的空地上会盖\n各种各样的小店，双数会盖可以住的房子。快从贴纸上找到这些\n建筑物贴上来吧。\n书",
+  "timings_ms": {
+    "capture_ms": 0,
+    "decode_ms": 259,
+    "det_ms": 1651,
+    "rec_ms": 384
+  },
+  "status": 200,
+  "detector_calls": 25,
+  "capture_source": "/home/orangepi/lira/camera-experiments/ocr-live-20261006-150236/capture.jpg",
+  "source_kind": "saved live camera JPEG replay"
+}

@@ -1,0 +1,483 @@
+[
+  {
+    "case": "interrupt",
+    "passed": true,
+    "expected": "interrupted",
+    "actual": [
+      "interrupted"
+    ],
+    "pcm_frames": 104172,
+    "drains": [
+      19.673
+    ],
+    "events": [
+      {
+        "at": 1.049,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.642,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 15.356,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 15.855,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 19.616,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 19.673,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，请稍等。"
+      },
+      {
+        "at": 20.04,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 20.755,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 20.755,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 20.756,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 23.522,
+        "kind": "user_text",
+        "text": "请先停一下，暂停这次播报。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.57,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.603,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.637,
+        "name": "get_capability_operation"
+      }
+    ],
+    "protocol": [
+      {
+        "at": 0.342,
+        "kind": "session.created"
+      },
+      {
+        "at": 1.049,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 9.642,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      },
+      {
+        "at": 10.57,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 10.615,
+        "kind": "session.updated"
+      },
+      {
+        "at": 12.603,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 14.637,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 15.277,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 15.356,
+        "kind": "response.output_text.done"
+      },
+      {
+        "at": 15.855,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 19.616,
+        "kind": "response.done"
+      },
+      {
+        "at": 20.04,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 20.755,
+        "kind": "response.done"
+      },
+      {
+        "at": 20.755,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 20.826,
+        "kind": "session.updated"
+      },
+      {
+        "at": 23.522,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "7bd7db1bfa5741e0ad215800520d890f",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "60332cd8a4166e68aab381bd6bc666c775d791d51400633b824ea6f2c986e907",
+        "result": {
+          "status": "interrupted",
+          "speech_id": "668127924f5e42ea92f717d8354f1e01"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "interrupt",
+    "passed": true,
+    "expected": "interrupted",
+    "actual": [
+      "interrupted"
+    ],
+    "pcm_frames": 93238,
+    "drains": [
+      17.311
+    ],
+    "events": [
+      {
+        "at": 0.994,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.581,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 13.374,
+        "kind": "assistant_text",
+        "text": "播报正在进行中，稍等片刻就能完成啦。"
+      },
+      {
+        "at": 13.849,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 17.007,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 17.311,
+        "kind": "assistant_delivered",
+        "text": "播报正在进行中，稍等片刻就能完成啦。"
+      },
+      {
+        "at": 17.701,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 18.406,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 18.407,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 18.408,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 21.236,
+        "kind": "user_text",
+        "text": "请先停一下，暂停这次播报。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.534,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.601,
+        "name": "get_capability_operation"
+      }
+    ],
+    "protocol": [
+      {
+        "at": 0.298,
+        "kind": "session.created"
+      },
+      {
+        "at": 0.994,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 9.581,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      },
+      {
+        "at": 10.533,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 10.586,
+        "kind": "session.updated"
+      },
+      {
+        "at": 12.601,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 13.139,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 13.374,
+        "kind": "response.output_text.done"
+      },
+      {
+        "at": 13.849,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 17.007,
+        "kind": "response.done"
+      },
+      {
+        "at": 17.701,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 18.406,
+        "kind": "response.done"
+      },
+      {
+        "at": 18.407,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 18.46,
+        "kind": "session.updated"
+      },
+      {
+        "at": 21.237,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "60f77af8cd64439491cbf4e61c8d1059",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "60332cd8a4166e68aab381bd6bc666c775d791d51400633b824ea6f2c986e907",
+        "result": {
+          "status": "interrupted",
+          "speech_id": "90f2f0bf59ae4a1597b1632bbf568d32"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "interrupt",
+    "passed": true,
+    "expected": "interrupted",
+    "actual": [
+      "interrupted"
+    ],
+    "pcm_frames": 156526,
+    "drains": [
+      22.161
+    ],
+    "events": [
+      {
+        "at": 1.006,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.608,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙子纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 15.801,
+        "kind": "assistant_text",
+        "text": "正在按要求逐字播报指定内容，播报完成后会结束这段语音输出。"
+      },
+      {
+        "at": 16.516,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 21.869,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 22.161,
+        "kind": "assistant_delivered",
+        "text": "正在按要求逐字播报指定内容，播报完成后会结束这段语音输出。"
+      },
+      {
+        "at": 22.536,
+        "kind": "assistant_prompt",
+        "text": "青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 23.271,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.273,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 23.275,
+        "kind": "interrupted",
+        "text": "本地唤醒打断播报，等待新的语音指令。"
+      },
+      {
+        "at": 26.119,
+        "kind": "user_text",
+        "text": "请先停一下，暂停这次播报。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.516,
+        "name": "start_exact_speech"
+      },
+      {
+        "at": 12.586,
+        "name": "get_capability_operation"
+      },
+      {
+        "at": 14.934,
+        "name": "get_capability_operation"
+      }
+    ],
+    "protocol": [
+      {
+        "at": 0.289,
+        "kind": "session.created"
+      },
+      {
+        "at": 1.006,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 9.608,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      },
+      {
+        "at": 10.516,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 10.562,
+        "kind": "session.updated"
+      },
+      {
+        "at": 12.586,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 14.934,
+        "kind": "response.function_call_arguments.done"
+      },
+      {
+        "at": 15.564,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 15.801,
+        "kind": "response.output_text.done"
+      },
+      {
+        "at": 16.516,
+        "kind": "response.output_audio.done"
+      },
+      {
+        "at": 21.869,
+        "kind": "response.done"
+      },
+      {
+        "at": 22.535,
+        "kind": "response.output_audio.started"
+      },
+      {
+        "at": 23.271,
+        "kind": "response.done"
+      },
+      {
+        "at": 23.273,
+        "kind": "conversation.item.input_audio_transcription.started"
+      },
+      {
+        "at": 23.329,
+        "kind": "session.updated"
+      },
+      {
+        "at": 26.119,
+        "kind": "conversation.item.input_audio_transcription.completed"
+      }
+    ],
+    "operations": [
+      {
+        "operation_id": "209e38a20f4f4738a1865fbfea344de8",
+        "status": "cancelled",
+        "name": "start_exact_speech",
+        "args_hash": "60332cd8a4166e68aab381bd6bc666c775d791d51400633b824ea6f2c986e907",
+        "result": {
+          "status": "interrupted",
+          "speech_id": "95fcf1943a4b4b59af83f3c461bc33ca"
+        }
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  }
+]

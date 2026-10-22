@@ -1,0 +1,22 @@
+{
+  "deployed": true,
+  "backup": "/home/orangepi/lira/deploy-backups/status-colors-20261020-072213",
+  "before_service": {
+    "MainPID": "72724",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "after_service": {
+    "MainPID": "72724",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "files": {
+    "lira/ui/static/textbooks.js": "9991dd2fba934ae031adf3e1d1190fc072b2c4d735cb0225041569af47857ad9",
+    "lira/ui/static/textbooks.css": "daeffe84811f4295d090f09b941a3c10d4630fc9c0723741ab12284530a33abf"
+  },
+  "protected_files_unchanged": true,
+  "textbook_data_unchanged": true,
+  "mode_unchanged": true,
+  "capabilities_flag": "false"
+}

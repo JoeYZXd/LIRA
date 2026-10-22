@@ -134,3 +134,33 @@ async def test_whitelist_pause_via_real_kws(harness):
     await h.settle(0.3)
     assert h.engine.state is State.STANDBY
     assert h.ir_sent == []
+
+
+async def test_wake_pause_then_continue_uses_cached_page(harness):
+    h = harness
+    await _start_article_reading(h)
+    session = h.pipeline.session
+    await h.engine.on_wake()
+    assert session.is_paused
+    assert h.engine.state is State.LISTENING
+    await h.say_text("继续")
+    assert h.engine.state is State.READING
+    assert h.pipeline.session is session and not session.is_paused
+    assert h.camera.capture_calls == 1
+    await h.say_text("停止")
+
+
+async def test_expired_chat_fresh_wake_can_resume_reading(harness):
+    h = harness
+    await _start_article_reading(h)
+    session = h.pipeline.session
+    await h.engine.on_wake()
+    h.engine.tick(h.engine.now + 9)
+    assert h.engine.state is State.STANDBY
+    assert h.pipeline.session is session and session.is_paused
+    await h.engine.on_wake()
+    await h.say_text("继续")
+    assert h.engine.state is State.READING
+    assert h.pipeline.session is session
+    assert h.camera.capture_calls == 1
+    await h.say_text("停止")

@@ -1,0 +1,2386 @@
+diff --git a/device/lira/diagnostics/camera_quality.py b/device/lira/diagnostics/camera_quality.py
+index 710c73f..a1e27aa 100644
+--- a/device/lira/diagnostics/camera_quality.py
++++ b/device/lira/diagnostics/camera_quality.py
+@@ -1,828 +1,748 @@
+-"""Controlled ISP NV12 capture. Run ``python -m lira.diagnostics.camera_quality --help``.
+-
+-Only linear, single-plane NV12 is supported. v4l2-ctl verbose dqbuf bytesused
+-records define serialized frame boundaries; sizeimage is capacity, not payload.
+-"""
+-
+-from __future__ import annotations
+-
+-import argparse
+-import asyncio
+-import contextlib
+-import hashlib
+-import json
+-import os
+-import re
+-import signal
+-import sys
+-import time
+-import uuid
+-from pathlib import Path
+-
+-CONTROLS = ("vertical_blanking", "exposure", "analogue_gain")
+-
+-
+-def parse_format(raw):
+-    def field(pattern):
+-        m = re.search(pattern, raw, re.MULTILINE)
+-        if not m:
+-            raise ValueError("Missing/ambiguous format field: " + pattern)
+-        return m
+-
+-    w, h = map(int, field(r"Width/Height\s*:\s*(\d+)/(\d+)").groups())
+-    pixel = field(r"Pixel Format\s*:\s*'([^']+)'").group(1)
+-    planes = re.search(r"Number of planes\s*:\s*(\d+)", raw)
+-    stride = int(field(r"Bytes per Line\s*:\s*(\d+)").group(1))
+-    capacity = int(field(r"Size Image\s*:\s*(\d+)").group(1))
+-    if (
+-        pixel != "NV12"
+-        or (planes and int(planes.group(1)) != 1)
+-        or w % 2
+-        or h % 2
+-        or stride < w
+-        or stride % 2
+-    ):
+-        raise ValueError(
+-            "Only even, linear single-plane NV12 with explicit stride is supported"
+-        )
+-    if (
+-        len(re.findall(r"Bytes per Line\s*:", raw)) != 1
+-        or capacity < stride * h * 3 // 2
+-    ):
+-        raise ValueError("Ambiguous plane layout or undersized capacity")
+-    metadata = {
+-        k: v.strip()
+-        for k, v in re.findall(
+-            r"^\s*(Colorspace|Transfer Function|YCbCr/HSV Encoding|Quantization|Field)\s*:\s*(.+)$",
+-            raw,
+-            re.MULTILINE,
+-        )
+-    }
+-    if metadata.get("Field", "None").lower() not in ("none", "any"):
+-        raise ValueError("Interlaced NV12 unsupported")
+-    return {
+-        "width": w,
+-        "height": h,
+-        "pixelformat": pixel,
+-        "planes": 1,
+-        "bytesperline": stride,
+-        "sizeimage": capacity,
+-        "color": metadata,
+-    }
+-
+-
+-def decode_nv12(payload, fmt):
+-    import cv2
+-    import numpy as np
+-
+-    stride, h, w = fmt["bytesperline"], fmt["height"], fmt["width"]
+-    required = stride * h * 3 // 2
+-    if len(payload) != required:
+-        raise ValueError(
+-            f"NV12 payload {len(payload)} != explicit linear layout {required}"
+-        )
+-    yuv = (
+-        np.frombuffer(payload, dtype=np.uint8).reshape(h * 3 // 2, stride)[:, :w].copy()
+-    )
+-    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
+-
+-
+-def split_frames(data, bytesused, count):
+-    if (
+-        len(bytesused) != count
+-        or any(n <= 0 for n in bytesused)
+-        or sum(bytesused) != len(data)
+-    ):
+-        raise ValueError(
+-            "Frame count/payload differs from verbose dqbuf bytesused records"
+-        )
+-    frames = []
+-    offset = 0
+-    for n in bytesused:
+-        frames.append(data[offset : offset + n])
+-        offset += n
+-    return frames
+-
+-
+-def parse_controls(raw):
+-    result = {}
+-    for line in raw.splitlines():
+-        m = re.match(r"\s*(\w+)\s+0x[0-9a-f]+.*?:\s*(.*)", line)
+-        if m and m.group(1) in CONTROLS:
+-            vals = {
+-                k: int(v)
+-                for k, v in re.findall(
+-                    r"(min|max|step|default|value)=(-?\d+)", m.group(2)
+-                )
+-            }
+-            if not all(k in vals for k in ("min", "max", "step", "value")):
+-                raise ValueError("Unreadable control " + m.group(1))
+-            if vals["step"] <= 0 or vals["min"] > vals["max"]:
+-                raise ValueError("Invalid control range " + m.group(1))
+-            result[m.group(1)] = vals
+-    if set(result) != set(CONTROLS):
+-        raise ValueError("Exposure, gain and vblank ranges/readback required")
+-    return result
+-
+-
+-async def run_process(args, timeout=20):
+-    proc = await asyncio.create_subprocess_exec(
+-        *map(str, args),
+-        stdout=asyncio.subprocess.PIPE,
+-        stderr=asyncio.subprocess.PIPE,
+-        start_new_session=True,
+-    )
+-    try:
+-        out, err = await asyncio.wait_for(proc.communicate(), timeout)
+-        if proc.returncode:
+-            raise RuntimeError(
+-                f"{args!r}: exit {proc.returncode}: {err.decode(errors='replace')} {out.decode(errors='replace')}"
+-            )
+-        return out.decode(errors="replace") + err.decode(errors="replace")
+-    finally:
+-
+-        async def teardown():
+-            # The HAL launches children. Kill the session even if its leader exited.
+-            with contextlib.suppress(ProcessLookupError):
+-                os.killpg(proc.pid, signal.SIGTERM)
+-            if proc.returncode is None:
+-                try:
+-                    await asyncio.wait_for(proc.wait(), 1)
+-                except TimeoutError:
+-                    with contextlib.suppress(ProcessLookupError):
+-                        os.killpg(proc.pid, signal.SIGKILL)
+-                    await proc.wait()
+-            with contextlib.suppress(ProcessLookupError):
+-                os.killpg(proc.pid, signal.SIGKILL)
+-
+-        # Shield TERM, escalation and reaping together. Restoration and lock
+-        # release must not begin while a cancelled capture still owns a child.
+-        await finish_restore(teardown())
+-
+-
+-class DeviceLock:
+-    def __init__(self, path):
+-        self.path = Path(path)
+-        self.file = None
+-
+-    def __enter__(self):
+-        import fcntl
+-
+-        self.path.parent.mkdir(parents=True, exist_ok=True)
+-        self.file = self.path.open("a+")
+-        try:
+-            fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+-        except BaseException:  # noqa: BLE001 - close lock file on cancellation too
+-            self.file.close()
+-            raise RuntimeError("Another diagnostic capture owns the camera lock")
+-        return self
+-
+-    def __exit__(self, *exc):
+-        self.file.close()
+-
+-
+-def external_owners(nodes, proc_root=Path("/proc"), coverage=None):
+-    """Check visible ownership; record inaccessible PID details without claiming
+-    complete system-wide coverage. Kernel streaming rejection is still mandatory.
+-    Known LIRA/3A controllers are rejected even when their fd table is hidden.
+-    """
+-    owners = []
+-    targets = {str(Path(n).resolve()) for n in nodes}
+-    unavailable = []
+-    for pid in proc_root.iterdir():
+-        if not pid.name.isdigit() or int(pid.name) == os.getpid():
+-            continue
+-        comm = ""
+-        cmd = ""
+-        try:
+-            comm = (pid / "comm").read_text().strip()
+-            cmd = (
+-                (pid / "cmdline")
+-                .read_bytes()
+-                .replace(b"\x00", b" ")
+-                .decode(errors="replace")
+-            )
+-        except FileNotFoundError:
+-            continue
+-        except PermissionError:
+-            unavailable.append({"pid": int(pid.name), "check": "command"})
+-        known = any(x in (comm + " " + cmd).lower() for x in ("rkaiq", "ispserver"))
+-        known = known or (comm.startswith("python") and "-m lira.main" in cmd)
+-        opened = []
+-        try:
+-            for fd in (pid / "fd").iterdir():
+-                try:
+-                    target = os.readlink(fd)
+-                    if target in targets:
+-                        opened.append(target)
+-                except FileNotFoundError:
+-                    continue
+-                except PermissionError:
+-                    unavailable.append({"pid": int(pid.name), "check": "fd link"})
+-        except FileNotFoundError:
+-            continue
+-        except PermissionError:
+-            unavailable.append({"pid": int(pid.name), "check": "fd table"})
+-        if known or opened:
+-            owners.append(
+-                {"pid": int(pid.name), "command": cmd or comm, "nodes": opened}
+-            )
+-    if coverage is not None:
+-        coverage.update(
+-            {
+-                "method": "visible /proc commands and fd links",
+-                "complete": not unavailable,
+-                "inaccessible": unavailable,
+-                "limitation": "Hidden processes may own nodes; streaming must succeed and controls must remain stable. Operator must pause camera/3A services.",
+-            }
+-        )
+-    return owners
+-
+-
+-class CameraSession:
+-    def __init__(self, node, sensor, manifest, runner=run_process, timeout=20):
+-        self.node = node
+-        self.sensor = sensor
+-        self.m = manifest
+-        self.run = runner
+-        self.timeout = timeout
+-
+-    async def ctl(self, node, *args):
+-        return await self.run(["v4l2-ctl", "-d", node, *args], self.timeout)
+-
+-    async def controls(self):
+-        raw = await self.ctl(self.sensor, "--list-ctrls")
+-        self.m.setdefault("control_queries", []).append(raw)
+-        return parse_controls(raw)
+-
+-    async def snapshot(self):
+-        self.original_raw = await self.ctl(self.node, "--get-fmt-video")
+-        self.original_format = parse_format(self.original_raw)
+-        self.original_controls = await self.controls()
+-        self.m["original"] = {
+-            "format": self.original_format,
+-            "format_raw": self.original_raw,
+-            "controls": self.original_controls,
+-        }
+-
+-    async def set_control(self, name, value):
+-        await self.ctl(self.sensor, f"--set-ctrl={name}={value}")
+-
+-    async def setup(self, args):
+-        for name, value in [
+-            ("vertical_blanking", args.vblank),
+-            ("exposure", args.exposure),
+-            ("analogue_gain", args.gain),
+-        ]:
+-            if value is None:
+-                continue
+-            ranges = await self.controls()
+-            c = ranges[name]
+-            if not c["min"] <= value <= c["max"] or (value - c["min"]) % c["step"]:
+-                raise ValueError(f"{name}={value} outside current range/step {c}")
+-            await self.set_control(name, value)
+-        self.m["readback"] = await self.controls()
+-        if args.width is not None:
+-            await self.ctl(
+-                self.node,
+-                f"--set-fmt-video=width={args.width},height={args.height},pixelformat=NV12",
+-            )
+-        raw = await self.ctl(self.node, "--get-fmt-video")
+-        self.m["format_raw"] = raw
+-        self.m["format"] = parse_format(raw)
+-
+-    async def restore(self):
+-        errors = []
+-        # Reduce exposure before potentially reducing frame length; gain is independent.
+-        for action in (
+-            "lower_exposure",
+-            "format",
+-            "vblank",
+-            "exposure",
+-            "gain",
+-            "verify",
+-        ):
+-            try:
+-                old = self.original_controls
+-                fmt = self.original_format
+-                if action == "lower_exposure":
+-                    c = (await self.controls())["exposure"]
+-                    await self.set_control("exposure", c["min"])
+-                elif action == "format":
+-                    await self.ctl(
+-                        self.node,
+-                        f"--set-fmt-video=width={fmt['width']},height={fmt['height']},pixelformat=NV12",
+-                    )
+-                elif action == "vblank":
+-                    await self.set_control(
+-                        "vertical_blanking", old["vertical_blanking"]["value"]
+-                    )
+-                elif action == "exposure":
+-                    await self.set_control("exposure", old["exposure"]["value"])
+-                elif action == "gain":
+-                    await self.set_control(
+-                        "analogue_gain", old["analogue_gain"]["value"]
+-                    )
+-                else:
+-                    actual = await self.controls()
+-                    actual_fmt = parse_format(
+-                        await self.ctl(self.node, "--get-fmt-video")
+-                    )
+-                    self.m["restored_readback"] = actual
+-                    self.m["restored_format"] = actual_fmt
+-                    if actual_fmt != fmt or any(
+-                        actual[k]["value"] != old[k]["value"] for k in CONTROLS
+-                    ):
+-                        raise RuntimeError("Restore readback differs from snapshot")
+-            except Exception as e:  # noqa: BLE001 - attempt every restoration action
+-                errors.append(f"{action}: {e}")
+-        self.m["restore"] = {"ok": not errors, "errors": errors}
+-
+-
+-def write_json(path, obj):
+-    temp = path.with_suffix(".json.tmp")
+-    temp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+-    temp.replace(path)
+-
+-
+-async def finish_restore(coroutine):
+-    # Repeated SIGINT/cancel must not release ownership before restoration ends.
+-    task = asyncio.create_task(coroutine)
+-    cancelled = False
+-    while not task.done():
+-        try:
+-            await asyncio.shield(task)
+-        except asyncio.CancelledError:
+-            cancelled = True
+-    task.result()
+-    if cancelled:
+-        raise asyncio.CancelledError()
+-
+-
+-async def capture(args):
+-    import cv2
+-
+-    output = Path(args.output) / (
+-        "sample-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:10]
+-    )
+-    output.mkdir(parents=True, exist_ok=False)
+-    m = {
+-        "schema": "lira.camera-quality/v1",
+-        "kind": args.command,
+-        "valid": False,
+-        "capture_ok": False,
+-        "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+-        "scene": {
+-            "label": args.scene,
+-            "distance_cm": args.distance_cm,
+-            "page_description": getattr(args, "page_description", "A4 ordinary body"),
+-            "full_page_confirmed": args.full_page,
+-        },
+-        "requested": vars(args).copy(),
+-        "tool_version": 1,
+-    }
+-    m["requested"].pop("handler", None)
+-    try:
+-        with DeviceLock(args.lock):
+-            coverage = {}
+-            owners = external_owners([args.device, args.sensor], coverage=coverage)
+-            m["ownership_check"] = coverage
+-            if owners:
+-                raise RuntimeError(
+-                    f"Camera/3A externally owned; manually pause services: {owners}"
+-                )
+-            m["topology"] = await run_process(
+-                ["media-ctl", "-p", "-d", args.media], args.timeout
+-            )
+-            m["v4l2_version"] = await run_process(
+-                ["v4l2-ctl", "--version"], args.timeout
+-            )
+-            session = CameraSession(args.device, args.sensor, m, timeout=args.timeout)
+-            await session.snapshot()
+-            try:
+-                if args.command == "baseline":
+-                    if args.sensor != "/dev/v4l-subdev2":
+-                        raise ValueError(
+-                            "Production HAL hardcodes /dev/v4l-subdev2; baseline requires that sensor"
+-                        )
+-                    script = 'import asyncio,sys; from pathlib import Path; from lira.hal.board.camera_isp import V4l2IspCamera\nasync def main():\n c=V4l2IspCamera(sys.argv[1],int(sys.argv[3]),sys.argv[4]=="1")\n try:\n  await c.open(); Path(sys.argv[2]).write_bytes(await c.capture())\n finally: await c.close()\nasyncio.run(main())'
+-                    m["baseline_process"] = await run_process(
+-                        [
+-                            sys.executable,
+-                            "-c",
+-                            script,
+-                            args.device,
+-                            output / "baseline.jpg",
+-                            str(args.rotation),
+-                            "1" if args.hflip else "0",
+-                        ],
+-                        args.timeout,
+-                    )
+-                    m["readback"] = await session.controls()
+-                    m["format_raw"] = await session.ctl(args.device, "--get-fmt-video")
+-                    m["format"] = parse_format(m["format_raw"])
+-                    if cv2.imread(str(output / "baseline.jpg")) is None:
+-                        raise ValueError("Invalid baseline JPEG")
+-                    m["frames"] = [
+-                        {
+-                            "file": "baseline.jpg",
+-                            "sha256": hashlib.sha256(
+-                                (output / "baseline.jpg").read_bytes()
+-                            ).hexdigest(),
+-                        }
+-                    ]
+-                else:
+-                    await session.setup(args)
+-                    # Capture warmup and retained frames in ONE stream. All dqbuf records
+-                    # are serialized; discard warmup ourselves (no ambiguous stream-skip).
+-                    total = args.warmup + args.frames
+-                    rawpath = output / "stream.nv12"
+-                    log = await session.ctl(
+-                        args.device,
+-                        "--verbose",
+-                        "--stream-mmap",
+-                        f"--stream-count={total}",
+-                        f"--stream-to={rawpath}",
+-                    )
+-                    (output / "stream.log").write_text(log, encoding="utf-8")
+-                    sizes = [
+-                        int(x)
+-                        for x in re.findall(r"cap dqbuf:.*?bytesused:\s*(\d+)", log)
+-                    ]
+-                    payloads = split_frames(rawpath.read_bytes(), sizes, total)
+-                    after = parse_format(
+-                        await session.ctl(args.device, "--get-fmt-video")
+-                    )
+-                    if after != m["format"]:
+-                        raise ValueError("Format changed during streaming")
+-                    m["serialization"] = {
+-                        "method": "verbose cap dqbuf bytesused, all buffers written in order",
+-                        "bytesused": sizes,
+-                        "warmup_discarded": args.warmup,
+-                    }
+-                    m["frames"] = []
+-                    for i, payload in enumerate(payloads[args.warmup :]):
+-                        name = f"frame-{i:03d}"
+-                        (output / (name + ".nv12")).write_bytes(payload)
+-                        bgr = decode_nv12(payload, m["format"])
+-                        if not cv2.imwrite(str(output / (name + ".png")), bgr):
+-                            raise RuntimeError("PNG write failed")
+-                        m["frames"].append(
+-                            {
+-                                "raw": name + ".nv12",
+-                                "png": name + ".png",
+-                                "bytesused": len(payload),
+-                                "sha256": hashlib.sha256(payload).hexdigest(),
+-                            }
+-                        )
+-                    m["readback_after_capture"] = await session.controls()
+-                    if any(
+-                        m["readback"][k]["value"]
+-                        != m["readback_after_capture"][k]["value"]
+-                        for k in CONTROLS
+-                    ):
+-                        raise RuntimeError("Controls changed during capture")
+-                m["capture_ok"] = True
+-            finally:
+-                await finish_restore(session.restore())
+-            m["valid"] = m["capture_ok"] and m["restore"]["ok"]
+-    except BaseException as e:  # noqa: BLE001 - retain interrupted capture manifest
+-        m["error"] = f"{type(e).__name__}: {e}"
+-    finally:
+-        write_json(output / "manifest.json", m)
+-    print(str(output))
+-    return 0 if m["valid"] else 1
+-
+-
+-ROI_NAMES = ("center", "top_left", "top_right", "bottom_left", "bottom_right")
+-
+-
+-def validate_rois(rois, width, height):
+-    """Coordinates refer to the oriented image, manually marked for this scene."""
+-    if not isinstance(rois, dict) or set(rois) != set(ROI_NAMES):
+-        raise ValueError("Exactly five named ROIs required: " + ", ".join(ROI_NAMES))
+-    for name, rect in rois.items():
+-        if (
+-            not isinstance(rect, list)
+-            or len(rect) != 4
+-            or any(type(v) is not int for v in rect)
+-        ):
+-            raise ValueError(f"{name}: expected integer [x,y,width,height]")
+-        x, y, w, h = rect
+-        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
+-            raise ValueError(f"{name}: empty or out-of-bounds ROI")
+-    return rois
+-
+-
+-def image_metrics(image):
+-    import cv2
+-
+-    from lira.hal.board.camera_isp import _sharpness
+-
+-    y = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)[..., 0]
+-    return {
+-        "mean_luma": float(y.mean()),
+-        "dark_fraction_le_5": float((y <= 5).mean()),
+-        "highlight_fraction_ge_250": float((y >= 250).mean()),
+-        "laplacian_variance": _sharpness(image),
+-    }
+-
+-
+-def registration_evidence(frames, aligned):
+-    import cv2
+-    import numpy as np
+-
+-    from lira.hal.board.camera_isp import _ALIGN_MAX_SHIFT
+-
+-    shifts = []
+-    scale = 512.0 / frames[0].shape[1]
+-    if len(frames) > 1:
+-        smalls = [
+-            np.float32(
+-                cv2.cvtColor(
+-                    cv2.resize(f, None, fx=scale, fy=scale), cv2.COLOR_BGR2GRAY
+-                )
+-            )
+-            for f in frames
+-        ]
+-        for image in smalls[1:]:
+-            (dx, dy), response = cv2.phaseCorrelate(smalls[0], image)
+-            shifts.append(
+-                {
+-                    "reported_shift_512": [dx, dy],
+-                    "response": response,
+-                    "production_applied_shift_pixels": [dx / scale, dy / scale],
+-                }
+-            )
+-    return {
+-        "frame_count": len(frames),
+-        "aligned_mean": aligned,
+-        "method": "single_frame"
+-        if len(frames) == 1
+-        else ("production_aligned_mean" if aligned else "sharpest_frame_fallback"),
+-        "threshold_512_pixels": _ALIGN_MAX_SHIFT,
+-        "shifts": shifts,
+-        "characterization": "Synthetic +1px text displacement yields phaseCorrelate +1px; "
+-        "production applies +shift, doubling displacement instead of correcting it. "
+-        "Behavior preserved; scene-specific degradation requires inspecting crops.",
+-    }
+-
+-
+-def analyze(args):
+-    """Offline replay from validated original NV12; never opens a camera."""
+-    import cv2
+-    import numpy as np
+-
+-    from lira.hal.board.camera_isp import (
+-        _ALIGN_MAX_SHIFT,
+-        _GAIN_CAP,
+-        _GAMMA,
+-        _TARGET_LUMA,
+-        _apply_orientation,
+-        _digital_exposure,
+-        _merge_frames,
+-    )
+-
+-    output = Path(args.output) / (
+-        "stages-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:10]
+-    )
+-    output.mkdir(parents=True, exist_ok=False)
+-    m = {
+-        "schema": "lira.camera-quality-stages/v1",
+-        "kind": "stages",
+-        "valid": False,
+-        "source_manifest": str(Path(args.manifest).resolve()),
+-        "outputs": [],
+-        "metric_scope": "Auxiliary only; no automatic recommendation or OCR claim",
+-    }
+-    try:
+-        source_path = Path(args.manifest).resolve()
+-        source_bytes = source_path.read_bytes()
+-        source = json.loads(source_bytes)
+-        if (
+-            source.get("schema") != "lira.camera-quality/v1"
+-            or source.get("kind") != "capture"
+-            or source.get("valid") is not True
+-            or source.get("capture_ok") is not True
+-            or source.get("restore", {}).get("ok") is not True
+-        ):
+-            raise ValueError(
+-                "A valid, restored controlled capture manifest is required"
+-            )
+-        m["source_manifest_sha256"] = hashlib.sha256(source_bytes).hexdigest()
+-        m["scene"] = source["scene"]
+-        fmt = source["format"]
+-        # Re-validate explicit layout, not only a payload's total size.
+-        if parse_format(source["format_raw"]) != fmt:
+-            raise ValueError("Source format metadata differs from format readback")
+-        entries = source.get("frames")
+-        if not isinstance(entries, list) or not entries:
+-            raise ValueError("No source frames")
+-        requested = source["requested"]
+-        if (
+-            type(requested.get("frames")) is not int
+-            or len(entries) != requested["frames"]
+-        ):
+-            raise ValueError("Incomplete source frame count")
+-        rotation = requested.get("rotation", 0)
+-        hflip = requested.get("hflip", False)
+-        if rotation not in (0, 90, 180, 270) or type(hflip) is not bool:
+-            raise ValueError("Invalid source orientation")
+-        m["config"] = {
+-            "orientation": {"rotation": rotation, "hflip": hflip},
+-            "merge_max_shift": _ALIGN_MAX_SHIFT,
+-            "bilateral": {"diameter": 9, "sigma_color": 50, "sigma_space": 50},
+-            "digital_exposure": {
+-                "target_luma": _TARGET_LUMA,
+-                "gamma": _GAMMA,
+-                "gain_cap": _GAIN_CAP,
+-                "white_balance_cap": 2.5,
+-                "levels_percentiles": [0.5, 99.5],
+-            },
+-            "jpeg_quality": 88,
+-        }
+-        m["conversion"] = {
+-            "method": "OpenCV COLOR_YUV2BGR_NV12, same as production",
+-            "quantization": fmt.get("color", {}).get("Quantization", "unknown"),
+-            "limitation": "OpenCV NV12 conversion assumes limited video range. "
+-            "Full Range readback is a range mismatch; decoded PNG is not "
+-            "an equivalent sensor luminance measurement. No range correction applied.",
+-        }
+-        m["sources"] = []
+-        frames = []
+-        used_paths = set()
+-        for entry in entries:
+-            paths = []
+-            for key in ("raw", "png"):
+-                path = (source_path.parent / entry[key]).resolve()
+-                if path.parent != source_path.parent or path in used_paths:
+-                    raise ValueError(
+-                        "Source must be unique files within capture directory"
+-                    )
+-                used_paths.add(path)
+-                paths.append(path)
+-            rawpath, pngpath = paths
+-            payload = rawpath.read_bytes()
+-            digest = hashlib.sha256(payload).hexdigest()
+-            if digest != entry["sha256"] or len(payload) != entry["bytesused"]:
+-                raise ValueError("Source NV12 hash/size mismatch")
+-            decoded = decode_nv12(payload, fmt)
+-            pngbytes = pngpath.read_bytes()
+-            png = cv2.imdecode(np.frombuffer(pngbytes, np.uint8), cv2.IMREAD_COLOR)
+-            if png is None or not np.array_equal(png, decoded):
+-                raise ValueError("Source PNG is corrupt or differs from NV12 decoding")
+-            frames.append(_apply_orientation(decoded, rotation, hflip))
+-            m["sources"].append(
+-                {
+-                    "raw": str(rawpath),
+-                    "sha256": digest,
+-                    "png": str(pngpath),
+-                    "png_sha256": hashlib.sha256(pngbytes).hexdigest(),
+-                }
+-            )
+-        height, width = frames[0].shape[:2]
+-        rois = validate_rois(
+-            json.loads(Path(args.rois).read_text(encoding="utf-8")), width, height
+-        )
+-        m["roi_coordinate_space"] = (
+-            "oriented image; manually mark same paper text again after moving camera/page"
+-        )
+-        m["roi_rectangles"] = rois
+-
+-        def save(stage, image):
+-            h, w = image.shape[:2]
+-            validate_rois(rois, w, h)
+-            filename = stage + ".png"
+-            if not cv2.imwrite(str(output / filename), image):
+-                raise RuntimeError("PNG write failed")
+-            record = {
+-                "stage": stage,
+-                "file": filename,
+-                "sha256": hashlib.sha256((output / filename).read_bytes()).hexdigest(),
+-                "metrics": image_metrics(image),
+-                "rois": {},
+-            }
+-            for name, (x, y, rw, rh) in rois.items():
+-                crop = image[y : y + rh, x : x + rw]
+-                cropname = stage + "-" + name + ".png"
+-                if not cv2.imwrite(str(output / cropname), crop):
+-                    raise RuntimeError("ROI PNG write failed")
+-                record["rois"][name] = {
+-                    "file": cropname,
+-                    "metrics": image_metrics(crop),
+-                }
+-            m["outputs"].append(record)
+-
+-        for i, image in enumerate(frames):
+-            save(f"single-{i:03d}", image)
+-        merged, aligned = _merge_frames(frames)
+-        m["registration"] = registration_evidence(frames, aligned)
+-        save("merged", merged)
+-        denoised = cv2.bilateralFilter(merged, 9, 50, 50)
+-        save("bilateral", denoised)
+-        digital = _digital_exposure(denoised)
+-        save("digital", digital)
+-        ok, jpeg = cv2.imencode(".jpg", digital, [cv2.IMWRITE_JPEG_QUALITY, 88])
+-        if not ok:
+-            raise RuntimeError("JPEG encoding failed")
+-        jpegpath = output / "jpeg88.jpg"
+-        jpegpath.write_bytes(jpeg.tobytes())
+-        m["jpeg"] = {
+-            "file": jpegpath.name,
+-            "sha256": hashlib.sha256(jpegpath.read_bytes()).hexdigest(),
+-        }
+-        decoded = cv2.imdecode(jpeg, cv2.IMREAD_COLOR)
+-        if decoded is None:
+-            raise ValueError("JPEG decode failed")
+-        save("jpeg-decoded", decoded)
+-        m["valid"] = True
+-    except Exception as exc:  # noqa: BLE001 - retain offline failure evidence
+-        m["error"] = f"{type(exc).__name__}: {exc}"
+-    finally:
+-        write_json(output / "manifest.json", m)
+-    print(str(output))
+-    return 0 if m["valid"] else 1
+-
+-
+-def build_parser():
+-    p = argparse.ArgumentParser(description=__doc__)
+-    sub = p.add_subparsers(dest="command", required=True)
+-    q = sub.add_parser(
+-        "analyze", help="Offline same-batch stage and manually marked ROI export"
+-    )
+-    q.add_argument("--manifest", required=True, help="Controlled capture manifest.json")
+-    q.add_argument(
+-        "--rois", required=True, help="JSON mapping five names to [x,y,width,height]"
+-    )
+-    q.add_argument("--output", default="camera-experiments")
+-    for name in ("capture", "baseline", "inspect"):
+-        q = sub.add_parser(name)
+-        q.add_argument("--device", default="/dev/video11")
+-        q.add_argument("--sensor", default="/dev/v4l-subdev2")
+-        q.add_argument("--media", default="/dev/media1")
+-        q.add_argument("--timeout", type=float, default=30)
+-        q.add_argument("--lock", default="/tmp/lira-camera-quality.lock")
+-        if name == "inspect":
+-            continue
+-        q.add_argument("--output", default="camera-experiments")
+-        q.add_argument("--scene", required=True)
+-        q.add_argument("--page-description", default="A4 ordinary body")
+-        q.add_argument("--distance-cm", type=float, required=True)
+-        q.add_argument(
+-            "--full-page",
+-            action="store_true",
+-            help="Operator confirms complete A4 coverage; not inferred by tool",
+-        )
+-        q.add_argument("--exposure", type=int)
+-        q.add_argument("--gain", type=int)
+-        q.add_argument("--vblank", type=int)
+-        q.add_argument("--width", type=int)
+-        q.add_argument("--height", type=int)
+-        q.add_argument("--frames", type=int, default=3)
+-        q.add_argument("--warmup", type=int, default=5)
+-        q.add_argument("--rotation", type=int, choices=(0, 90, 180, 270), default=0)
+-        q.add_argument("--hflip", action="store_true")
+-    return p
+-
+-
+-async def dispatch(args):
+-    if args.command == "analyze":
+-        return analyze(args)
+-    if args.command == "inspect":
+-        with DeviceLock(args.lock):
+-            coverage = {}
+-            owners = external_owners([args.device, args.sensor], coverage=coverage)
+-            if owners:
+-                raise RuntimeError(f"Externally owned: {owners}")
+-            s = CameraSession(
+-                args.device,
+-                args.sensor,
+-                {"ownership_check": coverage},
+-                timeout=args.timeout,
+-            )
+-            await s.snapshot()
+-            print(json.dumps(s.m, ensure_ascii=False, indent=2))
+-        return 0
+-    if (
+-        (args.width is None) != (args.height is None)
+-        or (args.width is not None and (args.width <= 0 or args.height <= 0))
+-        or args.frames < 1
+-        or args.warmup < 0
+-        or args.distance_cm <= 0
+-        or args.timeout <= 0
+-    ):
+-        raise ValueError("Invalid dimensions/frame count/distance/timeout")
+-    return await capture(args)
+-
+-
+-def main():
+-    args = build_parser().parse_args()
+-    try:
+-        return asyncio.run(dispatch(args))
+-    except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001 - CLI error exit
+-        print(f"{type(e).__name__}: {e}", file=sys.stderr)
+-        return 1
+-
+-
+-if __name__ == "__main__":
+-    raise SystemExit(main())
++"""Controlled ISP NV12 capture. Run ``python -m lira.diagnostics.camera_quality --help``.
++
++Only linear, single-plane NV12 is supported. v4l2-ctl verbose dqbuf bytesused
++records define serialized frame boundaries; sizeimage is capacity, not payload.
++"""
++
++from __future__ import annotations
++
++import argparse
++import asyncio
++import contextlib
++import hashlib
++import json
++import os
++import re
++import signal
++import sys
++import time
++import uuid
++from pathlib import Path
++
++from lira.hal.board.nv12 import decode_nv12, parse_format, split_frames
++
++CONTROLS = ("vertical_blanking", "exposure", "analogue_gain")
++
++
++def parse_controls(raw):
++    result = {}
++    for line in raw.splitlines():
++        m = re.match(r"\s*(\w+)\s+0x[0-9a-f]+.*?:\s*(.*)", line)
++        if m and m.group(1) in CONTROLS:
++            vals = {
++                k: int(v)
++                for k, v in re.findall(
++                    r"(min|max|step|default|value)=(-?\d+)", m.group(2)
++                )
++            }
++            if not all(k in vals for k in ("min", "max", "step", "value")):
++                raise ValueError("Unreadable control " + m.group(1))
++            if vals["step"] <= 0 or vals["min"] > vals["max"]:
++                raise ValueError("Invalid control range " + m.group(1))
++            result[m.group(1)] = vals
++    if set(result) != set(CONTROLS):
++        raise ValueError("Exposure, gain and vblank ranges/readback required")
++    return result
++
++
++async def run_process(args, timeout=20):
++    proc = await asyncio.create_subprocess_exec(
++        *map(str, args),
++        stdout=asyncio.subprocess.PIPE,
++        stderr=asyncio.subprocess.PIPE,
++        start_new_session=True,
++    )
++    try:
++        out, err = await asyncio.wait_for(proc.communicate(), timeout)
++        if proc.returncode:
++            raise RuntimeError(
++                f"{args!r}: exit {proc.returncode}: {err.decode(errors='replace')} {out.decode(errors='replace')}"
++            )
++        return out.decode(errors="replace") + err.decode(errors="replace")
++    finally:
++
++        async def teardown():
++            # The HAL launches children. Kill the session even if its leader exited.
++            with contextlib.suppress(ProcessLookupError):
++                os.killpg(proc.pid, signal.SIGTERM)
++            if proc.returncode is None:
++                try:
++                    await asyncio.wait_for(proc.wait(), 1)
++                except TimeoutError:
++                    with contextlib.suppress(ProcessLookupError):
++                        os.killpg(proc.pid, signal.SIGKILL)
++                    await proc.wait()
++            with contextlib.suppress(ProcessLookupError):
++                os.killpg(proc.pid, signal.SIGKILL)
++
++        # Shield TERM, escalation and reaping together. Restoration and lock
++        # release must not begin while a cancelled capture still owns a child.
++        await finish_restore(teardown())
++
++
++class DeviceLock:
++    def __init__(self, path):
++        self.path = Path(path)
++        self.file = None
++
++    def __enter__(self):
++        import fcntl
++
++        self.path.parent.mkdir(parents=True, exist_ok=True)
++        self.file = self.path.open("a+")
++        try:
++            fcntl.flock(self.file, fcntl.LOCK_EX | fcntl.LOCK_NB)
++        except BaseException:  # noqa: BLE001 - close lock file on cancellation too
++            self.file.close()
++            raise RuntimeError("Another diagnostic capture owns the camera lock")
++        return self
++
++    def __exit__(self, *exc):
++        self.file.close()
++
++
++def external_owners(nodes, proc_root=Path("/proc"), coverage=None):
++    """Check visible ownership; record inaccessible PID details without claiming
++    complete system-wide coverage. Kernel streaming rejection is still mandatory.
++    Known LIRA/3A controllers are rejected even when their fd table is hidden.
++    """
++    owners = []
++    targets = {str(Path(n).resolve()) for n in nodes}
++    unavailable = []
++    for pid in proc_root.iterdir():
++        if not pid.name.isdigit() or int(pid.name) == os.getpid():
++            continue
++        comm = ""
++        cmd = ""
++        try:
++            comm = (pid / "comm").read_text().strip()
++            cmd = (
++                (pid / "cmdline")
++                .read_bytes()
++                .replace(b"\x00", b" ")
++                .decode(errors="replace")
++            )
++        except FileNotFoundError:
++            continue
++        except PermissionError:
++            unavailable.append({"pid": int(pid.name), "check": "command"})
++        known = any(x in (comm + " " + cmd).lower() for x in ("rkaiq", "ispserver"))
++        known = known or (comm.startswith("python") and "-m lira.main" in cmd)
++        opened = []
++        try:
++            for fd in (pid / "fd").iterdir():
++                try:
++                    target = os.readlink(fd)
++                    if target in targets:
++                        opened.append(target)
++                except FileNotFoundError:
++                    continue
++                except PermissionError:
++                    unavailable.append({"pid": int(pid.name), "check": "fd link"})
++        except FileNotFoundError:
++            continue
++        except PermissionError:
++            unavailable.append({"pid": int(pid.name), "check": "fd table"})
++        if known or opened:
++            owners.append(
++                {"pid": int(pid.name), "command": cmd or comm, "nodes": opened}
++            )
++    if coverage is not None:
++        coverage.update(
++            {
++                "method": "visible /proc commands and fd links",
++                "complete": not unavailable,
++                "inaccessible": unavailable,
++                "limitation": "Hidden processes may own nodes; streaming must succeed and controls must remain stable. Operator must pause camera/3A services.",
++            }
++        )
++    return owners
++
++
++class CameraSession:
++    def __init__(self, node, sensor, manifest, runner=run_process, timeout=20):
++        self.node = node
++        self.sensor = sensor
++        self.m = manifest
++        self.run = runner
++        self.timeout = timeout
++
++    async def ctl(self, node, *args):
++        return await self.run(["v4l2-ctl", "-d", node, *args], self.timeout)
++
++    async def controls(self):
++        raw = await self.ctl(self.sensor, "--list-ctrls")
++        self.m.setdefault("control_queries", []).append(raw)
++        return parse_controls(raw)
++
++    async def snapshot(self):
++        self.original_raw = await self.ctl(self.node, "--get-fmt-video")
++        self.original_format = parse_format(self.original_raw)
++        self.original_controls = await self.controls()
++        self.m["original"] = {
++            "format": self.original_format,
++            "format_raw": self.original_raw,
++            "controls": self.original_controls,
++        }
++
++    async def set_control(self, name, value):
++        await self.ctl(self.sensor, f"--set-ctrl={name}={value}")
++
++    async def setup(self, args):
++        for name, value in [
++            ("vertical_blanking", args.vblank),
++            ("exposure", args.exposure),
++            ("analogue_gain", args.gain),
++        ]:
++            if value is None:
++                continue
++            ranges = await self.controls()
++            c = ranges[name]
++            if not c["min"] <= value <= c["max"] or (value - c["min"]) % c["step"]:
++                raise ValueError(f"{name}={value} outside current range/step {c}")
++            await self.set_control(name, value)
++        self.m["readback"] = await self.controls()
++        if args.width is not None:
++            await self.ctl(
++                self.node,
++                f"--set-fmt-video=width={args.width},height={args.height},pixelformat=NV12",
++            )
++        raw = await self.ctl(self.node, "--get-fmt-video")
++        self.m["format_raw"] = raw
++        self.m["format"] = parse_format(raw)
++
++    async def restore(self):
++        errors = []
++        # Reduce exposure before potentially reducing frame length; gain is independent.
++        for action in (
++            "lower_exposure",
++            "format",
++            "vblank",
++            "exposure",
++            "gain",
++            "verify",
++        ):
++            try:
++                old = self.original_controls
++                fmt = self.original_format
++                if action == "lower_exposure":
++                    c = (await self.controls())["exposure"]
++                    await self.set_control("exposure", c["min"])
++                elif action == "format":
++                    await self.ctl(
++                        self.node,
++                        f"--set-fmt-video=width={fmt['width']},height={fmt['height']},pixelformat=NV12",
++                    )
++                elif action == "vblank":
++                    await self.set_control(
++                        "vertical_blanking", old["vertical_blanking"]["value"]
++                    )
++                elif action == "exposure":
++                    await self.set_control("exposure", old["exposure"]["value"])
++                elif action == "gain":
++                    await self.set_control(
++                        "analogue_gain", old["analogue_gain"]["value"]
++                    )
++                else:
++                    actual = await self.controls()
++                    actual_fmt = parse_format(
++                        await self.ctl(self.node, "--get-fmt-video")
++                    )
++                    self.m["restored_readback"] = actual
++                    self.m["restored_format"] = actual_fmt
++                    if actual_fmt != fmt or any(
++                        actual[k]["value"] != old[k]["value"] for k in CONTROLS
++                    ):
++                        raise RuntimeError("Restore readback differs from snapshot")
++            except Exception as e:  # noqa: BLE001 - attempt every restoration action
++                errors.append(f"{action}: {e}")
++        self.m["restore"] = {"ok": not errors, "errors": errors}
++
++
++def write_json(path, obj):
++    temp = path.with_suffix(".json.tmp")
++    temp.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
++    temp.replace(path)
++
++
++async def finish_restore(coroutine):
++    # Repeated SIGINT/cancel must not release ownership before restoration ends.
++    task = asyncio.create_task(coroutine)
++    cancelled = False
++    while not task.done():
++        try:
++            await asyncio.shield(task)
++        except asyncio.CancelledError:
++            cancelled = True
++    task.result()
++    if cancelled:
++        raise asyncio.CancelledError()
++
++
++async def capture(args):
++    import cv2
++
++    output = Path(args.output) / (
++        "sample-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:10]
++    )
++    output.mkdir(parents=True, exist_ok=False)
++    m = {
++        "schema": "lira.camera-quality/v1",
++        "kind": args.command,
++        "valid": False,
++        "capture_ok": False,
++        "time_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
++        "scene": {
++            "label": args.scene,
++            "distance_cm": args.distance_cm,
++            "page_description": getattr(args, "page_description", "A4 ordinary body"),
++            "full_page_confirmed": args.full_page,
++        },
++        "requested": vars(args).copy(),
++        "tool_version": 1,
++    }
++    m["requested"].pop("handler", None)
++    try:
++        with DeviceLock(args.lock):
++            coverage = {}
++            owners = external_owners([args.device, args.sensor], coverage=coverage)
++            m["ownership_check"] = coverage
++            if owners:
++                raise RuntimeError(
++                    f"Camera/3A externally owned; manually pause services: {owners}"
++                )
++            m["topology"] = await run_process(
++                ["media-ctl", "-p", "-d", args.media], args.timeout
++            )
++            m["v4l2_version"] = await run_process(
++                ["v4l2-ctl", "--version"], args.timeout
++            )
++            session = CameraSession(args.device, args.sensor, m, timeout=args.timeout)
++            await session.snapshot()
++            try:
++                if args.command == "baseline":
++                    if args.sensor != "/dev/v4l-subdev2":
++                        raise ValueError(
++                            "Production HAL hardcodes /dev/v4l-subdev2; baseline requires that sensor"
++                        )
++                    script = 'import asyncio,sys; from pathlib import Path; from lira.hal.board.camera_isp import V4l2IspCamera\nasync def main():\n c=V4l2IspCamera(sys.argv[1],int(sys.argv[3]),sys.argv[4]=="1")\n try:\n  await c.open(); Path(sys.argv[2]).write_bytes(await c.capture())\n finally: await c.close()\nasyncio.run(main())'
++                    m["baseline_process"] = await run_process(
++                        [
++                            sys.executable,
++                            "-c",
++                            script,
++                            args.device,
++                            output / "baseline.jpg",
++                            str(args.rotation),
++                            "1" if args.hflip else "0",
++                        ],
++                        args.timeout,
++                    )
++                    m["readback"] = await session.controls()
++                    m["format_raw"] = await session.ctl(args.device, "--get-fmt-video")
++                    m["format"] = parse_format(m["format_raw"])
++                    if cv2.imread(str(output / "baseline.jpg")) is None:
++                        raise ValueError("Invalid baseline JPEG")
++                    m["frames"] = [
++                        {
++                            "file": "baseline.jpg",
++                            "sha256": hashlib.sha256(
++                                (output / "baseline.jpg").read_bytes()
++                            ).hexdigest(),
++                        }
++                    ]
++                else:
++                    await session.setup(args)
++                    # Capture warmup and retained frames in ONE stream. All dqbuf records
++                    # are serialized; discard warmup ourselves (no ambiguous stream-skip).
++                    total = args.warmup + args.frames
++                    rawpath = output / "stream.nv12"
++                    log = await session.ctl(
++                        args.device,
++                        "--verbose",
++                        "--stream-mmap",
++                        f"--stream-count={total}",
++                        f"--stream-to={rawpath}",
++                    )
++                    (output / "stream.log").write_text(log, encoding="utf-8")
++                    sizes = [
++                        int(x)
++                        for x in re.findall(r"cap dqbuf:.*?bytesused:\s*(\d+)", log)
++                    ]
++                    payloads = split_frames(rawpath.read_bytes(), sizes, total)
++                    after = parse_format(
++                        await session.ctl(args.device, "--get-fmt-video")
++                    )
++                    if after != m["format"]:
++                        raise ValueError("Format changed during streaming")
++                    m["serialization"] = {
++                        "method": "verbose cap dqbuf bytesused, all buffers written in order",
++                        "bytesused": sizes,
++                        "warmup_discarded": args.warmup,
++                    }
++                    m["frames"] = []
++                    for i, payload in enumerate(payloads[args.warmup :]):
++                        name = f"frame-{i:03d}"
++                        (output / (name + ".nv12")).write_bytes(payload)
++                        bgr = decode_nv12(payload, m["format"])
++                        if not cv2.imwrite(str(output / (name + ".png")), bgr):
++                            raise RuntimeError("PNG write failed")
++                        m["frames"].append(
++                            {
++                                "raw": name + ".nv12",
++                                "png": name + ".png",
++                                "bytesused": len(payload),
++                                "sha256": hashlib.sha256(payload).hexdigest(),
++                            }
++                        )
++                    m["readback_after_capture"] = await session.controls()
++                    if any(
++                        m["readback"][k]["value"]
++                        != m["readback_after_capture"][k]["value"]
++                        for k in CONTROLS
++                    ):
++                        raise RuntimeError("Controls changed during capture")
++                m["capture_ok"] = True
++            finally:
++                await finish_restore(session.restore())
++            m["valid"] = m["capture_ok"] and m["restore"]["ok"]
++    except BaseException as e:  # noqa: BLE001 - retain interrupted capture manifest
++        m["error"] = f"{type(e).__name__}: {e}"
++    finally:
++        write_json(output / "manifest.json", m)
++    print(str(output))
++    return 0 if m["valid"] else 1
++
++
++ROI_NAMES = ("center", "top_left", "top_right", "bottom_left", "bottom_right")
++
++
++def validate_rois(rois, width, height):
++    """Coordinates refer to the oriented image, manually marked for this scene."""
++    if not isinstance(rois, dict) or set(rois) != set(ROI_NAMES):
++        raise ValueError("Exactly five named ROIs required: " + ", ".join(ROI_NAMES))
++    for name, rect in rois.items():
++        if (
++            not isinstance(rect, list)
++            or len(rect) != 4
++            or any(type(v) is not int for v in rect)
++        ):
++            raise ValueError(f"{name}: expected integer [x,y,width,height]")
++        x, y, w, h = rect
++        if x < 0 or y < 0 or w <= 0 or h <= 0 or x + w > width or y + h > height:
++            raise ValueError(f"{name}: empty or out-of-bounds ROI")
++    return rois
++
++
++def image_metrics(image):
++    import cv2
++
++    from lira.hal.board.camera_isp import _sharpness
++
++    y = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)[..., 0]
++    return {
++        "mean_luma": float(y.mean()),
++        "dark_fraction_le_5": float((y <= 5).mean()),
++        "highlight_fraction_ge_250": float((y >= 250).mean()),
++        "laplacian_variance": _sharpness(image),
++    }
++
++
++def registration_evidence(frames, aligned):
++    import cv2
++    import numpy as np
++
++    from lira.hal.board.camera_isp import _ALIGN_MAX_SHIFT
++
++    shifts = []
++    scale = 512.0 / frames[0].shape[1]
++    if len(frames) > 1:
++        smalls = [
++            np.float32(
++                cv2.cvtColor(
++                    cv2.resize(f, None, fx=scale, fy=scale), cv2.COLOR_BGR2GRAY
++                )
++            )
++            for f in frames
++        ]
++        for image in smalls[1:]:
++            (dx, dy), response = cv2.phaseCorrelate(smalls[0], image)
++            shifts.append(
++                {
++                    "reported_shift_512": [dx, dy],
++                    "response": response,
++                    "production_applied_shift_pixels": [dx / scale, dy / scale],
++                }
++            )
++    return {
++        "frame_count": len(frames),
++        "aligned_mean": aligned,
++        "method": "single_frame"
++        if len(frames) == 1
++        else ("production_aligned_mean" if aligned else "sharpest_frame_fallback"),
++        "threshold_512_pixels": _ALIGN_MAX_SHIFT,
++        "shifts": shifts,
++        "characterization": "Synthetic +1px text displacement yields phaseCorrelate +1px; "
++        "production applies +shift, doubling displacement instead of correcting it. "
++        "Behavior preserved; scene-specific degradation requires inspecting crops.",
++    }
++
++
++def analyze(args):
++    """Offline replay from validated original NV12; never opens a camera."""
++    import cv2
++    import numpy as np
++
++    from lira.hal.board.camera_isp import (
++        _ALIGN_MAX_SHIFT,
++        _GAIN_CAP,
++        _LUMA_LOW,
++        _TARGET_LUMA,
++        _apply_orientation,
++        _digital_exposure,
++        _merge_frames,
++    )
++
++    output = Path(args.output) / (
++        "stages-" + time.strftime("%Y%m%d-%H%M%S") + "-" + uuid.uuid4().hex[:10]
++    )
++    output.mkdir(parents=True, exist_ok=False)
++    m = {
++        "schema": "lira.camera-quality-stages/v1",
++        "kind": "stages",
++        "valid": False,
++        "source_manifest": str(Path(args.manifest).resolve()),
++        "outputs": [],
++        "metric_scope": "Auxiliary only; no automatic recommendation or OCR claim",
++    }
++    try:
++        source_path = Path(args.manifest).resolve()
++        source_bytes = source_path.read_bytes()
++        source = json.loads(source_bytes)
++        if (
++            source.get("schema") != "lira.camera-quality/v1"
++            or source.get("kind") != "capture"
++            or source.get("valid") is not True
++            or source.get("capture_ok") is not True
++            or source.get("restore", {}).get("ok") is not True
++        ):
++            raise ValueError(
++                "A valid, restored controlled capture manifest is required"
++            )
++        m["source_manifest_sha256"] = hashlib.sha256(source_bytes).hexdigest()
++        m["scene"] = source["scene"]
++        fmt = source["format"]
++        # Re-validate explicit layout, not only a payload's total size.
++        if parse_format(source["format_raw"]) != fmt:
++            raise ValueError("Source format metadata differs from format readback")
++        entries = source.get("frames")
++        if not isinstance(entries, list) or not entries:
++            raise ValueError("No source frames")
++        requested = source["requested"]
++        if (
++            type(requested.get("frames")) is not int
++            or len(entries) != requested["frames"]
++        ):
++            raise ValueError("Incomplete source frame count")
++        rotation = requested.get("rotation", 0)
++        hflip = requested.get("hflip", False)
++        if rotation not in (0, 90, 180, 270) or type(hflip) is not bool:
++            raise ValueError("Invalid source orientation")
++        m["config"] = {
++            "orientation": {"rotation": rotation, "hflip": hflip},
++            "merge_max_shift": _ALIGN_MAX_SHIFT,
++            "bilateral": {"diameter": 9, "sigma_color": 50, "sigma_space": 50},
++            "digital_exposure": {
++                "target_luma": _TARGET_LUMA,
++                "method": "per-pixel BGR gain with highlight roll-off for dark inputs only",
++                "dark_threshold": _LUMA_LOW,
++                "gain_cap": _GAIN_CAP,
++            },
++            "white_reference_balance": "not applied; these stages are uncalibrated comparisons, not calibrated production replay",
++            "jpeg_quality": 88,
++        }
++        m["conversion"] = {
++            "method": "OpenCV COLOR_YUV2BGR_NV12, same as production",
++            "quantization": fmt.get("color", {}).get("Quantization", "unknown"),
++            "limitation": "OpenCV NV12 conversion assumes limited video range. "
++            "Full Range readback is a range mismatch; decoded PNG is not "
++            "an equivalent sensor luminance measurement. No range correction applied.",
++        }
++        m["sources"] = []
++        frames = []
++        used_paths = set()
++        for entry in entries:
++            paths = []
++            for key in ("raw", "png"):
++                path = (source_path.parent / entry[key]).resolve()
++                if path.parent != source_path.parent or path in used_paths:
++                    raise ValueError(
++                        "Source must be unique files within capture directory"
++                    )
++                used_paths.add(path)
++                paths.append(path)
++            rawpath, pngpath = paths
++            payload = rawpath.read_bytes()
++            digest = hashlib.sha256(payload).hexdigest()
++            if digest != entry["sha256"] or len(payload) != entry["bytesused"]:
++                raise ValueError("Source NV12 hash/size mismatch")
++            decoded = decode_nv12(payload, fmt)
++            pngbytes = pngpath.read_bytes()
++            png = cv2.imdecode(np.frombuffer(pngbytes, np.uint8), cv2.IMREAD_COLOR)
++            if png is None or not np.array_equal(png, decoded):
++                raise ValueError("Source PNG is corrupt or differs from NV12 decoding")
++            frames.append(_apply_orientation(decoded, rotation, hflip))
++            m["sources"].append(
++                {
++                    "raw": str(rawpath),
++                    "sha256": digest,
++                    "png": str(pngpath),
++                    "png_sha256": hashlib.sha256(pngbytes).hexdigest(),
++                }
++            )
++        height, width = frames[0].shape[:2]
++        rois = validate_rois(
++            json.loads(Path(args.rois).read_text(encoding="utf-8")), width, height
++        )
++        m["roi_coordinate_space"] = (
++            "oriented image; manually mark same paper text again after moving camera/page"
++        )
++        m["roi_rectangles"] = rois
++
++        def save(stage, image):
++            h, w = image.shape[:2]
++            validate_rois(rois, w, h)
++            filename = stage + ".png"
++            if not cv2.imwrite(str(output / filename), image):
++                raise RuntimeError("PNG write failed")
++            record = {
++                "stage": stage,
++                "file": filename,
++                "sha256": hashlib.sha256((output / filename).read_bytes()).hexdigest(),
++                "metrics": image_metrics(image),
++                "rois": {},
++            }
++            for name, (x, y, rw, rh) in rois.items():
++                crop = image[y : y + rh, x : x + rw]
++                cropname = stage + "-" + name + ".png"
++                if not cv2.imwrite(str(output / cropname), crop):
++                    raise RuntimeError("ROI PNG write failed")
++                record["rois"][name] = {
++                    "file": cropname,
++                    "metrics": image_metrics(crop),
++                }
++            m["outputs"].append(record)
++
++        for i, image in enumerate(frames):
++            save(f"single-{i:03d}", image)
++        merged, aligned = _merge_frames(frames)
++        m["registration"] = registration_evidence(frames, aligned)
++        save("merged", merged)
++        denoised = cv2.bilateralFilter(merged, 9, 50, 50)
++        save("bilateral", denoised)
++        digital = _digital_exposure(denoised)
++        save("digital", digital)
++        ok, jpeg = cv2.imencode(".jpg", digital, [cv2.IMWRITE_JPEG_QUALITY, 88])
++        if not ok:
++            raise RuntimeError("JPEG encoding failed")
++        jpegpath = output / "jpeg88.jpg"
++        jpegpath.write_bytes(jpeg.tobytes())
++        m["jpeg"] = {
++            "file": jpegpath.name,
++            "sha256": hashlib.sha256(jpegpath.read_bytes()).hexdigest(),
++        }
++        decoded = cv2.imdecode(jpeg, cv2.IMREAD_COLOR)
++        if decoded is None:
++            raise ValueError("JPEG decode failed")
++        save("jpeg-decoded", decoded)
++        m["valid"] = True
++    except Exception as exc:  # noqa: BLE001 - retain offline failure evidence
++        m["error"] = f"{type(exc).__name__}: {exc}"
++    finally:
++        write_json(output / "manifest.json", m)
++    print(str(output))
++    return 0 if m["valid"] else 1
++
++
++def build_parser():
++    p = argparse.ArgumentParser(description=__doc__)
++    sub = p.add_subparsers(dest="command", required=True)
++    q = sub.add_parser(
++        "analyze", help="Offline same-batch stage and manually marked ROI export"
++    )
++    q.add_argument("--manifest", required=True, help="Controlled capture manifest.json")
++    q.add_argument(
++        "--rois", required=True, help="JSON mapping five names to [x,y,width,height]"
++    )
++    q.add_argument("--output", default="camera-experiments")
++    for name in ("capture", "baseline", "inspect"):
++        q = sub.add_parser(name)
++        q.add_argument("--device", default="/dev/video11")
++        q.add_argument("--sensor", default="/dev/v4l-subdev2")
++        q.add_argument("--media", default="/dev/media1")
++        q.add_argument("--timeout", type=float, default=30)
++        q.add_argument("--lock", default="/tmp/lira-camera-quality.lock")
++        if name == "inspect":
++            continue
++        q.add_argument("--output", default="camera-experiments")
++        q.add_argument("--scene", required=True)
++        q.add_argument("--page-description", default="A4 ordinary body")
++        q.add_argument("--distance-cm", type=float, required=True)
++        q.add_argument(
++            "--full-page",
++            action="store_true",
++            help="Operator confirms complete A4 coverage; not inferred by tool",
++        )
++        q.add_argument("--exposure", type=int)
++        q.add_argument("--gain", type=int)
++        q.add_argument("--vblank", type=int)
++        q.add_argument("--width", type=int)
++        q.add_argument("--height", type=int)
++        q.add_argument("--frames", type=int, default=3)
++        q.add_argument("--warmup", type=int, default=5)
++        q.add_argument("--rotation", type=int, choices=(0, 90, 180, 270), default=0)
++        q.add_argument("--hflip", action="store_true")
++    return p
++
++
++async def dispatch(args):
++    if args.command == "analyze":
++        return analyze(args)
++    if args.command == "inspect":
++        with DeviceLock(args.lock):
++            coverage = {}
++            owners = external_owners([args.device, args.sensor], coverage=coverage)
++            if owners:
++                raise RuntimeError(f"Externally owned: {owners}")
++            s = CameraSession(
++                args.device,
++                args.sensor,
++                {"ownership_check": coverage},
++                timeout=args.timeout,
++            )
++            await s.snapshot()
++            print(json.dumps(s.m, ensure_ascii=False, indent=2))
++        return 0
++    if (
++        (args.width is None) != (args.height is None)
++        or (args.width is not None and (args.width <= 0 or args.height <= 0))
++        or args.frames < 1
++        or args.warmup < 0
++        or args.distance_cm <= 0
++        or args.timeout <= 0
++    ):
++        raise ValueError("Invalid dimensions/frame count/distance/timeout")
++    return await capture(args)
++
++
++def main():
++    args = build_parser().parse_args()
++    try:
++        return asyncio.run(dispatch(args))
++    except (Exception, KeyboardInterrupt) as e:  # noqa: BLE001 - CLI error exit
++        print(f"{type(e).__name__}: {e}", file=sys.stderr)
++        return 1
++
++
++if __name__ == "__main__":
++    raise SystemExit(main())
+diff --git a/device/lira/hal/board/camera_isp.py b/device/lira/hal/board/camera_isp.py
+index e2ac41d..0135d90 100644
+--- a/device/lira/hal/board/camera_isp.py
++++ b/device/lira/hal/board/camera_isp.py
+@@ -1,217 +1,252 @@
+-"""板上相机 HAL（U10/M8）：RKISP 硬件管线（NV12 mainpath）→ 数字曝光补偿。
+-
+-取代裸 Bayer 路径（camera_raw.py）：板上实测裸路径满幅列条纹（MIPI 读出
+-伪影，软件不可根治），而 **RKISP 管线内核默认链路已通**——/dev/media1
+-(rkisp0-vir2) → rkisp_mainpath (/dev/video11) 直接输出 NV12，画面完全
+-干净、细节锐利。
+-
+-曝光/增益说明：3A 需 rkaiq 守护进程（闭源，本镜像未带且无公开 deb），
+-本实现以**数字曝光补偿**替代——按帧均值锚定目标亮度做 levels+gamma，
+-干净帧上大力提亮可用。若后续装上 rkaiq（ispserver），可将补偿系数调小。
+-"""
+-
+-from __future__ import annotations
+-
+-import asyncio
+-from pathlib import Path
+-
+-import cv2
+-import numpy as np
+-
+-from lira.hal.base import Camera, HalError
+-
+-__all__ = ["V4l2IspCamera"]
+-
+-_ISP_DEVICE = "/dev/video11"
+-_SUBDEV_GLOB = "/dev/v4l-subdev*"
+-_CAPTURE_TIMEOUT_S = 15.0
+-_TMP_NV12 = Path("/tmp/lira_isp_frame.raw")
+-_SENSOR_SUBDEV = "/dev/v4l-subdev2"  # M3：OV13855@CAM1 的传感器子设备
+-
+-#: 数字曝光目标：帧均值亮度锚定（0-255）。模拟增益打底后的轻量数字补偿。
+-_TARGET_LUMA = 120.0
+-_GAMMA = 2.0
+-_GAIN_CAP = 3.0
+-
+-#: 传感器曝光/增益（板上实测）：增益 128-1984（模拟增益是最有效的亮度杠杆，
+-#: 也是最大的噪声源——压噪优先拉长曝光而非抬增益）
+-_EXP_MAX = 6400
+-_GAIN_DARK = 1984
+-_GAIN_BRIGHT = 384
+-_LUMA_LOW = 70.0
+-_LUMA_HIGH = 190.0
+-
+-#: 15fps 档：拉高 vblank 换长曝光（vts 6436 ≥ 曝光上限 6400），增益需求约减半；
+-#: 静态阅读场景吃得下帧率损失（单拍流程，非连续流）
+-_VBLANK_15FPS = 3300
+-
+-#: 多帧对齐判定：512 宽下相位相关平均位移超过该像素数视为失配（回退择优）
+-_ALIGN_MAX_SHIFT = 2.0
+-
+-
+-class V4l2IspCamera(Camera):
+-    """`Camera.capture() -> JPEG bytes` 的 RKISP 管线实现。"""
+-
+-    def __init__(self, device: str = _ISP_DEVICE, rotation: int = 0, hflip: bool = False) -> None:
+-        self.device = device
+-        self._tmp = _TMP_NV12
+-        #: 画面旋转（0/90/180/270 度，顺时针）与水平翻转——装配/挂载方向
+-        #: 各异，由控制台调整并持久化（store meta）
+-        self.rotation = rotation
+-        self.hflip = hflip
+-
+-    async def open(self) -> None:
+-        """探测 ISP mainpath 节点，切 15fps 档并把曝光固定到上限。"""
+-        if not Path(self.device).exists():
+-            raise HalError(f"ISP mainpath 节点不存在: {self.device}（检查相机 overlay）")
+-        await self._sensor_set("vertical_blanking", _VBLANK_15FPS)  # 失败则曝光被驱动钳回原上限，功能不损
+-        await self._sensor_set("exposure", _EXP_MAX)
+-        self._sensor_gain = 1024  # 自适应起点（暗室起步，亮场景首拍后下调）
+-
+-    async def close(self) -> None:
+-        self._tmp.unlink(missing_ok=True)
+-
+-    async def capture(self) -> bytes:
+-        """单批三帧 → 对齐均值降噪（固定机位免费 √3 信噪比；失配回退择优）→
+-        空域降噪 → 数字补偿 → JPEG。"""
+-        frames = await self._capture_batch_adaptive()
+-        merged, _aligned = _merge_frames(frames)
+-        merged = cv2.bilateralFilter(merged, 9, 50, 50)
+-        best = _digital_exposure(merged)
+-        ok, jpeg = cv2.imencode(".jpg", best, [cv2.IMWRITE_JPEG_QUALITY, 88])
+-        if not ok:
+-            raise HalError("JPEG 编码失败")
+-        return jpeg.tobytes()
+-
+-    async def _sensor_set(self, ctrl: str, value: int) -> bool:
+-        proc = await asyncio.create_subprocess_exec(
+-            "v4l2-ctl", "-d", _SENSOR_SUBDEV, "-c", "%s=%d" % (ctrl, value),
+-            stdout=asyncio.subprocess.DEVNULL,
+-            stderr=asyncio.subprocess.DEVNULL,
+-        )
+-        return (await proc.wait()) == 0
+-
+-    def _luma_mean(self, bgr: np.ndarray) -> float:
+-        return float(cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)[..., 0].mean())
+-
+-    async def _capture_batch_adaptive(self, n: int = 3) -> list[np.ndarray]:
+-        """批级自适应采集：暗室起步高增益；整批过暗/过亮按比例调增益重拍一批。
+-        （一次流抓整批——15fps 长曝光下逐帧起 v4l2-ctl 的进程开销不可接受）"""
+-        gain = getattr(self, "_sensor_gain", 1024)
+-        frames = await self._capture_batch(gain, n)
+-        mean = self._luma_mean(frames[0])
+-        if mean < _LUMA_LOW and gain < _GAIN_DARK:
+-            new_gain = min(int(gain * _LUMA_LOW / max(mean, 1.0)), _GAIN_DARK)
+-            if new_gain > gain:
+-                await self._sensor_set("analogue_gain", new_gain)
+-                self._sensor_gain = new_gain
+-                frames = await self._capture_batch(new_gain, n)
+-        elif mean > _LUMA_HIGH and gain > _GAIN_BRIGHT:
+-            new_gain = max(int(gain * _LUMA_HIGH / max(mean, 1.0)), _GAIN_BRIGHT)
+-            await self._sensor_set("analogue_gain", new_gain)
+-            self._sensor_gain = new_gain
+-            frames = await self._capture_batch(new_gain, n)
+-        return frames
+-
+-    async def _capture_batch(self, gain: int, n: int) -> list[np.ndarray]:
+-        """单次 v4l2-ctl 流抓 n 帧（NV12 → BGR，逐帧套用方向配置）。"""
+-        await self._sensor_set("analogue_gain", gain)
+-        proc = await asyncio.create_subprocess_exec(
+-            "v4l2-ctl",
+-            "-d", self.device,
+-            "--set-fmt-video=width=2688,height=3136,pixelformat=NV12",
+-            "--stream-mmap", "--stream-count=%d" % n,
+-            "--stream-to=%s" % self._tmp,
+-            stdout=asyncio.subprocess.PIPE,
+-            stderr=asyncio.subprocess.PIPE,
+-        )
+-        _, stderr = await asyncio.wait_for(proc.communicate(), _CAPTURE_TIMEOUT_S)
+-        if proc.returncode != 0:
+-            raise HalError(f"ISP 拍摄失败: {stderr.decode(errors='replace').strip()}")
+-
+-        w, h = 2688, 3136
+-        expected = w * h * 3 // 2
+-        buf = np.fromfile(self._tmp, dtype=np.uint8)
+-        got = min(len(buf) // expected, n)
+-        if got == 0:
+-            raise HalError("ISP 帧大小不符: %d 字节不足一帧" % len(buf))
+-        frames = []
+-        for i in range(got):
+-            yuv = buf[i * expected : (i + 1) * expected].reshape((h * 3) // 2, w)
+-            bgr = cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
+-            frames.append(_apply_orientation(bgr, self.rotation, self.hflip))
+-        return frames
+-
+-
+-def _sharpness(bgr: np.ndarray) -> float:
+-    """锐度度量：亮度图拉普拉斯方差（对焦/抖动的经典判据，越大越锐）。"""
+-    y = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)[..., 0]
+-    return float(cv2.Laplacian(y, cv2.CV_64F).var())
+-
+-
+-def _merge_frames(
+-    frames: list[np.ndarray], max_shift: float = _ALIGN_MAX_SHIFT
+-) -> tuple[np.ndarray, bool]:
+-    """多帧合并：相位相关判定对齐（512 宽下平均位移 ≤ max_shift）→ 逐帧平移配准
+-    后取均值（固定机位下等效 √N 倍信噪比）；失配则回退最锐利单帧（抗抖动）。
+-
+-    返回 (合并图, 是否走了对齐均值)。
+-    """
+-    if len(frames) < 2:
+-        return frames[0], False
+-    scale = 512.0 / frames[0].shape[1]
+-    smalls = [
+-        cv2.cvtColor(cv2.resize(f, None, fx=scale, fy=scale), cv2.COLOR_BGR2GRAY)
+-        for f in frames
+-    ]
+-    ref = np.float32(smalls[0])
+-    shifts = []
+-    for s in smalls[1:]:
+-        (dx, dy), _ = cv2.phaseCorrelate(ref, np.float32(s))
+-        shifts.append((dx, dy))
+-    if max(max(abs(dx), abs(dy)) for dx, dy in shifts) > max_shift:
+-        return max(frames, key=_sharpness), False
+-    h, w = frames[0].shape[:2]
+-    acc = np.zeros_like(frames[0], dtype=np.float32)
+-    acc += frames[0]
+-    for f, (dx, dy) in zip(frames[1:], shifts):
+-        m = np.float32([[1, 0, dx / scale], [0, 1, dy / scale]])
+-        acc += cv2.warpAffine(f, m, (w, h))
+-    return (acc / len(frames)).astype(np.uint8), True
+-
+-
+-def _apply_orientation(bgr: np.ndarray, rotation: int, hflip: bool) -> np.ndarray:
+-    """按配置旋转/翻转画面（旋转为顺时针角度，限定 0/90/180/270）。"""
+-    k = (rotation // 90) % 4
+-    if k:
+-        bgr = np.rot90(bgr, k=-k)  # np.rot90 逆时针；-k = 顺时针 k*90
+-    if hflip:
+-        bgr = np.ascontiguousarray(bgr[:, ::-1])
+-    return np.ascontiguousarray(bgr)
+-
+-
+-def _digital_exposure(bgr: np.ndarray) -> np.ndarray:
+-    """数字曝光补偿：灰世界白平衡（去 LED 绿偏）+ 均值锚定 + levels + gamma。
+-
+-    干净帧（ISP 去马赛克/降噪为硬件质量）上大幅提亮不会像裸帧那样放大
+-    条纹；过曝保护用 99.5 分位做白点钳制。
+-    """
+-    from lira.hal.board.camera_raw import _gray_world_wb
+-
+-    bgr = _gray_world_wb(bgr, cap=2.5)
+-    ycrcb = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)
+-    y = ycrcb[..., 0].astype(np.float32)
+-    mean = float(y.mean())
+-    gain = min(max(_TARGET_LUMA / max(mean, 1.0), 1.0), _GAIN_CAP)
+-    y2 = y * gain
+-    lo, hi = np.percentile(y2, (0.5, 99.5))
+-    if hi - lo >= 10:
+-        y2 = np.clip((y2 - lo) * (255.0 / (hi - lo)), 0, 255)
+-    lut = (np.linspace(0, 1, 256) ** (1.0 / _GAMMA) * 255).astype(np.uint8)
+-    y2 = cv2.LUT(y2.astype(np.uint8), lut)
+-    ycrcb[..., 0] = y2
+-    # 色度随亮度增益轻提（欠曝帧色彩偏暗；钳制防过饱和）
+-    for ch in (1, 2):
+-        chf = (ycrcb[..., ch].astype(np.float32) - 128.0) * min(gain, 3.0) + 128.0
+-        ycrcb[..., ch] = np.clip(chf, 0, 255)
+-    return cv2.cvtColor(ycrcb, cv2.COLOR_YCrCb2BGR)
++"""Board camera: full sensor NV12, aligned denoising and color-preserving gain.
++
++The 4224x3136 mainpath keeps document proportions. Always decode the layout
++reported by the driver rather than assuming the requested size was accepted.
++Hardware 3A is unavailable on this image; dark captures receive bounded gain.
++"""
++
++from __future__ import annotations
++
++import asyncio
++import json
++import re
++from pathlib import Path
++
++import cv2
++import numpy as np
++
++from lira.hal.base import Camera, HalError
++from lira.hal.board.nv12 import decode_nv12, parse_format, split_frames
++
++__all__ = ["V4l2IspCamera"]
++
++_ISP_DEVICE = "/dev/video11"
++_SUBDEV_GLOB = "/dev/v4l-subdev*"
++_CAPTURE_TIMEOUT_S = 15.0
++_TMP_NV12 = Path("/tmp/lira_isp_frame.raw")
++_SENSOR_SUBDEV = "/dev/v4l-subdev2"  # M3：OV13855@CAM1 的传感器子设备
++
++#: 数字曝光目标：帧均值亮度锚定（0-255）。模拟增益打底后的轻量数字补偿。
++_TARGET_LUMA = 120.0
++_GAIN_CAP = 3.0
++
++#: 传感器曝光/增益（板上实测）：增益 128-1984（模拟增益是最有效的亮度杠杆，
++#: 也是最大的噪声源——压噪优先拉长曝光而非抬增益）
++_EXP_MAX = 6400
++_GAIN_DARK = 1984
++_GAIN_BRIGHT = 384
++_LUMA_LOW = 70.0
++_LUMA_HIGH = 190.0
++
++#: 15fps 档：拉高 vblank 换长曝光（vts 6436 ≥ 曝光上限 6400），增益需求约减半；
++#: 静态阅读场景吃得下帧率损失（单拍流程，非连续流）
++_VBLANK_15FPS = 3300
++
++#: 多帧对齐判定：512 宽下相位相关平均位移超过该像素数视为失配（回退择优）
++_ALIGN_MAX_SHIFT = 2.0
++
++
++class V4l2IspCamera(Camera):
++    """`Camera.capture() -> JPEG bytes` 的 RKISP 管线实现。"""
++
++    def __init__(self, device: str = _ISP_DEVICE, rotation: int = 0, hflip: bool = False) -> None:
++        self.device = device
++        self._tmp = _TMP_NV12
++        #: 画面旋转（0/90/180/270 度，顺时针）与水平翻转——装配/挂载方向
++        #: 各异，由控制台调整并持久化（store meta）
++        self.rotation = rotation
++        self.hflip = hflip
++        self.color_gains = np.ones(3, dtype=np.float32)
++        self.calibration_path = Path(__file__).resolve().parents[3] / "data/camera-color.json"
++
++    async def open(self) -> None:
++        """探测 ISP mainpath 节点，切 15fps 档并把曝光固定到上限。"""
++        if not Path(self.device).exists():
++            raise HalError(f"ISP mainpath 节点不存在: {self.device}（检查相机 overlay）")
++        exposure, gain = _EXP_MAX, 1024
++        self.color_gains = np.ones(3, dtype=np.float32)
++        try:
++            try:
++                calibration = json.loads(self.calibration_path.read_text(encoding="utf-8"))
++            except FileNotFoundError:
++                calibration = None
++            if calibration is not None:
++                gains = np.asarray(calibration["gains_bgr"], dtype=np.float32)
++                if gains.shape != (3,) or not np.isfinite(gains).all() or np.any((gains < 0.25) | (gains > 4)):
++                    raise ValueError("Invalid white-reference gains")
++                exposure, gain = int(calibration["sensor_exposure"]), int(calibration["sensor_gain"])
++                if not 4 <= exposure <= _EXP_MAX or not 128 <= gain <= _GAIN_DARK:
++                    raise ValueError("Invalid calibration sensor controls")
++                self.color_gains = gains
++        except (OSError, ValueError, KeyError, TypeError) as exc:
++            raise HalError("白平衡校准文件无效或不可读") from exc
++        await self._sensor_set("vertical_blanking", _VBLANK_15FPS)  # 失败则曝光被驱动钳回原上限，功能不损
++        await self._sensor_set("exposure", exposure)
++        self._sensor_gain = gain
++
++    async def close(self) -> None:
++        self._tmp.unlink(missing_ok=True)
++
++    async def capture(self) -> bytes:
++        """单批三帧 → 对齐均值降噪（固定机位免费 √3 信噪比；失配回退择优）→
++        空域降噪 → 数字补偿 → JPEG。"""
++        frames = await self._capture_batch_adaptive()
++        merged, _aligned = _merge_frames(frames)
++        merged = cv2.bilateralFilter(merged, 9, 50, 50)
++        balanced = _apply_color_gains(merged, self.color_gains)
++        best = _digital_exposure(balanced)
++        ok, jpeg = cv2.imencode(".jpg", best, [cv2.IMWRITE_JPEG_QUALITY, 88])
++        if not ok:
++            raise HalError("JPEG 编码失败")
++        return jpeg.tobytes()
++
++    async def _sensor_set(self, ctrl: str, value: int) -> bool:
++        proc = await asyncio.create_subprocess_exec(
++            "v4l2-ctl", "-d", _SENSOR_SUBDEV, "-c", "%s=%d" % (ctrl, value),
++            stdout=asyncio.subprocess.DEVNULL,
++            stderr=asyncio.subprocess.DEVNULL,
++        )
++        return (await proc.wait()) == 0
++
++    def _luma_mean(self, bgr: np.ndarray) -> float:
++        return float(cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)[..., 0].mean())
++
++    async def _capture_batch_adaptive(self, n: int = 3) -> list[np.ndarray]:
++        """批级自适应采集：暗室起步高增益；整批过暗/过亮按比例调增益重拍一批。
++        （一次流抓整批——15fps 长曝光下逐帧起 v4l2-ctl 的进程开销不可接受）"""
++        gain = getattr(self, "_sensor_gain", 1024)
++        frames = await self._capture_batch(gain, n)
++        mean = self._luma_mean(frames[0])
++        if mean < _LUMA_LOW and gain < _GAIN_DARK:
++            new_gain = min(
++                int(gain * _LUMA_LOW / max(mean, 1.0)), _GAIN_DARK,
++                int(gain * 235.0 / max(float(frames[0].max()), 1.0)),
++            )
++            if new_gain > gain:
++                await self._sensor_set("analogue_gain", new_gain)
++                self._sensor_gain = new_gain
++                frames = await self._capture_batch(new_gain, n)
++        elif mean > _LUMA_HIGH and gain > _GAIN_BRIGHT:
++            new_gain = max(int(gain * _LUMA_HIGH / max(mean, 1.0)), _GAIN_BRIGHT)
++            await self._sensor_set("analogue_gain", new_gain)
++            self._sensor_gain = new_gain
++            frames = await self._capture_batch(new_gain, n)
++        return frames
++
++    async def _capture_batch(self, gain: int, n: int) -> list[np.ndarray]:
++        """单次 v4l2-ctl 流抓 n 帧（NV12 → BGR，逐帧套用方向配置）。"""
++        await self._sensor_set("analogue_gain", gain)
++        # Verbose set-format also prints a layout. Keep it separate so the
++        # readback used for decoding is unambiguous.
++        await self._v4l2("--set-fmt-video=width=4224,height=3136,pixelformat=NV12")
++        stdout, stderr = await self._v4l2(
++            "--get-fmt-video", "--verbose", "--stream-mmap",
++            "--stream-count=%d" % n, "--stream-to=%s" % self._tmp,
++        )
++        log = stdout.decode(errors="replace") + stderr.decode(errors="replace")
++        try:
++            fmt = parse_format(log)
++            sizes = [int(x) for x in re.findall(r"cap dqbuf:.*?bytesused:\s*(\d+)", log)]
++            payloads = split_frames(self._tmp.read_bytes(), sizes, n)
++            return [
++                _apply_orientation(decode_nv12(payload, fmt), self.rotation, self.hflip)
++                for payload in payloads
++            ]
++        except ValueError as exc:
++            raise HalError(f"ISP 帧布局不符: {exc}") from exc
++
++    async def _v4l2(self, *args: str) -> tuple[bytes, bytes]:
++        proc = await asyncio.create_subprocess_exec(
++            "v4l2-ctl", "-d", self.device, *args,
++            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
++        )
++        try:
++            stdout, stderr = await asyncio.wait_for(proc.communicate(), _CAPTURE_TIMEOUT_S)
++        except BaseException:
++            if proc.returncode is None:
++                proc.kill()
++            await proc.communicate()
++            raise
++        if proc.returncode != 0:
++            raise HalError(f"ISP 拍摄失败: {stderr.decode(errors='replace').strip()}")
++        return stdout, stderr
++
++
++
++def _sharpness(bgr: np.ndarray) -> float:
++    """锐度度量：亮度图拉普拉斯方差（对焦/抖动的经典判据，越大越锐）。"""
++    y = cv2.cvtColor(bgr, cv2.COLOR_BGR2YCrCb)[..., 0]
++    return float(cv2.Laplacian(y, cv2.CV_64F).var())
++
++
++def _merge_frames(
++    frames: list[np.ndarray], max_shift: float = _ALIGN_MAX_SHIFT
++) -> tuple[np.ndarray, bool]:
++    """多帧合并：相位相关判定对齐（512 宽下平均位移 ≤ max_shift）→ 逐帧平移配准
++    后取均值（固定机位下等效 √N 倍信噪比）；失配则回退最锐利单帧（抗抖动）。
++
++    返回 (合并图, 是否走了对齐均值)。
++    """
++    if len(frames) < 2:
++        return frames[0], False
++    scale = 512.0 / frames[0].shape[1]
++    smalls = [
++        cv2.cvtColor(cv2.resize(f, None, fx=scale, fy=scale), cv2.COLOR_BGR2GRAY)
++        for f in frames
++    ]
++    ref = np.float32(smalls[0])
++    shifts = []
++    for s in smalls[1:]:
++        (dx, dy), _ = cv2.phaseCorrelate(ref, np.float32(s))
++        shifts.append((dx, dy))
++    if max(max(abs(dx), abs(dy)) for dx, dy in shifts) > max_shift:
++        return max(frames, key=_sharpness), False
++    h, w = frames[0].shape[:2]
++    acc = np.zeros_like(frames[0], dtype=np.float32)
++    acc += frames[0]
++    for f, (dx, dy) in zip(frames[1:], shifts):
++        m = np.float32([[1, 0, dx / scale], [0, 1, dy / scale]])
++        acc += cv2.warpAffine(f, m, (w, h))
++    return (acc / len(frames)).astype(np.uint8), True
++
++
++def _apply_orientation(bgr: np.ndarray, rotation: int, hflip: bool) -> np.ndarray:
++    """按配置旋转/翻转画面（旋转为顺时针角度，限定 0/90/180/270）。"""
++    k = (rotation // 90) % 4
++    if k:
++        bgr = np.rot90(bgr, k=-k)  # np.rot90 逆时针；-k = 顺时针 k*90
++    if hflip:
++        bgr = np.ascontiguousarray(bgr[:, ::-1])
++    return np.ascontiguousarray(bgr)
++
++
++def _digital_exposure(bgr: np.ndarray) -> np.ndarray:
++    """Only brighten dark inputs; preserve printed colors and bright-page contrast.
++
++    Colorful books do not satisfy gray-world assumptions. Applying levels,
++    gamma and amplified chroma to an already bright page washes out its ink.
++    A shared per-pixel BGR gain preserves hue, with smooth highlight roll-off.
++    """
++    mean = float(cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY).mean())
++    if mean >= _LUMA_LOW:
++        return bgr
++    gain = min(_TARGET_LUMA / max(mean, 1.0), _GAIN_CAP)
++    # Monotonic highlight roll-off keeps whites bounded while lifting shadows.
++    # Scale all channels of each pixel equally to retain hue.
++    peak = bgr.max(axis=2).astype(np.float32)
++    factors = gain / (1.0 + (gain - 1.0) * peak / 255.0)
++    adjusted = bgr.astype(np.float32)
++    adjusted *= factors[..., None]
++    np.rint(adjusted, out=adjusted)
++    np.clip(adjusted, 0, 255, out=adjusted)
++    return adjusted.astype(np.uint8)
++
++
++def _apply_color_gains(bgr: np.ndarray, gains: np.ndarray) -> np.ndarray:
++    """Apply measured white-reference gains; never infer them from page colors."""
++    if np.array_equal(gains, np.ones(3, dtype=np.float32)):
++        return bgr
++    adjusted = bgr.astype(np.float32)
++    adjusted *= gains
++    np.clip(adjusted, 0, 255, out=adjusted)
++    return adjusted.astype(np.uint8)
+diff --git a/device/tests/test_camera_isp_quality.py b/device/tests/test_camera_isp_quality.py
+index 0147c2b..6abfea1 100644
+--- a/device/tests/test_camera_isp_quality.py
++++ b/device/tests/test_camera_isp_quality.py
+@@ -1,58 +1,180 @@
+-"""camera_isp 多帧合并纯函数主机测试——板级采集路径无硬件不可测，纯函数按仓库惯例直测。"""
+-
+-import cv2
+-import numpy as np
+-
+-from lira.hal.board.camera_isp import _merge_frames, _sharpness
+-
+-
+-def _base_image() -> np.ndarray:
+-    """带类文字块的基础图（给相位相关与锐度提供结构）。"""
+-    rng = np.random.default_rng(0)
+-    img = np.full((200, 260, 3), 110, np.uint8)
+-    for _ in range(40):
+-        x, y = int(rng.integers(0, 220)), int(rng.integers(0, 160))
+-        img[y : y + 8, x : x + 30] = int(rng.integers(30, 220))
+-    return img
+-
+-
+-def _noisy(img: np.ndarray, seed: int, sigma: float) -> np.ndarray:
+-    rng = np.random.default_rng(seed)
+-    noise = rng.normal(0, sigma, img.shape)
+-    return np.clip(img.astype(np.float32) + noise, 0, 255).astype(np.uint8)
+-
+-
+-def test_aligned_frames_average_and_cut_noise():
+-    base = _base_image()
+-    frames = [_noisy(base, i, 24.0) for i in range(3)]
+-    merged, aligned = _merge_frames(frames)
+-    assert aligned is True
+-    assert merged.shape == frames[0].shape
+-    assert merged.dtype == np.uint8
+-    # √3 期望：与无噪真值的差图噪声应显著低于单帧（>20% 削减即视为生效）
+-    def sigma_vs_truth(im):
+-        return float((im.astype(np.float32) - base.astype(np.float32)).std())
+-    assert sigma_vs_truth(merged) < sigma_vs_truth(frames[0]) * 0.8
+-
+-
+-def test_misaligned_frames_fall_back_to_sharpest():
+-    base = _base_image()
+-    shifted = np.roll(base, 12, axis=1)
+-    blurred = cv2.GaussianBlur(base, (9, 9), 2.5)
+-    frames = [
+-        _noisy(blurred, 1, 5.0),  # 原位但模糊：与移位帧相对错位，且结构 LapVar 被抹平
+-        _noisy(shifted, 2, 2.0),  # 移位、干净、更锐
+-        _noisy(shifted, 3, 2.0),
+-    ]
+-    merged, aligned = _merge_frames(frames)
+-    assert aligned is False
+-    # 回退 = 全场最锐利帧（清晰的移位帧），而非模糊的原位帧
+-    assert merged is max(frames, key=_sharpness)
+-    assert merged is not frames[0]
+-
+-
+-def test_single_frame_passthrough():
+-    f = _noisy(_base_image(), 0, 5.0)
+-    merged, aligned = _merge_frames([f])
+-    assert aligned is False
+-    assert merged is f
++"""camera_isp 多帧合并纯函数主机测试——板级采集路径无硬件不可测，纯函数按仓库惯例直测。"""
++
++import cv2
++import numpy as np
++import pytest
++
++from lira.hal.board.camera_isp import _merge_frames, _sharpness
++
++
++def _base_image() -> np.ndarray:
++    """带类文字块的基础图（给相位相关与锐度提供结构）。"""
++    rng = np.random.default_rng(0)
++    img = np.full((200, 260, 3), 110, np.uint8)
++    for _ in range(40):
++        x, y = int(rng.integers(0, 220)), int(rng.integers(0, 160))
++        img[y : y + 8, x : x + 30] = int(rng.integers(30, 220))
++    return img
++
++
++def _noisy(img: np.ndarray, seed: int, sigma: float) -> np.ndarray:
++    rng = np.random.default_rng(seed)
++    noise = rng.normal(0, sigma, img.shape)
++    return np.clip(img.astype(np.float32) + noise, 0, 255).astype(np.uint8)
++
++
++def test_aligned_frames_average_and_cut_noise():
++    base = _base_image()
++    frames = [_noisy(base, i, 24.0) for i in range(3)]
++    merged, aligned = _merge_frames(frames)
++    assert aligned is True
++    assert merged.shape == frames[0].shape
++    assert merged.dtype == np.uint8
++    # √3 期望：与无噪真值的差图噪声应显著低于单帧（>20% 削减即视为生效）
++    def sigma_vs_truth(im):
++        return float((im.astype(np.float32) - base.astype(np.float32)).std())
++    assert sigma_vs_truth(merged) < sigma_vs_truth(frames[0]) * 0.8
++
++
++def test_misaligned_frames_fall_back_to_sharpest():
++    base = _base_image()
++    shifted = np.roll(base, 12, axis=1)
++    blurred = cv2.GaussianBlur(base, (9, 9), 2.5)
++    frames = [
++        _noisy(blurred, 1, 5.0),  # 原位但模糊：与移位帧相对错位，且结构 LapVar 被抹平
++        _noisy(shifted, 2, 2.0),  # 移位、干净、更锐
++        _noisy(shifted, 3, 2.0),
++    ]
++    merged, aligned = _merge_frames(frames)
++    assert aligned is False
++    # 回退 = 全场最锐利帧（清晰的移位帧），而非模糊的原位帧
++    assert merged is max(frames, key=_sharpness)
++    assert merged is not frames[0]
++
++
++def test_single_frame_passthrough():
++    f = _noisy(_base_image(), 0, 5.0)
++    merged, aligned = _merge_frames([f])
++    assert aligned is False
++    assert merged is f
++
++
++def test_bright_colored_page_keeps_printed_colors():
++    from lira.hal.board.camera_isp import _digital_exposure
++
++    # A colorful page is not a gray-world calibration target.
++    image = np.full((40, 60, 3), (80, 190, 160), dtype=np.uint8)
++    image[10:30, 20:40] = (170, 215, 220)  # pale yellow artwork
++    assert np.array_equal(_digital_exposure(image), image)
++
++
++def test_dark_page_brightening_preserves_channel_ratios():
++    from lira.hal.board.camera_isp import _digital_exposure
++
++    image = np.full((20, 30, 3), (20, 40, 60), dtype=np.uint8)
++    result = _digital_exposure(image)
++    pixel = result[0, 0].astype(float)
++    assert pixel[0] > 20
++    assert abs(pixel[1] / pixel[0] - 2) < 0.05
++    assert abs(pixel[2] / pixel[0] - 3) < 0.05
++
++
++def test_capture_decodes_negotiated_stride_and_frame_boundaries(tmp_path):
++    import asyncio
++    from lira.hal.board.camera_isp import V4l2IspCamera
++
++    # Driver accepts a different width and pads rows. Keep chroma neutral.
++    width, height, stride = 4, 4, 6
++    payloads = []
++    for luma in (60, 100, 140):
++        raw = np.full((height * 3 // 2, stride), 128, dtype=np.uint8)
++        raw[:height, :width] = luma
++        raw[:, width:] = 255  # padding must never become picture pixels
++        payloads.append(raw.tobytes())
++    path = tmp_path / "stream.nv12"
++    path.write_bytes(b"".join(payloads))
++    fmt = """Format Video Capture Multiplanar:
++Width/Height : 4/4
++Pixel Format : 'NV12'
++Number of planes : 1
++Field : None
++Bytes per Line : 6
++Size Image : 36
++"""
++    calls = []
++
++    class Camera(V4l2IspCamera):
++        async def _sensor_set(self, ctrl, value):
++            return True
++
++        async def _v4l2(self, *args):
++            calls.append(args)
++            if "--get-fmt-video" in args:
++                return fmt.encode(), b"cap dqbuf: bytesused: 36\n" * 3
++            # Verbose set-format output is deliberately NOT part of readback.
++            return fmt.encode(), b""
++
++    camera = Camera()
++    camera._tmp = path
++    frames = asyncio.run(camera._capture_batch(1024, 3))
++    assert len(frames) == 3
++    for frame, payload in zip(frames, payloads):
++        packed = np.frombuffer(payload, np.uint8).reshape(6, 6)[:, :4].copy()
++        expected = cv2.cvtColor(packed, cv2.COLOR_YUV2BGR_NV12)
++        assert frame.shape == (4, 4, 3)
++        np.testing.assert_array_equal(frame, expected)
++    assert "--get-fmt-video" not in calls[0]
++    assert not any(arg.startswith("--set-fmt") for arg in calls[1])
++
++
++def test_measured_white_balance_keeps_yellow_artwork_yellow():
++    from lira.hal.board.camera_isp import _apply_color_gains
++
++    image = np.array([[[60, 100, 50], [40, 100, 60]]], dtype=np.uint8)
++    result = _apply_color_gains(image, np.array([100/60, 1, 2], np.float32))
++    np.testing.assert_array_equal(result[0, 0], [100, 100, 100])
++    assert result[0, 1, 0] < result[0, 1, 1] < result[0, 1, 2]
++
++
++def test_dark_gain_does_not_clip_bright_paper_details():
++    from lira.hal.board.camera_isp import _digital_exposure
++
++    image = np.full((100, 100, 3), 20, np.uint8)
++    image[0, 0] = [200, 220, 240]
++    image[0, 1] = [180, 200, 220]
++    result = _digital_exposure(image)
++    assert result[0, 0, 0] < result[0, 0, 1] < result[0, 0, 2]
++    assert result[0, 1, 2] < result[0, 0, 2]
++
++
++@pytest.mark.parametrize("content", ["{", "{}", '{"gains_bgr":"bad","sensor_exposure":3200,"sensor_gain":384}'])
++def test_invalid_calibration_is_hal_error(tmp_path, content):
++    import asyncio
++    from lira.hal.base import HalError
++    from lira.hal.board.camera_isp import V4l2IspCamera
++
++    node = tmp_path / "video"
++    node.touch()
++    camera = V4l2IspCamera(str(node))
++    camera.calibration_path = tmp_path / "color.json"
++    camera.calibration_path.write_text(content)
++    with pytest.raises(HalError, match="校准"):
++        asyncio.run(camera.open())
++
++
++def test_removed_calibration_resets_gains_on_reopen(tmp_path):
++    import asyncio
++    from lira.hal.board.camera_isp import V4l2IspCamera
++
++    node = tmp_path / "video"
++    node.touch()
++
++    class Camera(V4l2IspCamera):
++        async def _sensor_set(self, ctrl, value):
++            return True
++
++    camera = Camera(str(node))
++    camera.calibration_path = tmp_path / "missing.json"
++    camera.color_gains = np.array([1.6, 1, 1.7], np.float32)
++    asyncio.run(camera.open())
++    np.testing.assert_array_equal(camera.color_gains, [1, 1, 1])
+
+NEW nv12.py:
+"""Validated linear single-plane NV12 layout and stream boundaries."""
+
+import re
+
+def parse_format(raw):
+    def field(pattern):
+        m = re.search(pattern, raw, re.MULTILINE)
+        if not m:
+            raise ValueError("Missing/ambiguous format field: " + pattern)
+        return m
+
+    w, h = map(int, field(r"Width/Height\s*:\s*(\d+)/(\d+)").groups())
+    pixel = field(r"Pixel Format\s*:\s*'([^']+)'").group(1)
+    planes = re.search(r"Number of planes\s*:\s*(\d+)", raw)
+    stride = int(field(r"Bytes per Line\s*:\s*(\d+)").group(1))
+    capacity = int(field(r"Size Image\s*:\s*(\d+)").group(1))
+    if (
+        pixel != "NV12"
+        or (planes and int(planes.group(1)) != 1)
+        or w % 2
+        or h % 2
+        or stride < w
+        or stride % 2
+    ):
+        raise ValueError(
+            "Only even, linear single-plane NV12 with explicit stride is supported"
+        )
+    if (
+        len(re.findall(r"Bytes per Line\s*:", raw)) != 1
+        or capacity < stride * h * 3 // 2
+    ):
+        raise ValueError("Ambiguous plane layout or undersized capacity")
+    metadata = {
+        k: v.strip()
+        for k, v in re.findall(
+            r"^\s*(Colorspace|Transfer Function|YCbCr/HSV Encoding|Quantization|Field)\s*:\s*(.+)$",
+            raw,
+            re.MULTILINE,
+        )
+    }
+    if metadata.get("Field", "None").lower() not in ("none", "any"):
+        raise ValueError("Interlaced NV12 unsupported")
+    return {
+        "width": w,
+        "height": h,
+        "pixelformat": pixel,
+        "planes": 1,
+        "bytesperline": stride,
+        "sizeimage": capacity,
+        "color": metadata,
+    }
+
+
+def decode_nv12(payload, fmt):
+    import cv2
+    import numpy as np
+
+    stride, h, w = fmt["bytesperline"], fmt["height"], fmt["width"]
+    required = stride * h * 3 // 2
+    if len(payload) != required:
+        raise ValueError(
+            f"NV12 payload {len(payload)} != explicit linear layout {required}"
+        )
+    yuv = np.ascontiguousarray(
+        np.frombuffer(payload, dtype=np.uint8).reshape(h * 3 // 2, stride)[:, :w]
+    )
+    return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR_NV12)
+
+
+def split_frames(data, bytesused, count):
+    if (
+        len(bytesused) != count
+        or any(n <= 0 for n in bytesused)
+        or sum(bytesused) != len(data)
+    ):
+        raise ValueError(
+            "Frame count/payload differs from verbose dqbuf bytesused records"
+        )
+    frames = []
+    offset = 0
+    for n in bytesused:
+        frames.append(data[offset : offset + n])
+        offset += n
+    return frames
+
+

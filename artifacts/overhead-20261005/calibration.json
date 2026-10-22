@@ -1,0 +1,20 @@
+{
+  "roi_native": [
+    2020,
+    1150,
+    35,
+    160
+  ],
+  "white_bgr": [
+    184.0,
+    255.0,
+    169.0
+  ],
+  "gains_bgr": [
+    1.3858695652173914,
+    1.0,
+    1.5088757396449703
+  ],
+  "gain": 512,
+  "reference": "User confirmed rectangular border is white; owl body is pale yellow"
+}

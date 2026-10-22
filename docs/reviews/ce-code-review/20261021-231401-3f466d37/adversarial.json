@@ -1,0 +1,10 @@
+{
+  "residual_risks": [
+    "Live Doubao request/stream compatibility and actual Vivi prosody were not verified: this bounded review intentionally made no network or real-model calls."
+  ],
+  "testing_gaps": [
+    "Cloud tests cover privacy enabled before request, but not privacy activation while streaming followed by rejection without task publication."
+  ],
+  "findings": [],
+  "reviewer": "adversarial"
+}

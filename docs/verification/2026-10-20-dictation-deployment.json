@@ -1,0 +1,47 @@
+{
+  "backup": "/home/orangepi/lira/deploy-backups/dictation-20261020-005832",
+  "files": {
+    "lira/dictation.py": "c7efa92ad5f69017dd67d0003862dba0a8da38d1127d4f76b6003997bfda43a8",
+    "lira/textbook_practice.py": "8f04741ce7ebcc8c1fb09a6f21bac54229b44352e2e322a659c0285442a4c2e5",
+    "lira/textbook_import.py": "2be9364396eeff3dcd6e50a8f05e542484c281aae2432c22da298f49d5c2b739",
+    "lira/tv_voice.py": "c5b5c2a4188c57a8b7a74b5aed40fe8aa32f17e3df9a5e725b70fe1cbbe1f5d3",
+    "lira/conversation_paths.py": "8940d330a8ccaaae42f20edbf4183fcd747aad9238bd09598886934d2626bcec",
+    "lira/audio/doubao_realtime.py": "68ba3f468aa6ddf7346da340f438a214b4c4ff0f63e7d79bd49fdbfc0356279b",
+    "lira/ui/static/textbooks.js": "6d97c155a51bde1c0496c77752fd4e3def302f558080b472c971058af1a4a231"
+  },
+  "before_hashes": {
+    "lira/dictation.py": null,
+    "lira/textbook_practice.py": "85eb0db1aab862986fdde372beed31a07100eb654d5c217c22d1b68c9c92f606",
+    "lira/textbook_import.py": "3a1a70f6bfbba89691f526af51f7ebb3c8ce00e6bb4cd0e3623a5c7eed9b5901",
+    "lira/tv_voice.py": "6d23700a55694418e891e3b91e3fd8bd4bb38985948567b9a6f32e2398ab6f76",
+    "lira/conversation_paths.py": "657c3d1e2e39c5a9055026b2d521b8a1b2ab3f4613c486f8520e295e333be3d3",
+    "lira/audio/doubao_realtime.py": "f5354685f06dd93a3a895b433462fc353f942ba9282b2d6a9bc2345061fb8bc4",
+    "lira/ui/static/textbooks.js": "73048872b91f8b2e469c8580b86b9b2b5d60f4c498ef71c61fb138ff5fb69923"
+  },
+  "before_service": {
+    "MainPID": "60961",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "mode_before": "doubao_realtime",
+  "deployed": true,
+  "after_service": {
+    "MainPID": "69903",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "capabilities_flag": "false",
+  "mode_after": "doubao_realtime",
+  "files_match": true,
+  "served_js_matches": true,
+  "protected_files": 122,
+  "protected_source_files_modified_after_deploy": [],
+  "protected_check": "Scoped-copy target allowlist plus source mtimes; initial in-memory hashes were not persisted before an early HTTP check failed.",
+  "textbook_data_written_by_deployment": false,
+  "verification_recovered_after_model_startup": true,
+  "default_dictation_tools_registered": true,
+  "voice_catalog_books": 1,
+  "reviewed_lesson7_available": true,
+  "published_books": 0,
+  "read_only_smoke": true
+}

@@ -1,0 +1,48 @@
+{
+  "reviewer": "testing",
+  "findings": [
+    {
+      "title": "Test privacy revocation during cloud streaming",
+      "severity": "P2",
+      "file": "device/tests/test_dictation_cloud_tts.py",
+      "line": 24,
+      "why_it_matters": "The new stream checks privacy after each response line, but the only privacy test starts with permission already denied. A regression that removes the in-stream check could continue receiving and storing a child's dictated text/audio after privacy is enabled while the request is active, and the suite would still pass.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Add a mock streaming response that yields one valid PCM chunk, flips allowed to false before the next chunk, then asserts synthesis raises the revocation error and yields no completed asset. Keep the existing pre-request denial test.",
+      "confidence": 75,
+      "evidence": [
+        "device/tests/test_dictation_cloud_tts.py:24: async def test_cloud_privacy_blocks_network():",
+        "device/tests/test_dictation_cloud_tts.py:27:         with pytest.raises(ValueError,match='撤销'):await synthesize_cloud('山顶',DEFAULT_TTS,'private-key',allowed=lambda:False,client=client)",
+        "device/lira/dictation_cloud_tts.py:37:                 async for line in response.aiter_lines():",
+        "device/lira/dictation_cloud_tts.py:38:                     guard()"
+      ],
+      "pre_existing": false
+    },
+    {
+      "title": "Test manual controls during active playback",
+      "severity": "P2",
+      "file": "tv-receiver/tests/DictationManualNavigationTest.java",
+      "line": 17,
+      "why_it_matters": "The engine newly accepts previous, confirm, and replay while manual audio is playing, where it must stop the old sound and fence its late completion callback. The navigation test drains every sound before issuing these commands, so an early remote press could play two words or move the cursor after a late callback without failing the suite.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Extend the native manual test to issue previous, confirm, and replay before sound.drain(), then invoke each captured old completion callback and assert the cursor, state, and actual_repeats stay on the newly selected item; also assert the old sound was stopped.",
+      "confidence": 75,
+      "evidence": [
+        "tv-receiver/tests/DictationManualNavigationTest.java:17:   engine.control(DictationEngineV2Test.cmd(engine,\"replay\"));sound.drain();check(engine.status().getInt(\"index\")==1,\"center replays current\");",
+        "tv-receiver/tests/DictationManualNavigationTest.java:18:   engine.control(DictationEngineV2Test.cmd(engine,\"confirm\"));sound.drain();check(engine.status().getInt(\"index\")==2,\"right advances and plays\");",
+        "tv-receiver/src/DictationEngineV2.java:64:   if(!(action.equals(\"start\")&&state.equals(\"waiting_start\")||action.equals(\"confirm\")&&(state.equals(\"waiting_child\")||manual()&&state.equals(\"playing\"))||action.equals(\"pause\")||action.equals(\"resume\")&&state.equals(\"paused\")||action.equals(\"replay\")&&(Arrays.asList(\"waiting_child\",\"failed_item\").contains(state)||manual()&&state.equals(\"playing\"))||action.equals(\"previous\")&&manual()&&Arrays.asList(\"waiting_child\",\"playing\",\"failed_item\").contains(state)||action.equals(\"cancel\")))throw new IllegalArgumentException(\"invalid_action\");"
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [
+    "Cloud TTS tests cover incomplete PCM and a non-success code, but do not assert sanitized failures for malformed JSON, invalid base64, non-object rows, or an HTTP failure.",
+    "No focused test asserts that a manual task is rejected before asset upload when the TV omits dictation_manual_navigation_v1, or that an older non-manual task still delivers to that TV.",
+    "The native manual navigation test does not exercise the new previous command against explanation-audio-busy or expired-lease gates; existing V2 tests cover those gates only for earlier actions."
+  ]
+}

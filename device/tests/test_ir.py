@@ -224,6 +224,28 @@ class TestSceneRun:
             await svc.run_scene("观影模式")
         assert ei.value.kind == "scene_not_found"
 
+    async def test_scene_continues_past_hal_error_step(self, tmp_path):
+        """R29：传输层故障（HalError）单步报告不中断——后续步骤照常发射。"""
+        store = make_store(tmp_path)
+        store.upsert_code("空调", "制冷", "frame-cool")
+        ir = MockIrController()
+        orig_send = ir.send
+
+        async def flaky_send(code: str) -> None:
+            if code == "pulse 8000":
+                raise HalError("BroadLink 发送失败: OSError('network unreachable')")
+            await orig_send(code)
+
+        ir.send = flaky_send
+        svc = IRService(store, ir)
+        results = await svc.run_scene("睡觉模式", confirmed=True)
+        assert [(r.device, r.ok, r.error_kind) for r in results] == [
+            ("台灯", False, "hal_error"),
+            ("空调", True, None),
+            ("加湿器", False, "disabled"),  # 业务闸路径（ApplianceError）不受影响
+        ]
+        assert ir.sent_codes == ["frame-cool"]
+
 
 # ---------- G12 状态机接线（澄清/未配置话术） ----------
 
@@ -285,8 +307,10 @@ class TestG12ClarificationWiring:
         assert rec.ir == []  # 不猜、不执行
         assert rec.spoken[-1] == pb.APPLIANCE_AMBIGUOUS
         assert engine.state is State.LISTENING  # 留在聆听态，可换说法
-        engine.tick(engine.now + engine.LISTEN_WINDOW_SECONDS + 1)
-        assert engine.state is State.LISTENING  # 澄清窗口重新计时（未超时）
+        engine.tick(engine.now + engine.LISTEN_WINDOW_SECONDS - 1)
+        assert engine.state is State.LISTENING
+        engine.tick(engine.now + 2)
+        assert engine.state is State.STANDBY  # 澄清后仍无后续指令，安静退出
 
     async def test_unique_alias_still_executes_normally(self):
         from lira.dialog.intents import Appliance

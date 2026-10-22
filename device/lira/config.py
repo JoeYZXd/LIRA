@@ -13,6 +13,8 @@
 
 from __future__ import annotations
 
+from lira.audio.tts_provider import OnlineTtsConfig
+
 import copy
 import os
 from dataclasses import dataclass
@@ -20,6 +22,8 @@ from pathlib import Path
 from typing import Any, Mapping
 
 import yaml
+
+from lira.hal.base import HalError, parse_mac
 
 # device/lira/config.py -> device/lira -> device -> repo root
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,6 +53,7 @@ class LlmConfig:
     wait_feedback_seconds: float
     # U5：复杂文本转白话的长度阈值（字符数）；医疗类别词不受阈值限制
     colloquial_threshold_chars: int
+    web_search_enabled: bool = False
 
 
 @dataclass(frozen=True)
@@ -64,6 +69,10 @@ class HalConfig:
     speaker_device: str = ""
     #: 板上摄像头设备（M3：OV13855@CAM1 → /dev/video0）
     camera_device: str = ""
+    echo_cancel_enabled: bool = False
+    #: 板上红外（M5：BroadLink RM4 Mini）。ir_host 空 = 未配置（板上装配 Mock 回退）
+    ir_host: str = ""
+    ir_mac: str = ""
 
 
 @dataclass(frozen=True)
@@ -95,18 +104,51 @@ class SyncConfig:
 
 
 @dataclass(frozen=True)
+class SpeakerConfig:
+    """声纹候选积累参数（开发者控制台改版 U6，KTD5）。
+
+    全部为**工程初值，不代表识别准确率**——板端质量阈值与样本目标的校准
+    属于 U8 验收门槛，校准不合格不得发布 100% 就绪承诺。改变 strategy_version
+    即宣告策略代次变化：旧候选证据失效（stale），要求重新积累，不静默续用。
+    """
+
+    #: 就绪目标：至少 N 段独立合格语音且累计 M 秒
+    target_segments: int = 3
+    target_seconds: float = 10.0
+    #: 单段质量门：最短时长（秒）、能量下限（RMS）、削波比例上限
+    min_segment_seconds: float = 1.0
+    min_rms: float = 0.01
+    max_clip_ratio: float = 0.05
+    #: 未绑定候选上限与过期天数（KTD5 数据关系：最多 20 个、7 天无证据过期）
+    max_candidates: int = 20
+    candidate_ttl_days: float = 7.0
+    #: 匹配门槛（已建立成员判定，与 SpeakerIdentity 同则）与歧义边际
+    match_threshold: float = 0.80
+    match_margin: float = 0.10
+    #: 候选指派门槛（低于 match_threshold：陌生声音才建新候选）
+    assign_threshold: float = 0.73
+    #: 段间一致性门（新段 vs 聚合向量、就绪复核的两两最小余弦）
+    consistency_threshold: float = 0.85
+    #: 采集策略版本：变化即旧候选 stale，重新积累
+    strategy_version: int = 1
+
+
+@dataclass(frozen=True)
 class AppConfig:
     llm: LlmConfig
     hal: HalConfig
     sync: SyncConfig
     ui: UiConfig
     dev_console: DevConsoleConfig
+    speaker: SpeakerConfig
     db_path: Path
     log_level: str
+    online_tts: OnlineTtsConfig = OnlineTtsConfig()
 
 
 # 内置默认值 = yaml 缺失时的兜底。api_key 故意不设默认值（必填项）。
 DEFAULTS: dict[str, Any] = {
+    "online_tts": {"enabled": False, "resource_id": "seed-tts-2.0", "speaker": "", "timeout_seconds": 10.0},
     "llm": {
         "base_url": DEFAULT_GLM_BASE_URL,
         "api_key": "",
@@ -116,6 +158,7 @@ DEFAULTS: dict[str, Any] = {
         "breaker_cooldown_seconds": 60.0,
         "wait_feedback_seconds": 2.0,
         "colloquial_threshold_chars": 150,
+        "web_search_enabled": False,
     },
     "hal": {
         "backend": "mock",
@@ -125,6 +168,10 @@ DEFAULTS: dict[str, Any] = {
         "mic_device": "",
         "speaker_device": "",
         "camera_device": "",
+        "echo_cancel_enabled": False,
+        # M5：BroadLink RM4 Mini（局域网固定 IP + MAC；空 = IR 未配置）
+        "ir_host": "",
+        "ir_mac": "",
     },
     # U7：设备 Web UI 监听地址（局域网浏览器访问；M7 起 in-process 挂载主循环）
     "ui": {
@@ -134,6 +181,21 @@ DEFAULTS: dict[str, Any] = {
     # M8 计划：开发者控制台（默认关；口令 vault 鉴权 + 采集类测试隐私联锁）
     "dev_console": {
         "enabled": False,
+    },
+    # 开发者控制台改版 U6：声纹候选积累参数（KTD5 工程初值，不代表识别准确率）
+    "speaker": {
+        "target_segments": 3,
+        "target_seconds": 10.0,
+        "min_segment_seconds": 1.0,
+        "min_rms": 0.01,
+        "max_clip_ratio": 0.05,
+        "max_candidates": 20,
+        "candidate_ttl_days": 7.0,
+        "match_threshold": 0.80,
+        "match_margin": 0.10,
+        "assign_threshold": 0.73,
+        "consistency_threshold": 0.85,
+        "strategy_version": 1,
     },
     # U6：本地家电配置库（R13，安全规则本地持久化；gitignore *.db）
     "db_path": "data/device.db",
@@ -149,6 +211,10 @@ DEFAULTS: dict[str, Any] = {
 
 # 环境变量覆盖表：env 名 -> (yaml 段, 键, 类型)
 ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
+    "LIRA_ONLINE_TTS_ENABLED": ("online_tts", "enabled", "bool"),
+    "LIRA_ONLINE_TTS_RESOURCE_ID": ("online_tts", "resource_id", str),
+    "LIRA_ONLINE_TTS_SPEAKER": ("online_tts", "speaker", str),
+    "LIRA_LLM_WEB_SEARCH_ENABLED": ("llm", "web_search_enabled", "bool"),
     "LIRA_LLM_BASE_URL": ("llm", "base_url", str),
     "LIRA_LLM_API_KEY": ("llm", "api_key", str),
     "LIRA_LLM_MODEL": ("llm", "model", str),
@@ -160,7 +226,10 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_HAL_BACKEND": ("hal", "backend", str),
     "LIRA_HAL_MIC_DEVICE": ("hal", "mic_device", str),
     "LIRA_HAL_SPEAKER_DEVICE": ("hal", "speaker_device", str),
+    "LIRA_HAL_ECHO_CANCEL_ENABLED": ("hal", "echo_cancel_enabled", "bool"),
     "LIRA_HAL_CAMERA_DEVICE": ("hal", "camera_device", str),
+    "LIRA_HAL_IR_HOST": ("hal", "ir_host", str),
+    "LIRA_HAL_IR_MAC": ("hal", "ir_mac", str),
     "LIRA_DB_PATH": (None, "db_path", str),
     "LIRA_SYNC_WS_URL": ("sync", "ws_url", str),
     "LIRA_SYNC_HEARTBEAT_SECONDS": ("sync", "heartbeat_seconds", float),
@@ -168,6 +237,12 @@ ENV_OVERRIDES: dict[str, tuple[str, str, type]] = {
     "LIRA_UI_HOST": ("ui", "host", str),
     "LIRA_UI_PORT": ("ui", "port", int),
     "LIRA_DEV_CONSOLE": ("dev_console", "enabled", "bool"),
+    # U6：声纹候选积累常用参数（其余阈值经 config.yaml 的 speaker 段调整）
+    "LIRA_SPEAKER_TARGET_SEGMENTS": ("speaker", "target_segments", int),
+    "LIRA_SPEAKER_TARGET_SECONDS": ("speaker", "target_seconds", float),
+    "LIRA_SPEAKER_MIN_SEGMENT_SECONDS": ("speaker", "min_segment_seconds", float),
+    "LIRA_SPEAKER_MAX_CANDIDATES": ("speaker", "max_candidates", int),
+    "LIRA_SPEAKER_TTL_DAYS": ("speaker", "candidate_ttl_days", float),
     "LIRA_LOG_LEVEL": (None, "log_level", str),
 }
 
@@ -225,7 +300,23 @@ def _apply_env(config: dict[str, Any], env: Mapping[str, str]) -> None:
 
 
 def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
+    online = config["online_tts"]
+    import math
+    if (not isinstance(online["enabled"], bool)
+            or isinstance(online["timeout_seconds"], bool)
+            or not isinstance(online["timeout_seconds"], (int, float))
+            or not math.isfinite(online["timeout_seconds"])
+            or online["timeout_seconds"] <= 0
+            or not isinstance(online["speaker"], str)
+            or not isinstance(online["resource_id"], str)):
+        raise ConfigError("online_tts requires a boolean enabled and positive finite timeout")
     llm = config["llm"]
+    if not isinstance(llm["web_search_enabled"], bool):
+        raise ConfigError("llm.web_search_enabled 必须为布尔值。")
+    if llm["web_search_enabled"] and llm["base_url"].rstrip("/") not in (
+        "https://api.moonshot.cn/v1", "https://api.moonshot.ai/v1"
+    ):
+        raise ConfigError("联网搜索目前需要 Kimi 开放平台端点。")
     if not llm["base_url"]:
         raise ConfigError("LLM base_url 为空。请设置 config.yaml 的 llm.base_url 或环境变量 LIRA_LLM_BASE_URL。")
     if require_api_key and not llm["api_key"]:
@@ -246,10 +337,31 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
     if int(llm["colloquial_threshold_chars"]) < 1:
         raise ConfigError("llm.colloquial_threshold_chars 必须 >= 1。")
 
+    hal = config["hal"]
+    if not isinstance(hal["echo_cancel_enabled"], bool):
+        raise ConfigError("hal.echo_cancel_enabled 必须为布尔值。")
+    if hal["echo_cancel_enabled"] and (hal["mic_device"] != "lira_audio" or hal["speaker_device"] != "lira_audio"):
+        raise ConfigError("消回声必须将 mic_device 和 speaker_device 均设为 lira_audio。")
     if config["hal"]["backend"] not in HAL_BACKENDS:
         raise ConfigError(
             f"hal.backend={config['hal']['backend']!r} 非法，可选值: {HAL_BACKENDS}。"
         )
+    # M5：IR 配置须成对，MAC 格式在此把关（parse_mac 唯一实现在 hal.base，
+    # 运行期核对复用同一规则）
+    ir_host = str(hal["ir_host"]).strip()
+    ir_mac = str(hal["ir_mac"]).strip()
+    if ir_host and not ir_mac:
+        raise ConfigError(
+            "hal.ir_host 已配置但 hal.ir_mac 为空。请同时配置设备 MAC"
+            "（板上发现探测: python -m lira.hal.board.ir_broadlink）。"
+        )
+    if not ir_host and ir_mac:
+        raise ConfigError("hal.ir_mac 已配置但 hal.ir_host 为空。请同时配置设备固定 IP。")
+    if ir_mac:
+        try:
+            parse_mac(ir_mac)
+        except HalError as exc:
+            raise ConfigError(f"hal.ir_mac={ir_mac!r} {exc}") from exc
     if not config["db_path"]:
         raise ConfigError("db_path 为空。请设置本地家电配置库路径（如 data/device.db）。")
     if config["sync"]["heartbeat_seconds"] <= 0:
@@ -270,6 +382,36 @@ def _validate(config: dict[str, Any], *, require_api_key: bool) -> None:
 
     if not isinstance(config["dev_console"]["enabled"], bool):
         raise ConfigError("dev_console.enabled 必须为布尔值。")
+
+    # U6：声纹候选参数（数值合法性；工程初值语义见 SpeakerConfig docstring）
+    speaker = config["speaker"]
+    if int(speaker["target_segments"]) < 1:
+        raise ConfigError("speaker.target_segments 必须 >= 1（就绪目标段数）。")
+    if speaker["target_seconds"] <= 0:
+        raise ConfigError("speaker.target_seconds 必须为正数。")
+    if speaker["min_segment_seconds"] <= 0:
+        raise ConfigError("speaker.min_segment_seconds 必须为正数。")
+    if speaker["min_segment_seconds"] > speaker["target_seconds"]:
+        raise ConfigError("speaker.min_segment_seconds 不得大于 speaker.target_seconds。")
+    if speaker["min_rms"] < 0:
+        raise ConfigError("speaker.min_rms 必须 >= 0。")
+    if not 0 <= speaker["max_clip_ratio"] <= 1:
+        raise ConfigError("speaker.max_clip_ratio 必须在 [0, 1] 区间。")
+    if int(speaker["max_candidates"]) < 1:
+        raise ConfigError("speaker.max_candidates 必须 >= 1。")
+    if speaker["candidate_ttl_days"] <= 0:
+        raise ConfigError("speaker.candidate_ttl_days 必须为正数。")
+    for threshold in ("match_threshold", "assign_threshold", "consistency_threshold"):
+        if not 0 < speaker[threshold] <= 1:
+            raise ConfigError(f"speaker.{threshold} 必须在 (0, 1] 区间。")
+    if speaker["assign_threshold"] > speaker["match_threshold"]:
+        raise ConfigError(
+            "speaker.assign_threshold 不得高于 speaker.match_threshold"
+            "（候选指派门槛不应宽于已建立成员匹配门槛）。")
+    if speaker["match_margin"] < 0:
+        raise ConfigError("speaker.match_margin 必须 >= 0。")
+    if int(speaker["strategy_version"]) < 1:
+        raise ConfigError("speaker.strategy_version 必须 >= 1。")
 
     log_level = str(config["log_level"]).upper()
     if log_level not in {"DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"}:
@@ -313,6 +455,7 @@ def load_config(
 
     hal = config["hal"]
     return AppConfig(
+        online_tts=OnlineTtsConfig(**config["online_tts"], api_key=env.get("LIRA_ONLINE_TTS_API_KEY", "")),
         llm=LlmConfig(
             base_url=str(config["llm"]["base_url"]),
             api_key=str(config["llm"]["api_key"]),
@@ -322,6 +465,7 @@ def load_config(
             breaker_cooldown_seconds=float(config["llm"]["breaker_cooldown_seconds"]),
             wait_feedback_seconds=float(config["llm"]["wait_feedback_seconds"]),
             colloquial_threshold_chars=int(config["llm"]["colloquial_threshold_chars"]),
+            web_search_enabled=config["llm"]["web_search_enabled"],
         ),
         hal=HalConfig(
             backend=str(hal["backend"]),
@@ -330,6 +474,9 @@ def load_config(
             mic_device=str(hal["mic_device"]),
             speaker_device=str(hal["speaker_device"]),
             camera_device=str(hal["camera_device"]),
+            echo_cancel_enabled=hal["echo_cancel_enabled"],
+            ir_host=str(hal["ir_host"]).strip(),
+            ir_mac=str(hal["ir_mac"]).strip(),
         ),
         sync=SyncConfig(
             ws_url=str(config["sync"]["ws_url"]),
@@ -342,6 +489,20 @@ def load_config(
         ),
         dev_console=DevConsoleConfig(
             enabled=bool(config["dev_console"]["enabled"]),
+        ),
+        speaker=SpeakerConfig(
+            target_segments=int(config["speaker"]["target_segments"]),
+            target_seconds=float(config["speaker"]["target_seconds"]),
+            min_segment_seconds=float(config["speaker"]["min_segment_seconds"]),
+            min_rms=float(config["speaker"]["min_rms"]),
+            max_clip_ratio=float(config["speaker"]["max_clip_ratio"]),
+            max_candidates=int(config["speaker"]["max_candidates"]),
+            candidate_ttl_days=float(config["speaker"]["candidate_ttl_days"]),
+            match_threshold=float(config["speaker"]["match_threshold"]),
+            match_margin=float(config["speaker"]["match_margin"]),
+            assign_threshold=float(config["speaker"]["assign_threshold"]),
+            consistency_threshold=float(config["speaker"]["consistency_threshold"]),
+            strategy_version=int(config["speaker"]["strategy_version"]),
         ),
         db_path=_resolve_path(str(config["db_path"])),
         log_level=str(config["log_level"]),

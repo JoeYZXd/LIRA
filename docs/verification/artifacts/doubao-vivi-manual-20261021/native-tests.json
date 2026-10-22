@@ -1,0 +1,52 @@
+[
+  {
+    "test": "DictationCompletionTest",
+    "exit": 0,
+    "output": "Dictation per-lesson partial count, skipped item, interrupted task passed\n"
+  },
+  {
+    "test": "DictationEngineTest",
+    "exit": 0,
+    "output": "DictationEngine timing, drain, history, retry, restart stable epoch, terminal outbox passed\n"
+  },
+  {
+    "test": "DictationEngineV2Test",
+    "exit": 0,
+    "output": "v2 explicit start, drain intervals, replay, failure, pause fence, lease, reboot, durable ACK, safe UI and adaptive pages passed\n"
+  },
+  {
+    "test": "DictationKeyGateTest",
+    "exit": 0,
+    "output": "Remote held key and double confirm do not advance multiple pages\n"
+  },
+  {
+    "test": "DictationManualNavigationTest",
+    "exit": 0,
+    "output": "manual: one play, wait, replay, previous, next, bounds, idempotency and completion passed\n"
+  },
+  {
+    "test": "DictationPoliciesTest",
+    "exit": 0,
+    "output": "Dictation timer anchors, resume policies, repeats, manual, audio failure, stale controls passed\n"
+  },
+  {
+    "test": "DictationSpecTest",
+    "exit": 0,
+    "output": "DictationSpec: shared fixture and rejection cases passed\n"
+  },
+  {
+    "test": "TaskAssetStoreTest",
+    "exit": 0,
+    "output": "TaskAssetStore: scoped bytes, digest and traversal checks passed\n"
+  },
+  {
+    "test": "TaskAudioPlayerTest",
+    "exit": 0,
+    "output": "TaskAudioPlayer receipt: route, mute, volume, ownership and playback head passed (hardware not simulated)\n"
+  },
+  {
+    "test": "WordPageLayoutTest",
+    "exit": 0,
+    "output": "WordPageLayout whole-word, short and final pages across resolutions passed\n"
+  }
+]

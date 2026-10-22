@@ -1,0 +1,36 @@
+{
+  "reported_request": "开始默写第8课",
+  "before": {
+    "receiver_package_stopped": true,
+    "lira_probe": "ConnectError",
+    "vendor_control_http": 200
+  },
+  "action": "existing receiver launched through TV vendor controller from LIRA",
+  "after": {
+    "status": "ready",
+    "receiver": {
+      "version": "0.3",
+      "capabilities": [
+        "clear_content_id",
+        "pcm_audio_v1"
+      ],
+      "interactive": true,
+      "foreground": true,
+      "rendered_id": "",
+      "instance": "9e731b3b-ccfb-4037-aba4-d46005b0a4ea",
+      "audio": {
+        "status": "idle",
+        "music_volume": 4,
+        "music_muted": false
+      },
+      "status": "ok",
+      "clear_supported": true
+    },
+    "requested_lesson": null,
+    "instructions": "已检测到电视亮屏且接收应用在前台，直接调用show_dictation_ready，不要询问电视是否打开。"
+  },
+  "classic_chain_modified": false,
+  "application_source_deployed": false,
+  "lira_service_restarted": false,
+  "full_lesson8_acceptance": false
+}

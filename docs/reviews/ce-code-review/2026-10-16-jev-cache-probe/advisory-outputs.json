@@ -1,0 +1,6 @@
+{
+  "residual_risks": [
+    "Real TypeSafe API behavior, target-board audio and acoustic latency were not exercised by this review."
+  ],
+  "testing_gaps": []
+}

@@ -1,0 +1,956 @@
+{
+  "schema": "lira.camera-quality/v1",
+  "kind": "baseline",
+  "valid": true,
+  "capture_ok": true,
+  "time_utc": "2026-10-05T08:27:07Z",
+  "scene": {
+    "label": "overhead-current",
+    "distance_cm": 20.0,
+    "page_description": "overhead-book",
+    "full_page_confirmed": false
+  },
+  "requested": {
+    "command": "baseline",
+    "device": "/dev/video11",
+    "sensor": "/dev/v4l-subdev2",
+    "media": "/dev/media1",
+    "timeout": 30,
+    "lock": "/tmp/lira-camera-quality.lock",
+    "output": "/home/orangepi/lira/camera-experiments",
+    "scene": "overhead-current",
+    "page_description": "overhead-book",
+    "distance_cm": 20.0,
+    "full_page": false,
+    "exposure": null,
+    "gain": null,
+    "vblank": null,
+    "width": null,
+    "height": null,
+    "frames": 3,
+    "warmup": 5,
+    "rotation": 180,
+    "hflip": false
+  },
+  "tool_version": 1,
+  "ownership_check": {
+    "method": "visible /proc commands and fd links",
+    "complete": false,
+    "inaccessible": [
+      {
+        "pid": 1,
+        "check": "fd table"
+      },
+      {
+        "pid": 2,
+        "check": "fd table"
+      },
+      {
+        "pid": 3,
+        "check": "fd table"
+      },
+      {
+        "pid": 4,
+        "check": "fd table"
+      },
+      {
+        "pid": 5,
+        "check": "fd table"
+      },
+      {
+        "pid": 6,
+        "check": "fd table"
+      },
+      {
+        "pid": 10,
+        "check": "fd table"
+      },
+      {
+        "pid": 11,
+        "check": "fd table"
+      },
+      {
+        "pid": 12,
+        "check": "fd table"
+      },
+      {
+        "pid": 13,
+        "check": "fd table"
+      },
+      {
+        "pid": 14,
+        "check": "fd table"
+      },
+      {
+        "pid": 15,
+        "check": "fd table"
+      },
+      {
+        "pid": 16,
+        "check": "fd table"
+      },
+      {
+        "pid": 17,
+        "check": "fd table"
+      },
+      {
+        "pid": 18,
+        "check": "fd table"
+      },
+      {
+        "pid": 19,
+        "check": "fd table"
+      },
+      {
+        "pid": 22,
+        "check": "fd table"
+      },
+      {
+        "pid": 23,
+        "check": "fd table"
+      },
+      {
+        "pid": 24,
+        "check": "fd table"
+      },
+      {
+        "pid": 27,
+        "check": "fd table"
+      },
+      {
+        "pid": 28,
+        "check": "fd table"
+      },
+      {
+        "pid": 29,
+        "check": "fd table"
+      },
+      {
+        "pid": 32,
+        "check": "fd table"
+      },
+      {
+        "pid": 33,
+        "check": "fd table"
+      },
+      {
+        "pid": 34,
+        "check": "fd table"
+      },
+      {
+        "pid": 37,
+        "check": "fd table"
+      },
+      {
+        "pid": 38,
+        "check": "fd table"
+      },
+      {
+        "pid": 39,
+        "check": "fd table"
+      },
+      {
+        "pid": 42,
+        "check": "fd table"
+      },
+      {
+        "pid": 43,
+        "check": "fd table"
+      },
+      {
+        "pid": 44,
+        "check": "fd table"
+      },
+      {
+        "pid": 47,
+        "check": "fd table"
+      },
+      {
+        "pid": 48,
+        "check": "fd table"
+      },
+      {
+        "pid": 49,
+        "check": "fd table"
+      },
+      {
+        "pid": 52,
+        "check": "fd table"
+      },
+      {
+        "pid": 53,
+        "check": "fd table"
+      },
+      {
+        "pid": 56,
+        "check": "fd table"
+      },
+      {
+        "pid": 57,
+        "check": "fd table"
+      },
+      {
+        "pid": 59,
+        "check": "fd table"
+      },
+      {
+        "pid": 60,
+        "check": "fd table"
+      },
+      {
+        "pid": 61,
+        "check": "fd table"
+      },
+      {
+        "pid": 62,
+        "check": "fd table"
+      },
+      {
+        "pid": 63,
+        "check": "fd table"
+      },
+      {
+        "pid": 64,
+        "check": "fd table"
+      },
+      {
+        "pid": 65,
+        "check": "fd table"
+      },
+      {
+        "pid": 66,
+        "check": "fd table"
+      },
+      {
+        "pid": 68,
+        "check": "fd table"
+      },
+      {
+        "pid": 69,
+        "check": "fd table"
+      },
+      {
+        "pid": 70,
+        "check": "fd table"
+      },
+      {
+        "pid": 71,
+        "check": "fd table"
+      },
+      {
+        "pid": 72,
+        "check": "fd table"
+      },
+      {
+        "pid": 74,
+        "check": "fd table"
+      },
+      {
+        "pid": 75,
+        "check": "fd table"
+      },
+      {
+        "pid": 81,
+        "check": "fd table"
+      },
+      {
+        "pid": 85,
+        "check": "fd table"
+      },
+      {
+        "pid": 86,
+        "check": "fd table"
+      },
+      {
+        "pid": 87,
+        "check": "fd table"
+      },
+      {
+        "pid": 89,
+        "check": "fd table"
+      },
+      {
+        "pid": 90,
+        "check": "fd table"
+      },
+      {
+        "pid": 91,
+        "check": "fd table"
+      },
+      {
+        "pid": 92,
+        "check": "fd table"
+      },
+      {
+        "pid": 93,
+        "check": "fd table"
+      },
+      {
+        "pid": 94,
+        "check": "fd table"
+      },
+      {
+        "pid": 95,
+        "check": "fd table"
+      },
+      {
+        "pid": 96,
+        "check": "fd table"
+      },
+      {
+        "pid": 97,
+        "check": "fd table"
+      },
+      {
+        "pid": 98,
+        "check": "fd table"
+      },
+      {
+        "pid": 99,
+        "check": "fd table"
+      },
+      {
+        "pid": 100,
+        "check": "fd table"
+      },
+      {
+        "pid": 101,
+        "check": "fd table"
+      },
+      {
+        "pid": 102,
+        "check": "fd table"
+      },
+      {
+        "pid": 105,
+        "check": "fd table"
+      },
+      {
+        "pid": 107,
+        "check": "fd table"
+      },
+      {
+        "pid": 108,
+        "check": "fd table"
+      },
+      {
+        "pid": 109,
+        "check": "fd table"
+      },
+      {
+        "pid": 110,
+        "check": "fd table"
+      },
+      {
+        "pid": 111,
+        "check": "fd table"
+      },
+      {
+        "pid": 112,
+        "check": "fd table"
+      },
+      {
+        "pid": 113,
+        "check": "fd table"
+      },
+      {
+        "pid": 114,
+        "check": "fd table"
+      },
+      {
+        "pid": 115,
+        "check": "fd table"
+      },
+      {
+        "pid": 116,
+        "check": "fd table"
+      },
+      {
+        "pid": 117,
+        "check": "fd table"
+      },
+      {
+        "pid": 118,
+        "check": "fd table"
+      },
+      {
+        "pid": 119,
+        "check": "fd table"
+      },
+      {
+        "pid": 120,
+        "check": "fd table"
+      },
+      {
+        "pid": 121,
+        "check": "fd table"
+      },
+      {
+        "pid": 122,
+        "check": "fd table"
+      },
+      {
+        "pid": 123,
+        "check": "fd table"
+      },
+      {
+        "pid": 125,
+        "check": "fd table"
+      },
+      {
+        "pid": 128,
+        "check": "fd table"
+      },
+      {
+        "pid": 134,
+        "check": "fd table"
+      },
+      {
+        "pid": 135,
+        "check": "fd table"
+      },
+      {
+        "pid": 136,
+        "check": "fd table"
+      },
+      {
+        "pid": 138,
+        "check": "fd table"
+      },
+      {
+        "pid": 149,
+        "check": "fd table"
+      },
+      {
+        "pid": 154,
+        "check": "fd table"
+      },
+      {
+        "pid": 155,
+        "check": "fd table"
+      },
+      {
+        "pid": 156,
+        "check": "fd table"
+      },
+      {
+        "pid": 157,
+        "check": "fd table"
+      },
+      {
+        "pid": 158,
+        "check": "fd table"
+      },
+      {
+        "pid": 159,
+        "check": "fd table"
+      },
+      {
+        "pid": 160,
+        "check": "fd table"
+      },
+      {
+        "pid": 161,
+        "check": "fd table"
+      },
+      {
+        "pid": 164,
+        "check": "fd table"
+      },
+      {
+        "pid": 231,
+        "check": "fd table"
+      },
+      {
+        "pid": 232,
+        "check": "fd table"
+      },
+      {
+        "pid": 233,
+        "check": "fd table"
+      },
+      {
+        "pid": 235,
+        "check": "fd table"
+      },
+      {
+        "pid": 236,
+        "check": "fd table"
+      },
+      {
+        "pid": 238,
+        "check": "fd table"
+      },
+      {
+        "pid": 243,
+        "check": "fd table"
+      },
+      {
+        "pid": 270,
+        "check": "fd table"
+      },
+      {
+        "pid": 290,
+        "check": "fd table"
+      },
+      {
+        "pid": 291,
+        "check": "fd table"
+      },
+      {
+        "pid": 292,
+        "check": "fd table"
+      },
+      {
+        "pid": 326,
+        "check": "fd table"
+      },
+      {
+        "pid": 327,
+        "check": "fd table"
+      },
+      {
+        "pid": 411,
+        "check": "fd table"
+      },
+      {
+        "pid": 497,
+        "check": "fd table"
+      },
+      {
+        "pid": 500,
+        "check": "fd table"
+      },
+      {
+        "pid": 627,
+        "check": "fd table"
+      },
+      {
+        "pid": 702,
+        "check": "fd table"
+      },
+      {
+        "pid": 704,
+        "check": "fd table"
+      },
+      {
+        "pid": 751,
+        "check": "fd table"
+      },
+      {
+        "pid": 757,
+        "check": "fd table"
+      },
+      {
+        "pid": 764,
+        "check": "fd table"
+      },
+      {
+        "pid": 844,
+        "check": "fd table"
+      },
+      {
+        "pid": 846,
+        "check": "fd table"
+      },
+      {
+        "pid": 847,
+        "check": "fd table"
+      },
+      {
+        "pid": 870,
+        "check": "fd table"
+      },
+      {
+        "pid": 889,
+        "check": "fd table"
+      },
+      {
+        "pid": 915,
+        "check": "fd table"
+      },
+      {
+        "pid": 916,
+        "check": "fd table"
+      },
+      {
+        "pid": 1181,
+        "check": "fd table"
+      },
+      {
+        "pid": 1183,
+        "check": "fd table"
+      },
+      {
+        "pid": 1184,
+        "check": "fd table"
+      },
+      {
+        "pid": 1194,
+        "check": "fd table"
+      },
+      {
+        "pid": 1198,
+        "check": "fd table"
+      },
+      {
+        "pid": 1199,
+        "check": "fd table"
+      },
+      {
+        "pid": 1206,
+        "check": "fd table"
+      },
+      {
+        "pid": 1214,
+        "check": "fd table"
+      },
+      {
+        "pid": 1218,
+        "check": "fd table"
+      },
+      {
+        "pid": 1220,
+        "check": "fd table"
+      },
+      {
+        "pid": 1262,
+        "check": "fd table"
+      },
+      {
+        "pid": 1514,
+        "check": "fd table"
+      },
+      {
+        "pid": 1569,
+        "check": "fd table"
+      },
+      {
+        "pid": 1706,
+        "check": "fd table"
+      },
+      {
+        "pid": 1707,
+        "check": "fd table"
+      },
+      {
+        "pid": 1972,
+        "check": "fd table"
+      },
+      {
+        "pid": 10074,
+        "check": "fd table"
+      },
+      {
+        "pid": 12419,
+        "check": "fd table"
+      },
+      {
+        "pid": 18462,
+        "check": "fd table"
+      },
+      {
+        "pid": 19454,
+        "check": "fd table"
+      },
+      {
+        "pid": 21540,
+        "check": "fd table"
+      },
+      {
+        "pid": 21555,
+        "check": "fd table"
+      },
+      {
+        "pid": 23066,
+        "check": "fd table"
+      },
+      {
+        "pid": 26955,
+        "check": "fd table"
+      },
+      {
+        "pid": 26956,
+        "check": "fd table"
+      },
+      {
+        "pid": 27164,
+        "check": "fd table"
+      },
+      {
+        "pid": 27233,
+        "check": "fd table"
+      },
+      {
+        "pid": 27234,
+        "check": "fd table"
+      },
+      {
+        "pid": 27243,
+        "check": "fd table"
+      },
+      {
+        "pid": 27247,
+        "check": "fd table"
+      },
+      {
+        "pid": 27260,
+        "check": "fd table"
+      },
+      {
+        "pid": 27394,
+        "check": "fd table"
+      },
+      {
+        "pid": 28226,
+        "check": "fd table"
+      },
+      {
+        "pid": 28397,
+        "check": "fd table"
+      },
+      {
+        "pid": 28818,
+        "check": "fd table"
+      },
+      {
+        "pid": 28819,
+        "check": "fd table"
+      },
+      {
+        "pid": 28823,
+        "check": "fd table"
+      },
+      {
+        "pid": 28825,
+        "check": "fd table"
+      },
+      {
+        "pid": 28827,
+        "check": "fd table"
+      },
+      {
+        "pid": 28828,
+        "check": "fd table"
+      },
+      {
+        "pid": 28829,
+        "check": "fd table"
+      },
+      {
+        "pid": 28831,
+        "check": "fd table"
+      },
+      {
+        "pid": 28832,
+        "check": "fd table"
+      },
+      {
+        "pid": 28833,
+        "check": "fd table"
+      },
+      {
+        "pid": 28844,
+        "check": "fd table"
+      },
+      {
+        "pid": 28849,
+        "check": "fd table"
+      },
+      {
+        "pid": 28877,
+        "check": "fd table"
+      },
+      {
+        "pid": 28900,
+        "check": "fd table"
+      },
+      {
+        "pid": 28920,
+        "check": "fd table"
+      },
+      {
+        "pid": 28923,
+        "check": "fd table"
+      },
+      {
+        "pid": 28962,
+        "check": "fd table"
+      },
+      {
+        "pid": 28975,
+        "check": "fd table"
+      },
+      {
+        "pid": 28976,
+        "check": "fd table"
+      },
+      {
+        "pid": 28977,
+        "check": "fd table"
+      },
+      {
+        "pid": 28978,
+        "check": "fd table"
+      },
+      {
+        "pid": 28979,
+        "check": "fd table"
+      },
+      {
+        "pid": 28980,
+        "check": "fd table"
+      },
+      {
+        "pid": 28986,
+        "check": "fd table"
+      },
+      {
+        "pid": 29515,
+        "check": "fd table"
+      },
+      {
+        "pid": 29643,
+        "check": "fd table"
+      }
+    ],
+    "limitation": "Hidden processes may own nodes; streaming must succeed and controls must remain stable. Operator must pause camera/3A services."
+  },
+  "topology": "Media controller API version 6.1.99\n\nMedia device information\n------------------------\ndriver          rkisp0-vir2\nmodel           rkisp0\nserial          \nbus info        platform:rkisp0-vir2\nhw revision     0x0\ndriver version  6.1.99\n\nDevice topology\n- entity 1: rkisp-isp-subdev (4 pads, 10 links)\n            type V4L2 subdev subtype Unknown flags 0\n            device node name /dev/v4l-subdev3\n\tpad0: Sink\n\t\t[fmt:SBGGR10_1X10/4224x3136 field:none\n\t\t crop.bounds:(0,0)/4224x3136\n\t\t crop:(0,0)/4224x3136]\n\t\t<- \"rkisp_rawrd0_m\":0 []\n\t\t<- \"rkisp_rawrd2_s\":0 []\n\t\t<- \"rkisp_rawrd1_l\":0 []\n\t\t<- \"rkcif-mipi-lvds2\":0 [ENABLED]\n\tpad1: Sink\n\t\t<- \"rkisp-input-params\":0 [ENABLED]\n\tpad2: Source\n\t\t[fmt:YUYV8_2X8/4224x3136 field:none colorspace:smpte170m quantization:full-range\n\t\t crop.bounds:(0,0)/4224x3136\n\t\t crop:(0,0)/4224x3136]\n\t\t-> \"rkisp_mainpath\":0 [ENABLED]\n\t\t-> \"rkisp_selfpath\":0 [ENABLED]\n\t\t-> \"rkisp_fbcpath\":0 [ENABLED]\n\t\t-> \"rkisp_iqtool\":0 [ENABLED]\n\tpad3: Source\n\t\t-> \"rkisp-statistics\":0 [ENABLED]\n\n- entity 6: rkisp_mainpath (1 pad, 1 link)\n            type Node subtype V4L flags 0\n            device node name /dev/video11\n\tpad0: Sink\n\t\t<- \"rkisp-isp-subdev\":2 [ENABLED]\n\n- entity 12: rkisp_selfpath (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video12\n\tpad0: Sink\n\t\t<- \"rkisp-isp-subdev\":2 [ENABLED]\n\n- entity 18: rkisp_fbcpath (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video13\n\tpad0: Sink\n\t\t<- \"rkisp-isp-subdev\":2 [ENABLED]\n\n- entity 24: rkisp_iqtool (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video14\n\tpad0: Sink\n\t\t<- \"rkisp-isp-subdev\":2 [ENABLED]\n\n- entity 30: rkisp_rawrd0_m (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video15\n\tpad0: Source\n\t\t-> \"rkisp-isp-subdev\":0 []\n\n- entity 36: rkisp_rawrd2_s (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video16\n\tpad0: Source\n\t\t-> \"rkisp-isp-subdev\":0 []\n\n- entity 42: rkisp_rawrd1_l (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video17\n\tpad0: Source\n\t\t-> \"rkisp-isp-subdev\":0 []\n\n- entity 48: rkisp-statistics (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video18\n\tpad0: Sink\n\t\t<- \"rkisp-isp-subdev\":3 [ENABLED]\n\n- entity 54: rkisp-input-params (1 pad, 1 link)\n             type Node subtype V4L flags 0\n             device node name /dev/video19\n\tpad0: Source\n\t\t-> \"rkisp-isp-subdev\":1 [ENABLED]\n\n- entity 60: rkcif-mipi-lvds2 (1 pad, 1 link)\n             type V4L2 subdev subtype Unknown flags 0\n             device node name /dev/v4l-subdev4\n\tpad0: Source\n\t\t[fmt:SBGGR10_1X10/4224x3136@10000/300000 field:none]\n\t\t-> \"rkisp-isp-subdev\":0 [ENABLED]\n\n",
+  "v4l2_version": "v4l2-ctl 1.22.1\n",
+  "control_queries": [
+    "\nUser Controls\n\n                       exposure 0x00980911 (int)    : min=4 max=6432 step=1 default=2048 value=6400\n\nImage Source Controls\n\n              vertical_blanking 0x009e0901 (int)    : min=78 max=29631 step=1 default=78 value=3300\n            horizontal_blanking 0x009e0902 (int)    : min=4294964194 max=4294964194 step=1 default=4294964194 value=-3102 flags=read-only\n                  analogue_gain 0x009e0903 (int)    : min=128 max=1984 step=1 default=128 value=1120\n\nImage Processing Controls\n\n                 link_frequency 0x009f0901 (intmenu): min=0 max=1 default=0 value=0 (540000000 0x202fbf00)\n                     pixel_rate 0x009f0902 (int64)  : min=0 max=432000000 step=1 default=432000000 value=432000000 flags=read-only\n                   test_pattern 0x009f0903 (menu)   : min=0 max=4 default=0 value=0 (Disabled)\n",
+    "\nUser Controls\n\n                       exposure 0x00980911 (int)    : min=4 max=6432 step=1 default=2048 value=6400\n\nImage Source Controls\n\n              vertical_blanking 0x009e0901 (int)    : min=78 max=29631 step=1 default=78 value=3300\n            horizontal_blanking 0x009e0902 (int)    : min=4294964194 max=4294964194 step=1 default=4294964194 value=-3102 flags=read-only\n                  analogue_gain 0x009e0903 (int)    : min=128 max=1984 step=1 default=128 value=1024\n\nImage Processing Controls\n\n                 link_frequency 0x009f0901 (intmenu): min=0 max=1 default=0 value=0 (540000000 0x202fbf00)\n                     pixel_rate 0x009f0902 (int64)  : min=0 max=432000000 step=1 default=432000000 value=432000000 flags=read-only\n                   test_pattern 0x009f0903 (menu)   : min=0 max=4 default=0 value=0 (Disabled)\n",
+    "\nUser Controls\n\n                       exposure 0x00980911 (int)    : min=4 max=6432 step=1 default=2048 value=6400\n\nImage Source Controls\n\n              vertical_blanking 0x009e0901 (int)    : min=78 max=29631 step=1 default=78 value=3300\n            horizontal_blanking 0x009e0902 (int)    : min=4294964194 max=4294964194 step=1 default=4294964194 value=-3102 flags=read-only\n                  analogue_gain 0x009e0903 (int)    : min=128 max=1984 step=1 default=128 value=1024\n\nImage Processing Controls\n\n                 link_frequency 0x009f0901 (intmenu): min=0 max=1 default=0 value=0 (540000000 0x202fbf00)\n                     pixel_rate 0x009f0902 (int64)  : min=0 max=432000000 step=1 default=432000000 value=432000000 flags=read-only\n                   test_pattern 0x009f0903 (menu)   : min=0 max=4 default=0 value=0 (Disabled)\n",
+    "\nUser Controls\n\n                       exposure 0x00980911 (int)    : min=4 max=6432 step=1 default=2048 value=6400\n\nImage Source Controls\n\n              vertical_blanking 0x009e0901 (int)    : min=78 max=29631 step=1 default=78 value=3300\n            horizontal_blanking 0x009e0902 (int)    : min=4294964194 max=4294964194 step=1 default=4294964194 value=-3102 flags=read-only\n                  analogue_gain 0x009e0903 (int)    : min=128 max=1984 step=1 default=128 value=1120\n\nImage Processing Controls\n\n                 link_frequency 0x009f0901 (intmenu): min=0 max=1 default=0 value=0 (540000000 0x202fbf00)\n                     pixel_rate 0x009f0902 (int64)  : min=0 max=432000000 step=1 default=432000000 value=432000000 flags=read-only\n                   test_pattern 0x009f0903 (menu)   : min=0 max=4 default=0 value=0 (Disabled)\n"
+  ],
+  "original": {
+    "format": {
+      "width": 2688,
+      "height": 3136,
+      "pixelformat": "NV12",
+      "planes": 1,
+      "bytesperline": 2688,
+      "sizeimage": 12644352,
+      "color": {
+        "Field": "None",
+        "Colorspace": "Default",
+        "Transfer Function": "Default",
+        "YCbCr/HSV Encoding": "Default",
+        "Quantization": "Full Range"
+      }
+    },
+    "format_raw": "Format Video Capture Multiplanar:\n\tWidth/Height      : 2688/3136\n\tPixel Format      : 'NV12' (Y/UV 4:2:0)\n\tField             : None\n\tNumber of planes  : 1\n\tFlags             : \n\tColorspace        : Default\n\tTransfer Function : Default\n\tYCbCr/HSV Encoding: Default\n\tQuantization      : Full Range\n\tPlane 0           :\n\t   Bytes per Line : 2688\n\t   Size Image     : 12644352\n",
+    "controls": {
+      "exposure": {
+        "min": 4,
+        "max": 6432,
+        "step": 1,
+        "default": 2048,
+        "value": 6400
+      },
+      "vertical_blanking": {
+        "min": 78,
+        "max": 29631,
+        "step": 1,
+        "default": 78,
+        "value": 3300
+      },
+      "analogue_gain": {
+        "min": 128,
+        "max": 1984,
+        "step": 1,
+        "default": 128,
+        "value": 1120
+      }
+    }
+  },
+  "baseline_process": "",
+  "readback": {
+    "exposure": {
+      "min": 4,
+      "max": 6432,
+      "step": 1,
+      "default": 2048,
+      "value": 6400
+    },
+    "vertical_blanking": {
+      "min": 78,
+      "max": 29631,
+      "step": 1,
+      "default": 78,
+      "value": 3300
+    },
+    "analogue_gain": {
+      "min": 128,
+      "max": 1984,
+      "step": 1,
+      "default": 128,
+      "value": 1024
+    }
+  },
+  "format_raw": "Format Video Capture Multiplanar:\n\tWidth/Height      : 2688/3136\n\tPixel Format      : 'NV12' (Y/UV 4:2:0)\n\tField             : None\n\tNumber of planes  : 1\n\tFlags             : \n\tColorspace        : Default\n\tTransfer Function : Default\n\tYCbCr/HSV Encoding: Default\n\tQuantization      : Full Range\n\tPlane 0           :\n\t   Bytes per Line : 2688\n\t   Size Image     : 12644352\n",
+  "format": {
+    "width": 2688,
+    "height": 3136,
+    "pixelformat": "NV12",
+    "planes": 1,
+    "bytesperline": 2688,
+    "sizeimage": 12644352,
+    "color": {
+      "Field": "None",
+      "Colorspace": "Default",
+      "Transfer Function": "Default",
+      "YCbCr/HSV Encoding": "Default",
+      "Quantization": "Full Range"
+    }
+  },
+  "frames": [
+    {
+      "file": "baseline.jpg",
+      "sha256": "40da9084a96e864b6005e400a6f052d6e014939429f4438b6a6e56a0a4459003"
+    }
+  ],
+  "restored_readback": {
+    "exposure": {
+      "min": 4,
+      "max": 6432,
+      "step": 1,
+      "default": 2048,
+      "value": 6400
+    },
+    "vertical_blanking": {
+      "min": 78,
+      "max": 29631,
+      "step": 1,
+      "default": 78,
+      "value": 3300
+    },
+    "analogue_gain": {
+      "min": 128,
+      "max": 1984,
+      "step": 1,
+      "default": 128,
+      "value": 1120
+    }
+  },
+  "restored_format": {
+    "width": 2688,
+    "height": 3136,
+    "pixelformat": "NV12",
+    "planes": 1,
+    "bytesperline": 2688,
+    "sizeimage": 12644352,
+    "color": {
+      "Field": "None",
+      "Colorspace": "Default",
+      "Transfer Function": "Default",
+      "YCbCr/HSV Encoding": "Default",
+      "Quantization": "Full Range"
+    }
+  },
+  "restore": {
+    "ok": true,
+    "errors": []
+  }
+}

@@ -1,0 +1,152 @@
+{
+  "status": "degraded",
+  "reason": "Focused independent correctness/security review and independent validation completed; full skill roster and cross-model review were not completed for the isolated task scope.",
+  "verdict": "Ready with fixes",
+  "scope": {
+    "base": "caller-scoped current worktree including new files",
+    "branch": "feat/home-console-chat",
+    "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "pr_url": null,
+    "files_changed": 13
+  },
+  "intent": "Provide a multi-turn text-to-synthetic-audio Doubao console lab with simulated tools, manual reply playback, per-turn feedback, and JSON/Markdown/ZIP export. Preserve records on refresh; stop and erase on privacy; prevent microphone input and competing device tests.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security"
+  ],
+  "findings": [
+    {
+      "title": "Handle session failures between turns",
+      "severity": "P2",
+      "file": "device/lira/ui/doubao_lab.py",
+      "line": 226,
+      "confidence": 100,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Handle error events before the no-current-turn guard; mark the lab errored and close/release its failed session while preserving exportable records.",
+      "first_evidence": "device/lira/ui/doubao_lab.py:226 -- if turn is None:return",
+      "why_it_matters": "A receive failure between turns leaves the UI ready and device ownership retained; a subsequent input can wait against a failed session until timeout.",
+      "evidence": [
+        "RealtimeSession._task_done sets failed=True and emits error; feed rejects failed sessions.",
+        "The lab ignores this event without _current; ordinary watchdog only eventually closes the session."
+      ],
+      "#": 1,
+      "reviewers": [
+        "correctness",
+        "security"
+      ],
+      "independent_reviewers": [
+        "correctness",
+        "security"
+      ]
+    },
+    {
+      "title": "Stop audio before removing cleared records",
+      "severity": "P2",
+      "file": "device/lira/ui/static/dev-doubao-lab.js",
+      "line": 98,
+      "confidence": 100,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Dispose removed cards by pausing audio, removing src, calling load(), cancelling timers, and removing DOM; share cleanup with clearSensitive.",
+      "first_evidence": "device/lira/ui/static/dev-doubao-lab.js:98 -- for (const [id, card] of cards) if (!ids.has(id)) { clearTimeout(card.timer); card.root.remove(); cards.delete(id); }",
+      "why_it_matters": "If another browser clears records while a reply is playing, removing the audio DOM node alone can leave playback running and makes later cleanup unable to reach it.",
+      "evidence": [
+        "The removed-record branch never pauses or unloads audio.",
+        "clearSensitive only iterates remaining cards, so removed playing elements are no longer reachable there."
+      ],
+      "#": 2,
+      "reviewers": [
+        "security"
+      ],
+      "independent_reviewers": [
+        "security"
+      ]
+    }
+  ],
+  "actionable_findings": [
+    {
+      "title": "Handle session failures between turns",
+      "severity": "P2",
+      "file": "device/lira/ui/doubao_lab.py",
+      "line": 226,
+      "confidence": 100,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Handle error events before the no-current-turn guard; mark the lab errored and close/release its failed session while preserving exportable records.",
+      "first_evidence": "device/lira/ui/doubao_lab.py:226 -- if turn is None:return",
+      "why_it_matters": "A receive failure between turns leaves the UI ready and device ownership retained; a subsequent input can wait against a failed session until timeout.",
+      "evidence": [
+        "RealtimeSession._task_done sets failed=True and emits error; feed rejects failed sessions.",
+        "The lab ignores this event without _current; ordinary watchdog only eventually closes the session."
+      ],
+      "#": 1,
+      "reviewers": [
+        "correctness",
+        "security"
+      ],
+      "independent_reviewers": [
+        "correctness",
+        "security"
+      ]
+    },
+    {
+      "title": "Stop audio before removing cleared records",
+      "severity": "P2",
+      "file": "device/lira/ui/static/dev-doubao-lab.js",
+      "line": 98,
+      "confidence": 100,
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "pre_existing": false,
+      "suggested_fix": "Dispose removed cards by pausing audio, removing src, calling load(), cancelling timers, and removing DOM; share cleanup with clearSensitive.",
+      "first_evidence": "device/lira/ui/static/dev-doubao-lab.js:98 -- for (const [id, card] of cards) if (!ids.has(id)) { clearTimeout(card.timer); card.root.remove(); cards.delete(id); }",
+      "why_it_matters": "If another browser clears records while a reply is playing, removing the audio DOM node alone can leave playback running and makes later cleanup unable to reach it.",
+      "evidence": [
+        "The removed-record branch never pauses or unloads audio.",
+        "clearSensitive only iterates remaining cards, so removed playing elements are no longer reachable there."
+      ],
+      "#": 2,
+      "reviewers": [
+        "security"
+      ],
+      "independent_reviewers": [
+        "security"
+      ]
+    }
+  ],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [],
+  "testing_gaps": [],
+  "coverage": {
+    "scope": "New-task files and named integration only; previous WIP excluded.",
+    "cross_model": "Not run: caller-established git-diff runner could not isolate untracked files and task hunks without unrelated-code egress.",
+    "reviewer_outcomes": {
+      "correctness": "terminal; one finding",
+      "security": "terminal; two findings",
+      "validator": "terminal; both findings validated independently"
+    },
+    "validation": "Both findings independently validated against current source; queue drain, synthetic-only feed, simulated tools, export authentication and credential exclusion also inspected.",
+    "tests": "Independent rerun: tests/test_doubao_lab.py 4 passed. Caller reports 150 targeted Python and 38 browser tests passed.",
+    "limitations": [
+      "No new live cloud or hardware call performed.",
+      "Focused roster only; no claim of complete full-skill reviewer coverage.",
+      "No product source mutated; only review artifacts written."
+    ]
+  },
+  "artifact_path": "D:/Projects/LIRA/docs/reviews/ce-code-review/20261016-doubao-lab-focused",
+  "run_id": "20261016-doubao-lab-focused"
+}

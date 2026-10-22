@@ -1,0 +1,25 @@
+{
+  "deployed": true,
+  "scope": "teaching UI asset cache fix only",
+  "backup": "/home/orangepi/lira/deploy-backups/ui-asset-cache-20261019-234136",
+  "files": {
+    "lira/ui/static_assets.py": "851bb10050e5ac5fd0001023b1b56257669391696e2cd12463e1d1b0e59d255a",
+    "lira/ui/dev.py": "bf0ad1df15af062f1f4ec11a9f08540bb43a9c0e6ae4e8b426fa0d313ea3b67b",
+    "lira/ui/textbooks.py": "dbf41eee3bee78d0d3e04326e7ad0f5244b239b90d6bb228cfd0d898a42ada76",
+    "lira/ui/templates/dev.html": "317f51c3dd92edff130efb92eb3ef81eb35ce5c868f81a7fdcf49eea68d817f1",
+    "lira/ui/templates/textbooks.html": "4b9966c9cf6720fe2deff22129f88cc2541c6cce3b65ddbdf18bfd2fc13aba82"
+  },
+  "before": {
+    "lira/ui/static_assets.py": null,
+    "lira/ui/dev.py": "0229332557886a89c35b96e8899e6563284f9cf03351ab0fe7cff1b14659bf8e",
+    "lira/ui/textbooks.py": "2ce17d3adbf1b065f2a27964dc910b575a7f9a17ff8dbd2267f5219436ce9b25",
+    "lira/ui/templates/dev.html": "90aeca26ee9b815fe8aec7700b0217a9a668a86c2ada3b3963e1d9e4e8bfd13e",
+    "lira/ui/templates/textbooks.html": "400773ed49851546ef02151b05781b941104cac82301d4b0d0316ec1d375a37e"
+  },
+  "pid": "60961",
+  "capabilities_flag": "false",
+  "protected_files_unchanged": 127,
+  "conversation_mode_unchanged": true,
+  "existing_textbooks_migrated": false,
+  "db": "/home/orangepi/lira/data/device.db"
+}

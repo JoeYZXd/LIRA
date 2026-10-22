@@ -14,8 +14,13 @@ from __future__ import annotations
 
 from typing import Sequence
 
+from lira.dialog.context import StatusFacts
+
 __all__ = [
     "WAKE_ACK",
+    "INPUT_NOT_HEARD",
+    "UNDERSTANDING_FAILED",
+    "PLAYBACK_FAILED",
     "LISTEN_REMIND",
     "LISTEN_GOODBYE",
     "SESSION_CANCELLED",
@@ -37,19 +42,47 @@ __all__ = [
     "OCR_GUIDANCE",
     "OCR_GIVEUP",
     "CAPTURE_GUIDANCE",
+    "OCR_COMPLETE",
     "PRIVACY_ON",
     "PRIVACY_OFF",
+    "SHUTDOWN_FAREWELL",
+    "POWEROFF_FAILED",
+    "DND_EXIT_ACK",
+    "DND_STATUS_ON",
+    "DND_STATUS_OFF",
+    "DND_ESCAPE_PROMPT",
+    "DND_EXEC_PROMPT",
+    "dnd_escape_prompt_text",
+    "dnd_exec_prompt_text",
+    "VOLUME_ACK",
+    "status_report_text",
     "ir_sent_text",
     "confirm_prompt_text",
     "guidance_retry_text",
     "disabled_announce_text",
+    "CHAT_PRIVACY",
+    "CHAT_UNAVAILABLE",
+    "CHAT_BUSY",
+    "CHAT_FAILED",
+    "CHAT_MEMBER_GONE",
+    "CHAT_TOO_LONG",
+    "CHAT_EMPTY",
+    "CHAT_GREETING",
+    "CHAT_SAVE_FAILED_NOTE",
+    "CHAT_OFFLINE_NOTE",
+    "CHAT_ORIGIN_REJECT",
+    "CHAT_NAME_INVALID",
+    "CHAT_NAME_DUPLICATE",
+    "CHAT_MEMBER_MISSING",
+    "CHAT_NEED_JSON",
+    "CHAT_BAD_JSON_BODY",
 ]
 
 # ---------- 唤醒与聆听（R25/R20） ----------
 
-WAKE_ACK = "我在听。"
+WAKE_ACK = "我在。"
 LISTEN_REMIND = "请说出您的指令，比如说：打开台灯。"
-LISTEN_GOODBYE = "好的，想用我的时候，叫我小丽拉。"
+LISTEN_GOODBYE = "好的，想用我的时候，叫我小鹿。"
 SESSION_CANCELLED = "好的，已取消。"
 
 # ---------- 识别失败引导（R24） ----------
@@ -120,8 +153,114 @@ DISCLAIMER_OFFLINE = "当前没有网络，我按原文读给您听。"
 OCR_GUIDANCE = "我没有看清，请把材料放平，再靠近一点。"
 OCR_GIVEUP = "我还是没看清。请找家人帮忙，或者稍后再试。"
 CAPTURE_GUIDANCE = "正在为您拍摄，请把材料放平，不要遮挡镜头。"
+OCR_COMPLETE = "识别已完成，可以把书或材料从摄像头前移开了。我现在读给您听。"
 
 # ---------- 隐私模式后果播报（R12，U7 使用；含麦克风已关提示） ----------
 
 PRIVACY_ON = "好的，隐私模式已开启。麦克风已经关闭，我不会再听您说话，也不会把任何内容发到网上。想让我继续工作，请让家人在手机上打开设备管理页面关闭隐私模式。"
-PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫我小丽拉。"
+PRIVACY_OFF = "隐私模式已关闭，麦克风恢复了。您可以随时叫我小鹿。"
+
+# ---------- 真关机（R4，2026-10-06 计划 U4） ----------
+
+SHUTDOWN_FAREWELL = "好的，我休息了。您也早点休息，再见。"
+#: R4 失败反馈（M7 残留 R1 模式防线：不可逆动作失败必须可感知，不得只进日志）
+POWEROFF_FAILED = "不好意思，我没有关掉。请让家人看看设备，或者再叫我试一次。"
+
+# ---------- 勿扰模式（R8-R12，2026-10-06 计划 U5） ----------
+#
+# 进入勿扰零提示音（R8 有意设计）；以下仅豁免集话术。
+
+DND_EXIT_ACK = "好的，已退出勿扰模式。"
+DND_STATUS_ON = "是的，我在勿扰模式，先不说话。您说「退出勿扰模式」就能叫醒我。"
+DND_STATUS_OFF = "没有，我正常听着呢，随时可以吩咐。"
+
+#: 三次逃生舱（R10，2026-10-06 计划 U6）：主动开口询问是否退出
+DND_ESCAPE_PROMPT = "您连着说了几遍「{desc}」。我在勿扰模式，先不应答。要退出勿扰吗？确认请说：确认。"
+#: 退出后的执行问句（低危；高危走具名确认话术 confirm_prompt_text）
+DND_EXEC_PROMPT = "要现在为您{desc}吗？确认请说：确认。"
+
+
+def dnd_exec_prompt_text(desc: str) -> str:
+    return DND_EXEC_PROMPT.format(desc=desc)
+
+#: R16 全局音量调整确认（以调整后的音量播出，自然演示效果）
+VOLUME_ACK = "好的。"
+
+# ---------- 状态自查（R17，2026-10-06 计划 U9） ----------
+#
+# 措辞纪律：老人能懂的话，不报技术细节（IP/术语）；事实缺失降级表述不阻塞播报。
+
+STATUS_NETWORK_OK = "网络正常，能连上网。"
+STATUS_NETWORK_BAD = "现在连不上网。"
+STATUS_NETWORK_UNKNOWN = "网络情况我一下子说不准。"
+STATUS_CLOUD_OK = "云端服务也连着。"
+STATUS_CLOUD_BAD = "云端服务暂时连不上，读书认字不受影响。"
+STATUS_MIC_OFF = "麦克风已经关闭，听不见您说话。"
+
+
+def status_report_text(facts: StatusFacts) -> str:
+    """状态自查播报文案。facts 键：network/cloud/mic_on（True/False/None）。"""
+    parts = []
+    network = facts.get("network")
+    if network is True:
+        parts.append(STATUS_NETWORK_OK)
+    elif network is False:
+        parts.append(STATUS_NETWORK_BAD)
+    else:
+        parts.append(STATUS_NETWORK_UNKNOWN)
+    cloud = facts.get("cloud")
+    if cloud is True:
+        parts.append(STATUS_CLOUD_OK)
+    elif cloud is False:
+        parts.append(STATUS_CLOUD_BAD)
+    if facts.get("mic_on") is False:
+        parts.append(STATUS_MIC_OFF)
+    return "".join(parts)
+
+
+def dnd_escape_prompt_text(desc: str) -> str:
+    return DND_ESCAPE_PROMPT.format(desc=desc)
+
+INPUT_NOT_HEARD = "收音没有完成，请再说一遍。"
+UNDERSTANDING_FAILED = "理解指令时出了问题，请再说一遍。"
+PLAYBACK_FAILED = "回答没有播完，您可以再问一次。"
+
+# ---------- 文字聊天降级文案（home-console 计划 U2，R8/R10） ----------
+#
+# 措辞纪律：
+#  - 隐私态只断言"未发送至远程/云端"，不得断言"未离开设备"——局域网明文
+#    HTTP 与本地存储使更强承诺不实（沿 client.py 的措辞精度）；
+#  - 降级文案一律不回显消息内容（R10 内容纪律的文案侧）；
+#  - 面向家人：短句、友好、给出下一步（重试/找家人）。
+
+CHAT_PRIVACY = "现在是隐私模式，这句话没有发送到远程或云端，我也暂时不能回话。想让小丽拉继续聊，请家人在设备管理页面关闭隐私模式。"
+CHAT_UNAVAILABLE = "网络或远程服务暂时不可用，这句话没有发出去。请稍后再发一次。"
+CHAT_BUSY = "小丽拉正在回另一条消息，请稍等几秒再发。"
+CHAT_FAILED = "这次没有聊成，回复没有保存。请再发一次试试。"
+CHAT_MEMBER_GONE = "这位家人的会话已经不存在了，请回到选人页重新进入。"
+CHAT_TOO_LONG = "这条消息超过 2000 字了，请拆成几条发给我。"
+CHAT_EMPTY = "输入框还是空的，想说什么就打出来发给我吧。"
+#: 空会话引导语（U3 会话页零消息态渲染；会话历史为空时不显示"加载更多"）
+CHAT_GREETING = "还没聊过天呢。在下面的输入框打句话，发给小丽拉吧。"
+#: ok 态落库失败（saved=False）的常驻标注（R1 残留修复：回复已生成但没存进
+#: 历史，不得渲染成完整成功；只断言"未存进历史"，不暗示重发能找回本条）
+CHAT_SAVE_FAILED_NOTE = "这条回复没能存进历史，设备可能有点问题。"
+
+# ---------- 聊天页面文案（home-console 计划 U3/R5-R9；UI 层唯一出处） ----------
+#
+# 与上方降级文案同源管理：页面错误提示与数据端点 JSON 错误串不再散落
+# ui 层（含首页入口的"未装配"提示，经 app.py 传入模板）。
+
+#: chat 未装配 / 装配失败的显式文案（不隐藏、不静默；CHAT_UNAVAILABLE 已被
+#: 发送降级占用，故此名带 _NOTE）
+CHAT_OFFLINE_NOTE = "聊天功能暂不可用，请找家人看看设备。"
+#: 表单 POST 跨源拒绝（同源守卫的显式呈现，不执行任何变更）
+CHAT_ORIGIN_REJECT = "请求来源不被允许，已拒绝。"
+#: 成员称呼非法（空/超长；上限与 ui 层 _MAX_NAME_CHARS=20 一致，数字不模板化）
+CHAT_NAME_INVALID = "称呼需要 1 到 20 个字。"
+#: 成员重名（创建/改名撞上既有名字；{name} 为撞上的称呼，str.format 填充）
+CHAT_NAME_DUPLICATE = "「{name}」这个名字已经有了，换一个称呼吧。"
+#: 数据端点显式错误串（错误回 JSON 不 302；HTTP 404 detail 同用前者）
+CHAT_MEMBER_MISSING = "成员不存在"
+CHAT_NEED_JSON = "内容类型须为 application/json"
+CHAT_BAD_JSON_BODY = "请求体须为 JSON"

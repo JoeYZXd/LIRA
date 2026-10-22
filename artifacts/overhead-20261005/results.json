@@ -1,0 +1,104 @@
+[
+  {
+    "label": "原流程：横向文字，OCR 空结果",
+    "image": "test01.jpg",
+    "text_file": "test01.txt",
+    "ocr_text": ""
+  },
+  {
+    "label": "comparison / test02-fullwidth-current",
+    "image": "comparison\\test02-fullwidth-current.jpg",
+    "text_file": "comparison\\test02-fullwidth-current.txt",
+    "ocr_text": "1、2、3，头人\n焦昱设计\n小动物们正在玩“木头人” 游戏。趁\n它们一动不动的时候， 看看它们身上分别\n有哪些图形，再数一数每种图形的数量\n把数量最多的图形贴纸贴在方框里。"
+  },
+  {
+    "label": "comparison / test03-fullwidth-native",
+    "image": "comparison\\test03-fullwidth-native.jpg",
+    "text_file": "comparison\\test03-fullwidth-native.txt",
+    "ocr_text": "它们—\n1、 2、3, 木头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量\n把数量最多的图形贴纸贴在方框里。"
+  },
+  {
+    "label": "失败对照：错误的白色假设，处理产生无效黑图，已撤回",
+    "image": "comparison\\test04-white-reference-assumption.jpg",
+    "text_file": "comparison\\test04-white-reference-assumption.txt",
+    "ocr_text": ""
+  },
+  {
+    "label": "overhead-candidate-20261005 / test05-1",
+    "image": "overhead-candidate-20261005\\test05-1.jpg",
+    "text_file": "overhead-candidate-20261005\\test05-1.txt",
+    "ocr_text": "1、 2、3,头人\n焦显设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里\nSa"
+  },
+  {
+    "label": "overhead-candidate-20261005 / test05-2",
+    "image": "overhead-candidate-20261005\\test05-2.jpg",
+    "text_file": "overhead-candidate-20261005\\test05-2.txt",
+    "ocr_text": "1、2、3，头人\n焦显设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里"
+  },
+  {
+    "label": "overhead-candidate-20261005 / test05-3",
+    "image": "overhead-candidate-20261005\\test05-3.jpg",
+    "text_file": "overhead-candidate-20261005\\test05-3.txt",
+    "ocr_text": "1、2、3，头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里"
+  },
+  {
+    "label": "overhead-calibration-evidence / calibration-gain384-exp3200",
+    "image": "overhead-calibration-evidence\\calibration-gain384-exp3200.jpg",
+    "text_file": "overhead-calibration-evidence\\calibration-gain384-exp3200.txt",
+    "ocr_text": "它们→\n有哪些图形，\n1、2、3，木头人\n动物们正在玩“木头"
+  },
+  {
+    "label": "overhead-calibration-evidence / calibration-gain512",
+    "image": "overhead-calibration-evidence\\calibration-gain512.jpg",
+    "text_file": "overhead-calibration-evidence\\calibration-gain512.txt",
+    "ocr_text": "1、2、3，木头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。"
+  },
+  {
+    "label": "早期校准对照：白色参考过曝，未采用",
+    "image": "overhead-calibration-evidence\\test06-calibrated.jpg",
+    "text_file": "overhead-calibration-evidence\\test06-calibrated.txt",
+    "ocr_text": "1、2、3，木头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量,\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "label": "overhead-calibrated-20261005 / test07-1",
+    "image": "overhead-calibrated-20261005\\test07-1.jpg",
+    "text_file": "overhead-calibrated-20261005\\test07-1.txt",
+    "ocr_text": "1、2、3，木头人\n焦显设计\n小动物们正在玩“木头人”游戏。趁\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "label": "overhead-calibrated-20261005 / test07-2",
+    "image": "overhead-calibrated-20261005\\test07-2.jpg",
+    "text_file": "overhead-calibrated-20261005\\test07-2.txt",
+    "ocr_text": "1、2、3，木头人\n焦显设计\n小动物们正在玩“木头人”游戏。趁\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "label": "overhead-calibrated-20261005 / test07-3",
+    "image": "overhead-calibrated-20261005\\test07-3.jpg",
+    "text_file": "overhead-calibrated-20261005\\test07-3.txt",
+    "ocr_text": "1、2、3，木头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "label": "overhead-final-20261005 / test08-1",
+    "image": "overhead-final-20261005\\test08-1.jpg",
+    "text_file": "overhead-final-20261005\\test08-1.txt",
+    "ocr_text": "1、2、3，木头人\n焦昱设\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量\n把数量最多的图形贴纸贴在方框里。\noQ"
+  },
+  {
+    "label": "overhead-final-20261005 / test08-2",
+    "image": "overhead-final-20261005\\test08-2.jpg",
+    "text_file": "overhead-final-20261005\\test08-2.txt",
+    "ocr_text": "1、2、3，头人\n焦昱设计\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "label": "overhead-final-20261005 / test08-3",
+    "image": "overhead-final-20261005\\test08-3.jpg",
+    "text_file": "overhead-final-20261005\\test08-3.txt",
+    "ocr_text": "1、2、3，木头人\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。\noo"
+  },
+  {
+    "label": "设备已保存方案：最终生产拍摄",
+    "image": "overhead-production-20261005\\test09-production.jpg",
+    "text_file": "overhead-production-20261005\\test09-production.txt",
+    "ocr_text": "1、2、3，木头人\n小动物们正在玩“木头人”游戏。趁\n它们一动不动的时候，看看它们身上分别\n有哪些图形，再数一数每种图形的数量，\n把数量最多的图形贴纸贴在方框里。\noQ"
+  }
+]

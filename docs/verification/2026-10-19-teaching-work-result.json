@@ -1,0 +1,41 @@
+{
+  "status": "blocked_acceptance",
+  "implementation_units_present": ["U1", "U2", "U3", "U4", "U5", "U6", "U7", "U8", "U9", "U10"],
+  "code_review": {
+    "status": "complete",
+    "run_id": "20261019-teaching-48d377da",
+    "receipt": "2026-10-19-teaching-code-review.json",
+    "original_findings_applied": [1, 2, 3, 4, 5, 6, 7],
+    "additional_close_race": "fixed and independently inspected",
+    "unapplied_code_findings": []
+  },
+  "verification": {
+    "scoped_tests_passed": 294,
+    "nonbrowser_tests_passed": 1579,
+    "nonbrowser_tests_failed": 3,
+    "nonbrowser_failures": "existing HEAD wakeword fixture mismatch; classic unchanged",
+    "browser_tests_passed": 10,
+    "tv_receiver_unittests_passed": 6,
+    "U1_final_source": {"passed": 12, "total": 12, "clean_exit": true},
+    "speech_final_source": {"passed": 3, "total": 3, "clean_exit": true},
+    "timer_full_matrix_before_close_fix": {"passed": 1, "total": 6},
+    "timer_final_source_diagnostic": {"passed": 1, "total": 1, "cleanup_pending": false},
+    "model_matrix": {"rows": 36, "mechanical_passed": 20, "human_review": "2026-10-19-teaching-capabilities-u10-matrix-review.md", "support_gate": "blocked"}
+  },
+  "blockers": [
+    "Model claims agreement activation without successful activation and does not reliably consume needs_input/revision states",
+    "Missing/draft source model scenarios did not exercise the required actual content read path",
+    "Initial pending exact-speech acknowledgement still sometimes promises immediate playback",
+    "Single final-source timer success does not establish three-repetition model stability; earlier unknown failure remains untraced",
+    "Physical microphone, speaker, camera/OCR and TV receiver installation/pairing/clear acceptance are unverified"
+  ],
+  "consequence": "Keep realtime capabilities default-off; do not claim full agent support or deploy",
+  "recommended_next_focus": "Resolve actual model state/result adherence and obtain physical device acceptance without a fixed teaching workflow",
+  "source_manifest": "2026-10-19-teaching-final-source.json",
+  "preservation_receipt": "2026-10-19-teaching-preservation.json",
+  "operational_validation_plan": "2026-10-19-teaching-operational-validation.md",
+  "committed": false,
+  "deployed": false,
+  "service_restarted": false,
+  "classic_changed_by_this_work": false
+}

@@ -1,0 +1,41 @@
+--- before/conversation_paths.py
++++ after/conversation_paths.py
+@@ -40,6 +40,9 @@
+             websearch_enabled=env.get('enable_volc_websearch','false').strip().lower() in ('true','1','yes','on'),
+             websearch_type=env.get('volc_websearch_type','web_custom_api').strip(),
+             websearch_api_key=env.get('volc_websearch_api_key','').strip())
++        self.audio_output = env.get('LIRA_REALTIME_AUDIO_OUTPUT', 'device').strip()
++        if self.audio_output not in ('device', 'tv'):
++            raise ValueError('Unknown realtime audio output')
+         self.mode = runtime.store.get_meta('conversation_path','classic')
+         if self.mode not in ('classic','doubao_realtime'):
+             self.mode = 'classic'
+@@ -100,6 +103,7 @@
+ 
+     def snapshot(self):
+         return {'mode':self.mode, 'state':self.state, 'error':self.error,
++                'realtime_audio_output':self.audio_output,
+                 'websearch_enabled':self.config.websearch_enabled,
+                 'websearch_type':self.config.websearch_type,
+                 'websearch_configured':bool(self.config.websearch_api_key),
+@@ -499,11 +503,15 @@
+         if self._session_factory is not None:
+             created = self._session_factory(**kwargs)
+             return created
+-        from lira.hal.board.audio import SoundDevicePlayer
+-        from lira.audio.devices import board_audio_device
+-        cfg = self.rt._cfg
+-        player = SoundDevicePlayer(device=board_audio_device(cfg.hal.speaker_device,
+-            direction='output', echo_cancel=cfg.hal.echo_cancel_enabled), samplerate=24000)
++        if self.audio_output == 'tv':
++            from lira.tv_audio import TvAudioPlayer
++            player = TvAudioPlayer(self.tv.sender)
++        else:
++            from lira.hal.board.audio import SoundDevicePlayer
++            from lira.audio.devices import board_audio_device
++            cfg = self.rt._cfg
++            player = SoundDevicePlayer(device=board_audio_device(cfg.hal.speaker_device,
++                direction='output', echo_cancel=cfg.hal.echo_cancel_enabled), samplerate=24000)
+         created = RealtimeSession(**kwargs, player=player,
+                                   speed=self.rt.settings.tts_speed, volume=self.rt.settings.volume)
+         return created

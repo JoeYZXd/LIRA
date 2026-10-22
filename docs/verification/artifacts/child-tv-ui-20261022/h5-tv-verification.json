@@ -1,0 +1,17 @@
+{
+  "passed": true,
+  "screens": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "word_font": 148,
+      "no_scroll": true
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "word_font": 100.725,
+      "no_scroll": true
+    }
+  ]
+}

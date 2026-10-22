@@ -1,0 +1,1212 @@
+[
+  {
+    "case": "deferred-no-barge",
+    "passed": true,
+    "marker": "青色盒子",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.095,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 8.393,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 21.364,
+        "kind": "assistant_text",
+        "text": "查询到的测试标记是：青色盒子。"
+      },
+      {
+        "at": 21.864,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 24.485,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 24.486,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 32.336,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 36.343,
+        "kind": "assistant_text",
+        "text": "已读取到已完成的测试查询结果，标记为：青色盒子。"
+      },
+      {
+        "at": 36.946,
+        "kind": "assistant_delivered",
+        "text": "已读取到已完成的测试查询结果，标记为：青色盒子。"
+      },
+      {
+        "at": 36.946,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 41.718,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.64,
+        "phase": "started"
+      },
+      {
+        "at": 20.641,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.638,
+        "name": "query_synthetic_marker",
+        "call_id": "3e463466-672c-48c2-8bf8-9838ccfcd643"
+      },
+      {
+        "at": 32.495,
+        "name": "list_capability_operations",
+        "call_id": "f1aa426e-b92d-45e9-b095-bcac80e06266"
+      },
+      {
+        "at": 34.726,
+        "name": "get_capability_operation",
+        "call_id": "3821dc6e-dddf-46bf-9285-f44b6a114e82"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "deferred-barge",
+    "passed": true,
+    "marker": "青色盒子",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.048,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.881,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 8.819,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 8.82,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.382,
+        "kind": "user_text",
+        "text": "另外，测试数字是 7931，请先复述数字之前的查询，继续等待，不要取消。"
+      },
+      {
+        "at": 19.116,
+        "kind": "assistant_text",
+        "text": "测试数字是七九三一，之前的查询还在排队等待，没有取消。"
+      },
+      {
+        "at": 19.744,
+        "kind": "assistant_delivered",
+        "text": "测试数字是七九三一，之前的查询还在排队等待，没有取消。"
+      },
+      {
+        "at": 19.744,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 23.809,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.811,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 32.012,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.544,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询标记是青色盒子。"
+      },
+      {
+        "at": 35.043,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 38.472,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.192,
+        "phase": "started"
+      },
+      {
+        "at": 20.192,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.188,
+        "name": "query_synthetic_marker",
+        "call_id": "0a1b6dc0-c62b-4356-8978-f2c956bcb19b"
+      },
+      {
+        "at": 17.781,
+        "name": "get_capability_operation",
+        "call_id": "4cbd8b8c-923d-41e1-9415-295b35696bfe"
+      },
+      {
+        "at": 33.341,
+        "name": "get_capability_operation",
+        "call_id": "235f53cf-b68e-48cf-bac9-ec4173ab2327"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "background-barge",
+    "passed": true,
+    "marker": "青色盒子",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.021,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.875,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.159,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.16,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.035,
+        "kind": "user_text",
+        "text": "另外，测试数字是 7931，请先复述数字之前的查询，继续等待，不要取消。"
+      },
+      {
+        "at": 19.638,
+        "kind": "assistant_text",
+        "text": "复述数字：7931。之前的查询我会继续等待，不取消。\n当前查询仍在排队等待中，我会继续保持等待状态，等有结果了再告诉你。"
+      },
+      {
+        "at": 20.29,
+        "kind": "assistant_delivered",
+        "text": "复述数字：7931。之前的查询我会继续等待，不取消。\n当前查询仍在排队等待中，我会继续保持等待状态，等有结果了再告诉你。"
+      },
+      {
+        "at": 20.29,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 23.463,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.465,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 31.989,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.43,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询标记是：青色盒子。"
+      },
+      {
+        "at": 34.906,
+        "kind": "assistant_delivered",
+        "text": "已完成的测试查询标记是：青色盒子。"
+      },
+      {
+        "at": 34.906,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 38.101,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.057,
+        "phase": "started"
+      },
+      {
+        "at": 20.057,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.055,
+        "name": "query_synthetic_marker",
+        "call_id": "6f2d13ad-e338-4391-bd0e-bc6b9dcb605c"
+      },
+      {
+        "at": 18.288,
+        "name": "get_capability_operation",
+        "call_id": "def4a2dd-0c0c-4729-9df4-4654223ccc3d"
+      },
+      {
+        "at": 33.34,
+        "name": "get_capability_operation",
+        "call_id": "ddda12ba-4edd-4ea4-a55b-990d989b68ff"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "marker": "青色盒子",
+    "executions": 1,
+    "completed": false,
+    "cancelled": true,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.113,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.97,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.208,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.208,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 13.179,
+        "kind": "user_text",
+        "text": "请取消本次合成标记查询，不要再继续这个任务。"
+      },
+      {
+        "at": 15.717,
+        "kind": "assistant_text",
+        "text": "已经帮你取消这次合成标记查询任务了，不会再继续执行啦。"
+      },
+      {
+        "at": 16.304,
+        "kind": "assistant_delivered",
+        "text": "已经帮你取消这次合成标记查询任务了，不会再继续执行啦。"
+      },
+      {
+        "at": 16.304,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 20.897,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.276,
+        "phase": "started"
+      },
+      {
+        "at": 14.531,
+        "phase": "cancelled"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.274,
+        "name": "query_synthetic_marker",
+        "call_id": "df0df202-1046-4919-b417-80a244085258"
+      },
+      {
+        "at": 14.529,
+        "name": "cancel_capability_operation",
+        "call_id": "4ac6edb9-56a1-4342-9bd5-b87f4310ff62"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 1
+  },
+  {
+    "case": "deferred-no-barge",
+    "passed": true,
+    "marker": "橙色纸船",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.012,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.876,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 20.921,
+        "kind": "assistant_text",
+        "text": "工具返回的测试标记是橙色纸船。"
+      },
+      {
+        "at": 21.434,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 23.431,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.431,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 31.672,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.93,
+        "kind": "assistant_text",
+        "text": "已读取到已完成的测试查询结果，标记是橙色纸船。"
+      },
+      {
+        "at": 35.51,
+        "kind": "assistant_delivered",
+        "text": "已读取到已完成的测试查询结果，标记是橙色纸船。"
+      },
+      {
+        "at": 35.51,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 40.063,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.095,
+        "phase": "started"
+      },
+      {
+        "at": 20.096,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.094,
+        "name": "query_synthetic_marker",
+        "call_id": "9e6c53d6-97fc-402b-9d26-763999907a88"
+      },
+      {
+        "at": 31.907,
+        "name": "list_capability_operations",
+        "call_id": "0a19ea1a-a190-46c5-bf7b-a3a19a938176"
+      },
+      {
+        "at": 33.894,
+        "name": "get_capability_operation",
+        "call_id": "fcd63f82-7d88-4910-a542-5e2a923d2041"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "deferred-barge",
+    "passed": true,
+    "marker": "橙色纸船",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.1,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.94,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 8.858,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 8.859,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.359,
+        "kind": "user_text",
+        "text": "另外，测试数字是 7931，请先复述数字之前的查询，继续等待，不要取消。"
+      },
+      {
+        "at": 20.055,
+        "kind": "assistant_text",
+        "text": "测试数字是七九三一，之前的查询还在排队等待，我不会取消，等有结果会告诉你。"
+      },
+      {
+        "at": 20.829,
+        "kind": "assistant_delivered",
+        "text": "测试数字是七九三一，之前的查询还在排队等待，我不会取消，等有结果会告诉你。"
+      },
+      {
+        "at": 20.829,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 23.747,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.748,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 31.877,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.414,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询标记是橙色纸船。"
+      },
+      {
+        "at": 34.87,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 37.999,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.169,
+        "phase": "started"
+      },
+      {
+        "at": 20.17,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.166,
+        "name": "query_synthetic_marker",
+        "call_id": "232b1b23-bf11-45af-a6d0-69cfbaf1a9ae"
+      },
+      {
+        "at": 17.899,
+        "name": "get_capability_operation",
+        "call_id": "80653d40-ca59-48fa-b7b0-2687486e92c9"
+      },
+      {
+        "at": 33.447,
+        "name": "get_capability_operation",
+        "call_id": "ebc1691b-569e-4705-a26f-49f1ab36f616"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "background-barge",
+    "passed": true,
+    "marker": "橙色纸船",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.063,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.875,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.138,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.14,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.042,
+        "kind": "user_text",
+        "text": "另外，测试数字是 7931，请先复述数字之前的查询，继续等待，不要取消。"
+      },
+      {
+        "at": 18.817,
+        "kind": "assistant_text",
+        "text": "测试数字是七九三一，之前的查询还在排队等待中，我会继续等结果，不会取消。"
+      },
+      {
+        "at": 19.626,
+        "kind": "assistant_delivered",
+        "text": "测试数字是七九三一，之前的查询还在排队等待中，我会继续等结果，不会取消。"
+      },
+      {
+        "at": 19.626,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 23.783,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.784,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 32.035,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.158,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询标记是橙色纸船。"
+      },
+      {
+        "at": 34.637,
+        "kind": "assistant_delivered",
+        "text": "已完成的测试查询标记是橙色纸船。"
+      },
+      {
+        "at": 34.637,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 38.165,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.049,
+        "phase": "started"
+      },
+      {
+        "at": 20.05,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.046,
+        "name": "query_synthetic_marker",
+        "call_id": "6ae7d6ba-0071-49e4-b3f9-a9164484215a"
+      },
+      {
+        "at": 17.413,
+        "name": "get_capability_operation",
+        "call_id": "b8f62271-cd3c-47e7-9d2a-268b3f520cbe"
+      },
+      {
+        "at": 33.367,
+        "name": "get_capability_operation",
+        "call_id": "9b3b39a7-d380-4da4-9370-9aa19da334a1"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "marker": "橙色纸船",
+    "executions": 1,
+    "completed": false,
+    "cancelled": true,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.098,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.964,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.22,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.22,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 13.213,
+        "kind": "user_text",
+        "text": "请取消本次合成标记查询，不要再继续这个任务。"
+      },
+      {
+        "at": 16.314,
+        "kind": "assistant_text",
+        "text": "已经帮你取消本次合成标记查询任务了，不会再继续执行啦。"
+      },
+      {
+        "at": 16.887,
+        "kind": "assistant_delivered",
+        "text": "已经帮你取消本次合成标记查询任务了，不会再继续执行啦。"
+      },
+      {
+        "at": 16.887,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 21.62,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.284,
+        "phase": "started"
+      },
+      {
+        "at": 14.533,
+        "phase": "cancelled"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.271,
+        "name": "query_synthetic_marker",
+        "call_id": "036ba52a-b476-4dcf-be2e-0a3a0c8b8b46"
+      },
+      {
+        "at": 14.531,
+        "name": "cancel_capability_operation",
+        "call_id": "5b0c4831-8b4f-4a75-bdbb-f4f5f70f8166"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 2
+  },
+  {
+    "case": "deferred-no-barge",
+    "passed": true,
+    "marker": "紫色风筝",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.095,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 8.329,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 21.378,
+        "kind": "assistant_text",
+        "text": "查询到的测试标记是紫色风筝。"
+      },
+      {
+        "at": 21.842,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 24.124,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 24.125,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 32.321,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 35.442,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询结果标记是紫色风筝。"
+      },
+      {
+        "at": 35.941,
+        "kind": "assistant_delivered",
+        "text": "已完成的测试查询结果标记是紫色风筝。"
+      },
+      {
+        "at": 35.942,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 39.406,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.54,
+        "phase": "started"
+      },
+      {
+        "at": 20.541,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.538,
+        "name": "query_synthetic_marker",
+        "call_id": "49252fb6-394b-4273-8e87-ec4c23b17ac2"
+      },
+      {
+        "at": 32.466,
+        "name": "list_capability_operations",
+        "call_id": "f4f8dcc8-9560-4cc1-b788-4c5261133a16"
+      },
+      {
+        "at": 34.492,
+        "name": "get_capability_operation",
+        "call_id": "a2257b59-9f90-46ac-ae00-da42829e4797"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  },
+  {
+    "case": "deferred-barge",
+    "passed": true,
+    "marker": "紫色风筝",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.08,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 8.322,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.49,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.491,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.383,
+        "kind": "user_text",
+        "text": "另外，测试数字是 7931，请先复述数字之前的查询，继续等待，不要取消。"
+      },
+      {
+        "at": 19.403,
+        "kind": "assistant_text",
+        "text": "收到，复述数字：七九三幺。之前的查询还在排队等待，我不会取消，等有结果会及时告诉你。"
+      },
+      {
+        "at": 20.339,
+        "kind": "assistant_delivered",
+        "text": "收到，复述数字：七九三幺。之前的查询还在排队等待，我不会取消，等有结果会及时告诉你。"
+      },
+      {
+        "at": 20.34,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 24.118,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 24.119,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 32.052,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.127,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询标记是：紫色风筝。"
+      },
+      {
+        "at": 34.636,
+        "kind": "assistant_delivered",
+        "text": "已完成的测试查询标记是：紫色风筝。"
+      },
+      {
+        "at": 34.636,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 38.111,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.482,
+        "phase": "started"
+      },
+      {
+        "at": 20.484,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.48,
+        "name": "query_synthetic_marker",
+        "call_id": "719147e6-dfd6-4abc-a15b-d96a7564c80b"
+      },
+      {
+        "at": 17.71,
+        "name": "get_capability_operation",
+        "call_id": "fe234665-8295-4523-88c9-916ab383f93c"
+      },
+      {
+        "at": 33.405,
+        "name": "get_capability_operation",
+        "call_id": "b3667c8e-3de4-415e-9e01-fba288170767"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  },
+  {
+    "case": "background-barge",
+    "passed": true,
+    "marker": "紫色风筝",
+    "executions": 1,
+    "completed": true,
+    "cancelled": false,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.049,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.892,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.177,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.178,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 16.058,
+        "kind": "user_text",
+        "text": "另外，测试数字是 7931，请先复述数字之前的查询，继续等待，不要取消。"
+      },
+      {
+        "at": 19.138,
+        "kind": "assistant_text",
+        "text": "测试数字是7931，之前的查询还在排队等待中，我会保留原查询继续等结果，不取消。"
+      },
+      {
+        "at": 20.11,
+        "kind": "assistant_delivered",
+        "text": "测试数字是7931，之前的查询还在排队等待中，我会保留原查询继续等结果，不取消。"
+      },
+      {
+        "at": 20.11,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 23.499,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 23.5,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 32.02,
+        "kind": "user_text",
+        "text": "请查询当前绘画里的本地任务状态，读取已经完成的那个测试，查询结果告诉我它的标记。"
+      },
+      {
+        "at": 34.672,
+        "kind": "assistant_text",
+        "text": "已完成的测试查询标记是：紫色风筝。"
+      },
+      {
+        "at": 35.163,
+        "kind": "assistant_delivered",
+        "text": "已完成的测试查询标记是：紫色风筝。"
+      },
+      {
+        "at": 35.163,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 38.465,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.095,
+        "phase": "started"
+      },
+      {
+        "at": 20.096,
+        "phase": "completed"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.093,
+        "name": "query_synthetic_marker",
+        "call_id": "a7355bc8-a956-48b4-b412-8a03e36e45aa"
+      },
+      {
+        "at": 17.404,
+        "name": "get_capability_operation",
+        "call_id": "0ffea45f-481b-4c5d-bc11-f72e88726688"
+      },
+      {
+        "at": 32.198,
+        "name": "list_capability_operations",
+        "call_id": "1996fc35-b10a-479f-a7be-798ebba7935c"
+      },
+      {
+        "at": 34.032,
+        "name": "get_capability_operation",
+        "call_id": "3fa59898-6308-4121-b749-4ec743d1e804"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  },
+  {
+    "case": "cancel",
+    "passed": true,
+    "marker": "紫色风筝",
+    "executions": 1,
+    "completed": false,
+    "cancelled": true,
+    "premature_claims": [],
+    "events": [
+      {
+        "at": 1.085,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 7.905,
+        "kind": "user_text",
+        "text": "请调用合成标记查询工具，查询结束后告诉工具返回的测试标记，不要猜。"
+      },
+      {
+        "at": 9.47,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 9.471,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 13.158,
+        "kind": "user_text",
+        "text": "请取消本次合成标记查询，不要再继续这个任务。"
+      },
+      {
+        "at": 15.453,
+        "kind": "assistant_text",
+        "text": "已经帮你取消这次合成标记查询任务了。"
+      },
+      {
+        "at": 15.928,
+        "kind": "assistant_delivered",
+        "text": "已经帮你取消这次合成标记查询任务了。"
+      },
+      {
+        "at": 15.928,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 19.283,
+        "kind": "response_done",
+        "text": ""
+      }
+    ],
+    "calls": [
+      {
+        "at": 8.198,
+        "phase": "started"
+      },
+      {
+        "at": 14.478,
+        "phase": "cancelled"
+      }
+    ],
+    "tools": [
+      {
+        "at": 8.197,
+        "name": "query_synthetic_marker",
+        "call_id": "28c436c9-0218-48f3-b6b9-eb2a0f822b92"
+      },
+      {
+        "at": 14.477,
+        "name": "cancel_capability_operation",
+        "call_id": "3570c67b-4f24-4b4c-a5a4-da057e513338"
+      }
+    ],
+    "session_failed": false,
+    "repeat": 3
+  }
+]

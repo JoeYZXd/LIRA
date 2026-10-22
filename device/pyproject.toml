@@ -3,10 +3,13 @@ name = "lira-device"
 version = "0.1.0"
 description = "LIRA 低视力智能阅读与家电助手 — 设备端软件（Orange Pi 5 / RK3588S）"
 requires-python = ">=3.11"
-# 本单元（U1）运行仅依赖 PyYAML。重型依赖按单元逐步启用，放在 optional groups 中，
+# base 组：PyYAML（配置）+ pypinyin（词表拼音归一，2026-10-06 计划 U1）。
+# 重型依赖按单元逐步启用，放在 optional groups 中，
 # 避免一次性安装 sherpa-onnx / rknn / paddle 等板上专用包到 x86 开发环境。
 dependencies = [
     "PyYAML>=6.0",
+    # 退出/勿扰词表拼音归一（纯 Python，无二进制依赖）
+    "pypinyin>=0.50",
 ]
 
 [project.optional-dependencies]
@@ -15,11 +18,14 @@ llm = ["openai>=1.40"]
 # U4：x86 OCR 开发后端
 ocr-x86 = ["onnxruntime>=1.17", "pillow>=10.0", "opencv-python-headless>=4.9", "pyclipper>=1.3", "shapely>=2.0"]
 # U2：音频（sherpa-onnx 支持跨平台 x86 开发）
-audio = ["sherpa-onnx>=1.10", "sounddevice>=0.4"]
+audio = ["sherpa-onnx>=1.10", "sounddevice>=0.4", "websockets>=14"]
 # U7：设备本地触摸屏 Web UI（python-multipart：starlette 表单解析依赖）
-ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9", "itsdangerous>=2.1"]
-# M7：设备↔后台真实 WS 同步传输（lira/sync_ws.py；python-broadlink 待 M5 另装）
+ui = ["fastapi>=0.110", "uvicorn>=0.29", "jinja2>=3.1", "python-multipart>=0.0.9", "itsdangerous>=2.1", "httpx>=0.27"]
+textbooks = ["pillow>=10.0", "pypdfium2>=4.30"]
+# M7：设备↔后台真实 WS 同步传输（lira/sync_ws.py）
 sync = ["websockets>=13"]
+# M5：python-broadlink 不入 pyproject（上游 1.0.x 元数据要求 py>=3.13，板上 3.11 需
+# --ignore-requires-python 安装），仅按 deploy/SETUP.md 2.6 装入板上 venv 并锁定 ==1.0.6
 
 # dev：单元 + e2e。e2e 在同进程内拉起真实后台（backend/app），故附带其运行依赖
 # （FastAPI 表单/Jinja2 + PyJWT/bcrypt/itsdangerous 鉴权），见 tests/e2e/conftest.py。
@@ -29,6 +35,12 @@ dev = [
     "pyjwt>=2.8", "bcrypt>=4.1", "itsdangerous>=2.1",
     "websockets>=13",
 ]
+# U5：dev 控制台浏览器测试（tests/browser）。仅文档化测试依赖——浏览器运行时
+# 不进设备生产依赖（计划 Verification Contract 分层表：浏览器为独立测试层）。
+# 执行方式：显式 `pytest tests/browser` 单独成层运行；默认全量 pytest 不收集
+# （pytest-playwright 的 sync 会话常驻 running loop，会破坏同进程内后续
+# pytest-asyncio 测试，两层必须分进程，见 tests/browser/conftest.py docstring）。
+browser = ["playwright>=1.59", "pytest-playwright>=0.10"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -36,6 +48,13 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 include = ["lira*"]
+
+[tool.setuptools.package-data]
+"lira.llm" = ["*.md"]
+# KTD8：dev 控制台模板与本地静态资源随 wheel 交付（无 CDN 依赖）。
+# U8 决策：可选 3D 未采用（CSS/SVG 温柔动效已覆盖 R6，见 dev-console.css），
+# 不引入 Three.js，也不保留 vendor 预留 glob（空壳依赖清零）。
+"lira.ui" = ["templates/*.html", "static/*.css", "static/*.js"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

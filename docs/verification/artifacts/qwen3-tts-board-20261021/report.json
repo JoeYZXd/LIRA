@@ -1,0 +1,32 @@
+[
+  {
+    "word": "山顶。",
+    "model": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "speaker": "Serena",
+    "device": "Orange Pi 5 CPU",
+    "dtype": "float32",
+    "load_seconds": 7.8899526270106435,
+    "synthesis_seconds": 35.58831394294975,
+    "raw_audio_seconds": 1.28,
+    "real_time_factor": 27.803370267929495,
+    "sample_rate": 24000,
+    "tempo_rate": 0.75,
+    "peak_rss_mib": 5320.8671875,
+    "sha256": "9a43fc0322ac1251ffac5284075dff6bb3fcf6356d16f02370e13ea597732f72"
+  },
+  {
+    "word": "形状。",
+    "model": "Qwen3-TTS-12Hz-0.6B-CustomVoice",
+    "speaker": "Serena",
+    "device": "Orange Pi 5 CPU",
+    "dtype": "float32",
+    "load_seconds": 7.8899526270106435,
+    "synthesis_seconds": 31.016016225970816,
+    "raw_audio_seconds": 1.28,
+    "real_time_factor": 24.2312626765397,
+    "sample_rate": 24000,
+    "tempo_rate": 0.75,
+    "peak_rss_mib": 5320.8671875,
+    "sha256": "82038d62e2fbf5974eedfdf4b63389d62e1aa8df535f31226eae1b8b568eb1e9"
+  }
+]

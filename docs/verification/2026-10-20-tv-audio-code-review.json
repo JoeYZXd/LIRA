@@ -1,0 +1,115 @@
+{
+  "status": "complete",
+  "verdict": "Ready to merge",
+  "scope": {
+    "base": "explicit-this-turn-source-scope",
+    "branch": "feat/home-console-chat",
+    "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+    "pr_url": null,
+    "files_changed": 11
+  },
+  "intent": "Play real Doubao PCM through the paired television built-in speaker, with bounded authenticated chunks, playback-head delivery receipts and scoped cancellation. Configure only the existing realtime output path; classic remains unchanged.",
+  "intent_confidence": "explicit",
+  "reviewers": [
+    "correctness",
+    "security",
+    "testing",
+    "reliability",
+    "maintainability",
+    "api-contract",
+    "agent-native",
+    "adversarial",
+    "consent-correctness",
+    "consent-security",
+    "imperative-correctness",
+    "imperative-security"
+  ],
+  "findings": [],
+  "actionable_findings": [],
+  "triage_groups": [],
+  "pre_existing_findings": [],
+  "requirements_completeness": null,
+  "learnings": [],
+  "agent_native_gaps": [],
+  "deployment_notes": [],
+  "residual_risks": [
+    "Playback-head counters and routed_device_type=2 establish Android delivery, not human audibility; physical TV test remains owned by root."
+  ],
+  "testing_gaps": [
+    "Android-specific denied focus, muted output, activity-pause cancellation, stale focus callback ownership and final-drain routing changes are not executed by Python mocked transport tests.",
+    "Actual authenticated Java endpoints should be verified for missing/wrong bearer tokens and malformed/oversized PCM without disrupting the owned stream."
+  ],
+  "coverage": {
+    "scope_override": "Caller explicitly selected this turn including new/untracked files; full dirty branch and unrelated teaching code excluded. Review was non-mutating except scratch artifacts.",
+    "standards": "Successful search found no applicable AGENTS.md/CLAUDE.md/CODING_STANDARDS.md files in reviewed tree. Active user instructions enforced.",
+    "docs_root": "docs (config.yaml absent)",
+    "plan": "No unambiguous turn-specific plan discovered; settlement suppression not evaluated. User request supplied intent.",
+    "full_roster": true,
+    "terminal_reviewers_collected": 12,
+    "failed_reviewers": [],
+    "cross_model": {
+      "status": "skipped",
+      "reason": "Unable to scope safely: installed Claude route exists, but bundled sanctioned runner interface reviews a base-ref/tree without a per-file/line allowlist; explicit excluded dirty content and credentials cannot be exposed. Local adversarial fallback ran.",
+      "egress": false
+    },
+    "mechanics": {
+      "passes": 4,
+      "semantic_duplicates_merged": 1,
+      "malformed_findings": 0,
+      "malformed_returns": 0,
+      "suppressed_by_confidence": {},
+      "mode_aware_demotions": 0
+    },
+    "validator": {
+      "batches": 2,
+      "initial_batch": {
+        "validated": [
+          1
+        ],
+        "artifact": "validator.json",
+        "resolution": "Final post-drain route check subsequently added by root and source-verified."
+      },
+      "supplemental_batch": {
+        "validated": [],
+        "dropped": [
+          1
+        ],
+        "artifact": "consent-validator.json",
+        "reason": "Raw question-mark guard fixes the supplemental consent defect."
+      },
+      "cross_model_shortcuts": 0
+    },
+    "resolved_by_root_during_review": [
+      "Restored original Chinese launcher label.",
+      "Scoped audio-focus cancellation to original Stream under synchronization.",
+      "Added speaker-route checks on every drain iteration and after final drain before completion.",
+      "Excluded raw question marks from the new full-sentence consent branch while preserving legacy exact yes behavior."
+    ],
+    "runtime_tests": "Root reports 61 voice/audio/dictation tests passed. Root owns device/integration/physical tests; reviewer does not claim their execution.",
+    "supplemental_scope": "Only new full-sentence pending/armed display-consent grammar and parameterized tests; independent correctness/security leaves completed. No broad scan or external egress.",
+    "source_verification": [
+      "Final post-drain check rejects null/non-speaker and updates routeType before completion.",
+      "Raw question-mark exclusion applies only to new anchored fullmatch; pending expiry/armed gates retained.",
+      "Parameterized test now includes three positive and six negative cases, including both question-mark variants."
+    ],
+    "previous_review_artifact": "review-before-supplement.json",
+    "imperative_supplement": {
+      "scope": "Only direct imperative prefix alternatives in existing anchored pending/armed full-sentence consent grammar and associated cases.",
+      "reviewers": [
+        "imperative-correctness",
+        "imperative-security"
+      ],
+      "findings": 0,
+      "source_verified": [
+        "Direct imperative prefixes permit Please/you/help-me equivalents without requiring an initial yes.",
+        "Raw question-mark guard, anchored entire command and pending expiry/armed gate remain intact.",
+        "Question/conditional/negated/reported-speech prefixes do not match new alternatives.",
+        "Added direct-imperative positives and three question negatives in parameterized test."
+      ],
+      "validator": "No candidates; no additional validator selected.",
+      "previous_review": "review-before-imperative-supplement.json"
+    }
+  },
+  "artifact_path": "C:\\Users\\Joey\\AppData\\Local\\Temp\\compound-engineering-Joey\\ce-code-review\\20261020-tv-audio-7757ec4d",
+  "run_id": "20261020-tv-audio-7757ec4d"
+}

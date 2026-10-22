@@ -1,0 +1,18 @@
+{
+  "passed": true,
+  "checks": {
+    "shelf_matches_existing_library": true,
+    "existing_books_or_drafts": true,
+    "open_inside_teaching_card": true,
+    "single_lesson_or_empty_editor": true,
+    "all_lesson_fields_visible": true,
+    "unit_directory_present": true,
+    "return_inside_card": true,
+    "mobile_no_horizontal_overflow": true,
+    "model_extensions_off": true,
+    "no_javascript_errors": true
+  },
+  "javascript_errors": [],
+  "read_only_device_browser_test": true,
+  "household_content_not_exported": true
+}

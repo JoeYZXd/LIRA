@@ -1,0 +1,32 @@
+{
+  "status": "passed",
+  "scope": "actual Doubao realtime protocol after all close and late-callback fixes",
+  "model": "1.2.6.1",
+  "case_counts": {
+    "background-barge": 3,
+    "cancel": 3,
+    "deferred-barge": 3,
+    "deferred-no-barge": 3
+  },
+  "passed": 12,
+  "total": 12,
+  "one_execution_each": true,
+  "premature_claims": [],
+  "session_failures": 0,
+  "clean_process_exit": true,
+  "external_timeout_fired": false,
+  "source_sha256": {
+    "device/lira/audio/doubao_realtime.py": "f5354685f06dd93a3a895b433462fc353f942ba9282b2d6a9bc2345061fb8bc4",
+    "device/lira/realtime_capabilities.py": "24e4f5a097dacfb537a8533751c15161a0b50519fd250a632c87ba5e63dee243",
+    "device/scripts/probe_realtime_tool_protocol.py": "5f9c008fff260d9ed3c51a0b98a8402e7589c4c9d00641799177f5745f6448d1"
+  },
+  "raw_receipt": "2026-10-19-teaching-capabilities-u1-final-reviewed.json",
+  "deployed": false,
+  "hardware_verified": false,
+  "classic_changed": false,
+  "limitations": [
+    "Does not establish physical microphone/speaker/OCR/TV acceptance",
+    "Does not replace failed U10 model cooperation acceptance",
+    "Single final-source timer diagnostic does not replace the three-repetition stability matrix"
+  ]
+}

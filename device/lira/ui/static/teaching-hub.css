@@ -1,0 +1,24 @@
+.teaching-hub { min-width:0; font-size:16px; line-height:1.6; }
+.workspace > #tile-teaching { flex:0 1 1080px; width:100%; max-width:1080px; }
+.teaching-hub [hidden] { display:none!important; }
+.teaching-hub h2 { font-size:20px; margin:12px 0; }
+.teach-breadcrumb,.teach-common-actions,.teach-detail-head { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+.teaching-hub button { min-height:44px; white-space:normal; }
+.teach-breadcrumb { padding-bottom:12px; border-bottom:1px solid var(--border); }
+.teach-breadcrumb button { background:transparent; color:var(--ink); }
+.teach-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,220px),1fr)); gap:12px; margin:20px 0; }
+.teaching-hub .teach-subject,.teaching-hub .teach-feature { display:flex; flex-direction:column; align-items:flex-start; text-align:left; gap:8px; padding:20px; background:var(--surface); color:var(--ink); border:1px solid var(--border-strong,var(--border)); border-radius:12px; }
+.teach-subject strong { font-size:24px; }
+.teach-subject span,.teach-feature span { color:var(--ink-soft); font-weight:400; }
+.teach-feature strong { font-size:18px; }
+.teaching-hub .teach-badge { font-size:13px; padding:2px 8px; border-radius:6px; color:var(--ink); background:var(--bg); }
+.teach-subject:hover,.teach-feature:hover { border-color:var(--brand); }
+.teach-detail-head { justify-content:space-between; }
+.teach-common { margin-top:24px; border-top:1px solid var(--border); padding-top:16px; }
+.teach-common summary { cursor:pointer; min-height:44px; }
+.teach-planned { padding:16px 20px; background:var(--bg); border:1px solid var(--border); border-radius:12px; }
+.teach-planned p { margin:8px 0; }
+#teach-frame { width:100%; height:780px; border:0; display:block; background:var(--surface); }
+#teach-notice:not(:empty) { padding:12px; border:1px solid var(--brand); border-radius:8px; }
+.teaching-hub :focus-visible { outline:3px solid var(--brand); outline-offset:3px; }
+@media(max-width:600px) { .teach-grid { grid-template-columns:1fr; } .teaching-hub .teach-subject,.teaching-hub .teach-feature { padding:16px; } }

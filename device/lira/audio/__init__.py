@@ -25,10 +25,23 @@ from lira.audio._paths import (
     VOCODER_ONNX,
     WAKEWORD_KEYWORDS_FILE,
 )
-from lira.audio.asr import AsrStream, StreamingAsr
-from lira.audio.kws import KwsStream, WakeWordKws
-from lira.audio.mic import MicDistributor, SoundDeviceMic
-from lira.audio.tts import TtsEngine
+from importlib import import_module
+
+# Text and timing helpers are also used without the optional audio extra.
+_ENGINES = {
+    "AsrStream": "asr", "StreamingAsr": "asr",
+    "KwsStream": "kws", "WakeWordKws": "kws",
+    "MicDistributor": "mic", "SoundDeviceMic": "mic", "TtsEngine": "tts",
+}
+
+
+def __getattr__(name):
+    module = _ENGINES.get(name)
+    if module is None:
+        raise AttributeError(name)
+    value = getattr(import_module(f"{__name__}.{module}"), name)
+    globals()[name] = value
+    return value
 
 __all__ = [
     "ASR_MODEL_DIR",

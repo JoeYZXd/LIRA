@@ -183,13 +183,16 @@ class FakeRemoteLlm:
         self.reply = reply
         self.requests = 0
         self.prompts: list[str] = []
+        self.message_batches: list[list[dict[str, str]]] = []
         self.net_ok = True
 
     def __call__(self, request):  # noqa: ANN001 - httpx2 handler 签名
         import httpx2 as httpx
 
         self.requests += 1
-        self.prompts.append(json.loads(request.read().decode("utf-8"))["messages"][-1]["content"])
+        messages = json.loads(request.read().decode("utf-8"))["messages"]
+        self.message_batches.append(messages)
+        self.prompts.append(messages[-1]["content"])
         if not self.net_ok:
             raise httpx.ConnectError("network down (test)", request=request)
         return httpx.Response(200, headers=self.SSE_HEADERS,
@@ -225,23 +228,76 @@ class _Callbacks:
         self._h = h
 
     # speak：记录断言面（真实设备为 TTS 播报；e2e 记文本 + 可选留档）
-    def speak(self, text: str) -> None:
+    def speak(self, text: str, *, owner=None, exempt: bool = False):
+        if owner is not None and not self._h.engine.is_current(owner):
+            return None
         self._h.speak_log.append(text)
+        done = asyncio.Event()
+        done.status = "success"
+        done.set()
+        return done
 
-    def start_listening(self) -> None:
-        if self._h.asr_stream is not None:
-            self._h.asr_stream.reset()
+    def status_facts(self):
+        """R17：e2e 事实面（网络未知=缺键降级、云端未知、麦克风随隐私门）。"""
+        return {"mic_on": not self._h.privacy.is_on}
+
+    def chime(self, *, owner=None):
+        done = asyncio.Event()
+        done.status = "success"
+        done.set()
+        return done
+
+    def cancel_audio(self, owner):
+        pass
+
+    async def stop_audio(self, owner):
+        pass
+
+    def input_generation(self):
+        return self._h.dispatcher.generation
+
+    def reading_task_facts(self):
+        from lira.dialog.context import ReadingTaskFacts, ReadingTaskStatus
+
+        facts = self._h.pipeline.task_facts()
+        if facts is not None:
+            return facts
+        if self._h.engine.state is State.CAPTURING:
+            return ReadingTaskFacts(ReadingTaskStatus.CAPTURING, resumable=False)
+        return None
+
+    def start_listening(self, *, replay=True) -> None:
+        self._h.dispatcher.begin_listening(replay=replay)
 
     def set_audio_route(self, route: AudioRoute) -> None:
         self._h.route = route
 
-    def start_capture(self) -> None:
-        asyncio.ensure_future(self._h.pipeline.run_capture())
+    def start_capture(self, *, owner=None):
+        return self._h._spawn(
+            self._h.pipeline.run_capture(
+                read_original=self._h.engine.read_original, owner=owner,
+                is_valid=lambda: self._h.engine.is_current(owner),
+                on_capture_done=lambda ok: self._h._spawn(self._h.engine.on_capture_done(ok, owner=owner)),
+                on_reading_finished=lambda: self._h._spawn(self._reading_finished(self._h.pipeline.session)),
+            )
+        )
 
-    def send_ir(self, device: str, action: str) -> None:
+    def poweroff(self) -> None:
+        """R4：e2e 无系统副作用，记录断言面。"""
+        self._h.poweroff_called = True
+
+    def adjust_volume(self, delta: float) -> None:
+        """R16：e2e 记录调整量断言面（全局音量装配与持久化由 main_loop 单测覆盖）。"""
+        self._h.volume_deltas.append(delta)
+
+    async def _reading_finished(self, session):
+        if session is not None and self._h.pipeline.session is session:
+            await self._h.engine.on_reading_finished()
+
+    def send_ir(self, device: str, action: str, *, owner=None, confirmed=False):
         # 状态机已完成高危确认 → 装配层以 confirmed=True 过第二道闸
         # （第二道闸仍独立校验 enabled/动作/码值，防御直调）
-        asyncio.ensure_future(self._h._send_ir(device, action))
+        return self._h._spawn(self._h._send_ir(device, action, owner=owner, confirmed=confirmed))
 
     def playback_pause(self) -> None:
         self._h.pipeline.playback_pause()
@@ -268,7 +324,7 @@ class DeviceHarness:
     """全 mock 整机：音频注入 → 隐私门 → 路由 → 状态机 → IR/阅读/同步。
 
     Args:
-        voices: (WakeWordKws, StreamingAsr, WakeWordKws[白名单]) 或 None。
+        voices: (WakeWordKws, StreamingAsr, WakeWordKws[白名单], WakeWordKws[命令]) 或 None。
             None = 无模型环境（文本注入 say_text 仍可驱动状态机）。
         ocr_text: FakeOcrEngine 固定识别文本（每次拍摄覆盖）。
     """
@@ -284,6 +340,9 @@ class DeviceHarness:
         self.ir = MockIrController()
         self.ir_service = IRService(self.store, self.ir)
         self.speak_log: list[str] = []
+        #: U4/U8 断言面：poweroff 调用与音量调整记录（e2e 无系统/设置副作用）
+        self.poweroff_called = False
+        self.volume_deltas: list[float] = []
         self.ir_sent: list[tuple[str, str]] = []
         self.ir_errors: list[tuple[str, str, str]] = []
         self.route = AudioRoute.WAKE
@@ -306,11 +365,13 @@ class DeviceHarness:
         self.wake_stream: KwsStream | None = None
         self.asr_stream: AsrStream | None = None
         self.playback_stream: KwsStream | None = None
+        self.command_stream: KwsStream | None = None
         if voices is not None:
-            wake_kws, asr_engine, playback_kws = voices
+            wake_kws, asr_engine, playback_kws, command_kws = voices
             self.wake_stream = wake_kws.create_stream()
             self.asr_stream = asr_engine.create_stream()
             self.playback_stream = playback_kws.create_stream()
+            self.command_stream = command_kws.create_stream()
 
         # 状态机 + 路由（家电表每次匹配现读本地库 → 同步更新即时生效）
         self.callbacks = _Callbacks(self)
@@ -322,12 +383,12 @@ class DeviceHarness:
             wake_allowed=lambda: not self.privacy.is_on,
         )
         self.source = WavQueueSource()
-        self._gate = PrivacyGatedSink(
-            RouteDispatch(streams=self, wakeword=WAKEWORD, spawn=asyncio.ensure_future),
-            self.privacy,
-        )
         self._task: asyncio.Task | None = None
         self._pending: set[asyncio.Task] = set()
+        self.dispatcher = RouteDispatch(streams=self, wakeword=WAKEWORD, spawn=self._spawn)
+        self._gate = PrivacyGatedSink(self.dispatcher, self.privacy)
+        self.privacy.subscribe(self.dispatcher.apply_privacy)
+        self.privacy.subscribe(self.engine.apply_privacy)
 
         # 隐私通道：后果播报
         from lira.privacy import attach_announcer
@@ -348,9 +409,11 @@ class DeviceHarness:
 
         return tuple(a.to_dialog() for a in self.store.get_all_appliances())
 
-    async def _send_ir(self, device: str, action: str) -> None:
+    async def _send_ir(self, device: str, action: str, *, owner=None, confirmed=False) -> None:
+        if not self.engine.admit_ir(owner, device, action, confirmed=confirmed):
+            return
         try:
-            await self.ir_service.send_ir(device, action, confirmed=True)
+            await self.ir_service.send_ir(device, action, confirmed=confirmed)
             self.ir_sent.append((device, action))
         except ApplianceError as exc:
             self.ir_errors.append((device, action, exc.kind))
@@ -362,6 +425,13 @@ class DeviceHarness:
             self._task = asyncio.get_running_loop().create_task(self._run())
 
     async def aclose(self) -> None:
+        self.engine.close()
+        self.pipeline.playback_stop()
+        pending = list(self._pending)
+        for task in pending:
+            task.cancel()
+        if pending:
+            await asyncio.gather(*pending, return_exceptions=True)
         if self._task is not None:
             self._task.cancel()
             try:
@@ -403,6 +473,8 @@ class DeviceHarness:
         （AE1/AE4）不走此通道。
         """
         await self.engine.on_asr_text(text)
+        for _ in range(3):
+            await asyncio.sleep(0)
 
     def advance(self, seconds: float) -> None:
         """快进虚拟时钟（以静音填充，保持音频推进与时钟一致）。"""

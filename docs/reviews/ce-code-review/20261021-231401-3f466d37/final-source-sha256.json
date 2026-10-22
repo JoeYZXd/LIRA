@@ -1,0 +1,22 @@
+{
+  "device/lira/dictation_settings.py": "ef4685f9b2f05f25961437b2266d3ef3277f93e6c572f823e90e28d0427d6907",
+  "device/lira/dictation_task_contract.py": "f2917e68732db9db826b3083954d2316db717b9248104245ab4aab917411b3ad",
+  "device/lira/dictation_service.py": "ca6ca22d3b9fc86036883c010b6e476ef3060fbe7770c6ac63c51e03b002a822",
+  "device/lira/conversation_paths.py": "a3d5a4eb0eb61f7deafc8e36c286b709c7f2d67b2085be70f8128db255f0511a",
+  "device/lira/dictation_transport.py": "826ba4e1810c451bcc56fd674bc0bceeed8367580bc3e879f6c7f1c3c2912b66",
+  "device/lira/dictation_repository.py": "316c507886e759a50fad00ec798b5585bfda8cac949810b81632b3cb46363847",
+  "device/lira/dictation_tools.py": "50d5f0d997cb4a19e749f92e28c7d623e73a99cfbfc47ec3cf0ebdb91bdbb18e",
+  "device/lira/ui/dictation.py": "f976df7e858109af1fd84b1432f87da634c13afa65d8fe20c263528c96e42c23",
+  "device/lira/ui/static/dictation.js": "92809e92af9d62766aceb63106c73a32fb10474e6319e92691f7adc014b60bb8",
+  "device/lira/ui/templates/dictation.html": "96803076fdd408e62f9ce7db4f20392c92e2769ad84069b86e4c77292af4bb97",
+  "device/lira/llm/chinese_dictation_skill.md": "34514aa70fdf7798f658255700ae186c0ffe41d4fc453894e4832bb3f1b6b28b",
+  "tv-receiver/src/DictationSpec.java": "9836941a4dffbb81d5de01b91e0d6fc9cdb623da0950a549716bc5f698eb300e",
+  "tv-receiver/src/DictationEngineV2.java": "1689f31bada7ae3f8c11e1b9a4d858079396a67a152d2fe144dddf26cc437341",
+  "tv-receiver/src/ReceiverService.java": "f314c1505d432fedef8d9c4381a96cbbd58e5cb04be20ac7ed2cee4888ceda4b",
+  "tv-receiver/src/Screen.java": "f3383b0124e2ad11f6e1d951e11db9283da80c9f4ee938f9aa4700f5ace8617e",
+  "device/lira/dictation_cloud_tts.py": "33430d73d37009dad189a5af6c4c80c1ebc410d1e064239573e6cbc6067eab0e",
+  "device/tests/test_dictation_cloud_tts.py": "730951a627c8fbe5e77d3dc59d3ef40a24dc06b0bc1a7ba45b14444f63d1cccc",
+  "device/tests/test_dictation_settings.py": "97fa3e3de5dccf201088385e5ac1525fcc39bb10b8e76bc8d161a6422edcf029",
+  "tv-receiver/tests/DictationManualNavigationTest.java": "87d6403a16152601b5983276987e56981a8efeb78ae18631ae6455a83641a10e",
+  "device/tests/test_dictation_dialogue.py": "641209dc6d38751b6eab97d3b52b700a8c5bfad3c4ebec734993389134200ab8"
+}

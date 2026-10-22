@@ -1,0 +1,23 @@
+{
+  "checks": {
+    "dev_app": true,
+    "teaching_page": true,
+    "textbooks_page": true,
+    "model_tools_disabled": true,
+    "static_js": true,
+    "text_and_poem_create_read_confirm_edit_delete": true,
+    "conversation_mode_unchanged": true,
+    "existing_table_schemas_unchanged": true,
+    "database_quick_check": true,
+    "temporary_contents_cleaned": true
+  },
+  "passed": true,
+  "conversation_mode": "doubao_realtime",
+  "additive_tables": [
+    "teaching_content_versions",
+    "teaching_member_sessions",
+    "teaching_memories",
+    "teaching_record_refs",
+    "teaching_reviews"
+  ]
+}

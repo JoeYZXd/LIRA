@@ -46,6 +46,13 @@ UTTERANCES: list[tuple[str, str]] = [
     ("volume_up_tv", "电视机调大音量"),
     ("weather", "今天天气怎么样"),
     ("open_lamp", "打开台灯"),
+    # 2026-10-06 计划 U10：语音退出/勿扰/控制机制
+    ("bie_nian_le", "别念了"),
+    ("exit_dnd", "退出勿扰模式"),
+    ("query_dnd", "你现在是在勿扰模式吗"),
+    ("net_query", "你连上网了吗"),
+    ("voice_big", "声音大点"),
+    ("wake_shutdown", "小丽拉，立即去休息"),
 ]
 
 #: 前后静音垫（秒）：给 KWS/ASR 留出起止边界（词后 0.8s 长垫由注入器补）

@@ -1,0 +1,18 @@
+{
+  "test": "real household conversation; no supplied transcript, lesson/unit or tool arguments",
+  "before": {
+    "mode": "doubao_realtime",
+    "state": "standby",
+    "realtime_audio_output": "tv",
+    "cloud_active": false,
+    "error": ""
+  },
+  "after": {
+    "mode": "doubao_realtime",
+    "state": "listening",
+    "realtime_audio_output": "tv",
+    "cloud_active": true,
+    "error": ""
+  },
+  "synthetic_commands_sent": false
+}

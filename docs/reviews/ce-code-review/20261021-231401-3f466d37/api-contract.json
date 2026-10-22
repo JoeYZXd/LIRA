@@ -1,0 +1,28 @@
+{
+  "reviewer": "api-contract",
+  "findings": [
+    {
+      "title": "Pinned Vivi voice settings remain mutable",
+      "severity": "P2",
+      "file": "device/lira/dictation_cloud_tts.py",
+      "line": 17,
+      "why_it_matters": "The requested Vivi preset is a fixed task contract, but the config API accepts any valid speaker, pitch, rate, volume, and instruction. A saved config can therefore produce a task with a different voice or reading behavior while still being labeled as the pinned Doubao Vivi option; the UI exposes those changes directly.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Assuming 'pinned' means the specified values must be immutable, make validate_tts require equality with DEFAULT_TTS for every field and show those values as read-only in the UI. Keep the optional tts field itself so older local-TTS configs remain valid.",
+      "confidence": 75,
+      "evidence": [
+        "device/lira/dictation_cloud_tts.py:17:     if type(value['speaker']) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',value['speaker']):raise ValueError('tts: 音色编号无效')",
+        "device/lira/dictation_cloud_tts.py:18-21: pitch, speech_rate, loudness_rate, and instruction are validated by ranges/length rather than against DEFAULT_TTS.",
+        "device/lira/ui/static/dictation.js:14: The config POST serializes editable tts-speaker, tts-pitch, tts-rate, tts-volume, and tts-instruction fields."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [
+    "No focused compatibility test sends an older v2 task without manual_navigation to the updated TV and verifies it retains the original confirm/left/right behavior.",
+    "No focused transport test verifies that a manual_navigation task is rejected before asset upload when the TV lacks dictation_manual_navigation_v1."
+  ]
+}

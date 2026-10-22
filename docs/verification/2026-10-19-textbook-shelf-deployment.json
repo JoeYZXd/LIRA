@@ -1,0 +1,27 @@
+{
+  "deployed": true,
+  "scope": "textbook management only",
+  "backup": "/home/orangepi/lira/deploy-backups/textbook-shelf-20261019-225047",
+  "files": {
+    "lira/textbook_import.py": "1286671ca5449efe7b759b69ac7ffe61a6f238ca5811fc736a2880548376de0b",
+    "lira/ui/textbooks.py": "9e781ae37bd1b45fe4ea4e76ba4dc538b0c854a27038678c020a17d812c0a644",
+    "lira/ui/templates/textbooks.html": "0c3f8ed5ebb2de8b56dccfc8237b9e457feb331efc47e6ca428905c572def2ae",
+    "lira/ui/static/textbooks.js": "af049bac253f88918a728f55bbf1156122a6946183aab04c357a5b060391b96f",
+    "lira/ui/static/textbooks.css": "30cee0a9df8185f6057892260c88765a8d4102f0f95ede75d47266a8a0d5d37a"
+  },
+  "before": {
+    "lira/textbook_import.py": "c22483176a234d2fefd12e4408690ebfe053b7d660f3e8dc7f759a1ad2abca88",
+    "lira/ui/textbooks.py": "fd9f04fba482303d866fb83f364cf581fb756e1dc9d9333fe0670cbb843c0b02",
+    "lira/ui/templates/textbooks.html": "f6b0de60ce8ecb80f50b9ae453eae5c8a4978a44ec37dd6ff715525d18868abe",
+    "lira/ui/static/textbooks.js": "1434fcd36e653ebf021cc93272d06476b68f0c215258536d89bd77373b929356",
+    "lira/ui/static/textbooks.css": "bc92b6899ee3be330c75d53f0db3379d26efbd8b4051f8b296342e18ffccffe1"
+  },
+  "pid": "56294",
+  "capabilities_flag": "false",
+  "protected_files_unchanged": 126,
+  "conversation_mode_unchanged": true,
+  "existing_textbooks_migrated": false,
+  "db": "/home/orangepi/lira/data/device.db",
+  "visual_fix_backup": "/home/orangepi/lira/deploy-backups/textbook-shelf-20261019-225047/visual-fix",
+  "visual_fix_service_restarted": false
+}

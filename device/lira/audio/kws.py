@@ -50,6 +50,10 @@ class KwsStream:
         self._stream.accept_waveform(SAMPLE_RATE, samples)
         self.frames_fed += len(samples)
 
+    def reset(self) -> None:
+        """Discard recognizer residual at privacy/discontinuity boundaries."""
+        self._engine.kws.reset_stream(self._stream)
+
     def poll(self) -> str | None:
         """解码就绪帧并返回命中关键词文本；未命中返回 None。
 

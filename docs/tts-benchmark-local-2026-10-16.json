@@ -1,0 +1,430 @@
+{
+  "model_startup_seconds": 7.32373424700927,
+  "sample_rate": 44100,
+  "settings": {
+    "volume": 1.0,
+    "tts_speed": 1.0
+  },
+  "texts": [
+    "我在。",
+    "好的，我们马上开始录入声纹，请跟着我说。",
+    "请用平时说话的声音读出这句话。录制完成后，我会检查声音是否清楚，再告诉你下一步怎么做。"
+  ],
+  "rows": [
+    {
+      "mode": "local",
+      "text_index": 0,
+      "repeat": 0,
+      "status": "success",
+      "first_output_seconds": 0.6633201270014979,
+      "complete_seconds": 1.4022778880316764,
+      "playback_seconds": 0.7325009680353105,
+      "metrics": [
+        {
+          "utterance_id": 0,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 0.5730440230108798,
+          "rtf": 0.7834586252101872
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 0,
+      "repeat": 1,
+      "status": "success",
+      "first_output_seconds": 0.6365050990134478,
+      "complete_seconds": 1.3722373800119385,
+      "playback_seconds": 0.7299191839993,
+      "metrics": [
+        {
+          "utterance_id": 1,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 0.5901974859880283,
+          "rtf": 0.8069106253742575
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 0,
+      "repeat": 2,
+      "status": "success",
+      "first_output_seconds": 0.6379677790100686,
+      "complete_seconds": 1.3738595980103128,
+      "playback_seconds": 0.7298801009892486,
+      "metrics": [
+        {
+          "utterance_id": 2,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 0.5871260029962286,
+          "rtf": 0.8027113322214063
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 0,
+      "repeat": 0,
+      "status": "success",
+      "first_output_seconds": 0.05714603001251817,
+      "complete_seconds": 0.7934843829716556,
+      "playback_seconds": 0.7308737909770571,
+      "metrics": [
+        {
+          "utterance_id": 3,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 0,
+      "repeat": 1,
+      "status": "success",
+      "first_output_seconds": 0.05823159299325198,
+      "complete_seconds": 0.7933391359983943,
+      "playback_seconds": 0.7308583330013789,
+      "metrics": [
+        {
+          "utterance_id": 4,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 0,
+      "repeat": 2,
+      "status": "success",
+      "first_output_seconds": 0.06435343401972204,
+      "complete_seconds": 0.7997162220417522,
+      "playback_seconds": 0.7310211210278794,
+      "metrics": [
+        {
+          "utterance_id": 5,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 1,
+      "repeat": 0,
+      "status": "success",
+      "first_output_seconds": 2.887375565012917,
+      "complete_seconds": 6.384486699011177,
+      "playback_seconds": 3.49010251800064,
+      "metrics": [
+        {
+          "utterance_id": 6,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 2.8022376539884135,
+          "rtf": 0.801875782164199
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 1,
+      "repeat": 1,
+      "status": "success",
+      "first_output_seconds": 2.7864156229770742,
+      "complete_seconds": 6.099663028959185,
+      "playback_seconds": 3.307179105002433,
+      "metrics": [
+        {
+          "utterance_id": 7,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 2.7396334770019166,
+          "rtf": 0.8260992152927811
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 1,
+      "repeat": 2,
+      "status": "success",
+      "first_output_seconds": 2.6384367080172524,
+      "complete_seconds": 5.953165252052713,
+      "playback_seconds": 3.307317561004311,
+      "metrics": [
+        {
+          "utterance_id": 8,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 2.5967090479680337,
+          "rtf": 0.7836989140191367
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 1,
+      "repeat": 0,
+      "status": "success",
+      "first_output_seconds": 0.0554818119853735,
+      "complete_seconds": 3.5557713850284927,
+      "playback_seconds": 3.493589535006322,
+      "metrics": [
+        {
+          "utterance_id": 9,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 1,
+      "repeat": 1,
+      "status": "success",
+      "first_output_seconds": 0.05117418599547818,
+      "complete_seconds": 3.5515062999911606,
+      "playback_seconds": 3.4938505300087854,
+      "metrics": [
+        {
+          "utterance_id": 10,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 1,
+      "repeat": 2,
+      "status": "success",
+      "first_output_seconds": 0.06196135497884825,
+      "complete_seconds": 3.5617301039746962,
+      "playback_seconds": 3.493652033037506,
+      "metrics": [
+        {
+          "utterance_id": 11,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 2,
+      "repeat": 0,
+      "status": "success",
+      "first_output_seconds": 2.1663246270036325,
+      "complete_seconds": 10.907543095992878,
+      "playback_seconds": 8.732513260038104,
+      "metrics": [
+        {
+          "utterance_id": 12,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 5.924761464004405,
+          "rtf": 0.7743799215270363
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 1.0,
+      "starvation_seconds": 1.0873015873015834,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 2,
+      "repeat": 1,
+      "status": "success",
+      "first_output_seconds": 2.1988126289797947,
+      "complete_seconds": 11.050458065990824,
+      "playback_seconds": 8.84265410999069,
+      "metrics": [
+        {
+          "utterance_id": 13,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 6.063850715057924,
+          "rtf": 0.7925592058696133
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 1.0,
+      "starvation_seconds": 1.1915192743764127,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "local",
+      "text_index": 2,
+      "repeat": 2,
+      "status": "success",
+      "first_output_seconds": 2.145071867038496,
+      "complete_seconds": 10.976007034012582,
+      "playback_seconds": 8.822010045987554,
+      "metrics": [
+        {
+          "utterance_id": 14,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": 5.991130108945072,
+          "rtf": 0.7830544557463892
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 1.0,
+      "starvation_seconds": 1.1741496598639412,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 2,
+      "repeat": 0,
+      "status": "success",
+      "first_output_seconds": 0.054401000030338764,
+      "complete_seconds": 7.7036137619870715,
+      "playback_seconds": 7.642377684998792,
+      "metrics": [
+        {
+          "utterance_id": 15,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 2,
+      "repeat": 1,
+      "status": "success",
+      "first_output_seconds": 0.05674587102839723,
+      "complete_seconds": 7.707523269986268,
+      "playback_seconds": 7.642978673975449,
+      "metrics": [
+        {
+          "utterance_id": 16,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    },
+    {
+      "mode": "cached",
+      "text_index": 2,
+      "repeat": 2,
+      "status": "success",
+      "first_output_seconds": 0.05566935002570972,
+      "complete_seconds": 7.708245298010297,
+      "playback_seconds": 7.643163087021094,
+      "metrics": [
+        {
+          "utterance_id": 17,
+          "turn_id": null,
+          "asr_to_output_seconds": null,
+          "llm_first_content_seconds": null,
+          "synthesis_seconds": null,
+          "rtf": null
+        }
+      ],
+      "dropped_events": 0,
+      "starvation_count": 0.0,
+      "starvation_seconds": 0.0,
+      "device_underflow": 0.0
+    }
+  ],
+  "cloud_tested": false
+}

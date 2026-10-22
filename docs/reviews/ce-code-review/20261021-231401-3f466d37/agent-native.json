@@ -1,0 +1,43 @@
+{
+  "reviewer": "agent-native",
+  "findings": [
+    {
+      "title": "Expose the bound manual mode to the agent",
+      "severity": "P2",
+      "file": "device/lira/llm/chinese_dictation_skill.md",
+      "line": 15,
+      "why_it_matters": "The new instructions depend on manual_navigation, but subsequent dialogue turns receive only the skill text and a status tool result without the task playback settings. After preparation or task adoption, the agent cannot reliably know whether to apply manual-mode navigation instructions to the bound task.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "Add the bound task's pinned playback settings, including manual_navigation, to model_instructions and the dialogue agent's system context; include the same setting in get_dictation_task_status so the agent can refresh it after adoption. Read from the task snapshot, not the latest configuration revision.",
+      "confidence": 75,
+      "evidence": [
+        "device/lira/llm/chinese_dictation_skill.md:15: 当绑定流程的 manual_navigation=true 时，四会词每次只播报一次，结束后保持当前词等待遥控操作：左键返回上一词并播放，右键下一词并播放，确认键重播当前词。首词左键重播首词，末词右键结束；不循环、不计时重播或自动跳词。模型不能自行推进；收到孩子明确“下一个／写好了”才调用确认下一项，重播或上一词也须有对应请求。认读仍用确认键翻页；暂停后的确认键恢复当前词，不能绕过提问解释的暂停与继续确认。",
+        "device/lira/dictation_tools.py:45 returns INSTRUCTIONS plus skill content; lines 203-208 add skill and current_item to the status response, but no playback configuration; line 305 builds the dialogue system message without playback configuration."
+      ],
+      "pre_existing": false
+    },
+    {
+      "title": "Allow spoken next during manual playback",
+      "severity": "P2",
+      "file": "device/lira/dictation_tools.py",
+      "line": 11,
+      "why_it_matters": "The remote's right key advances while a manual word is still playing, but a child saying '下一词' at that point cannot do the same: observe_user only records child_ack in waiting_child, so the agent's confirm tool returns child_confirmation_required even if playback has finished by the time it calls the tool. The child must repeat the request.",
+      "autofix_class": "gated_auto",
+      "owner": "downstream-resolver",
+      "requires_verification": true,
+      "suggested_fix": "For bound tasks with manual_navigation enabled, accept an explicit next-word utterance while the current dictation item is playing. Bind the acknowledgement to the task and item identity and permit confirm after the audio completes or while it plays, while preserving the pending-answer and explanation gates.",
+      "confidence": 75,
+      "evidence": [
+        "device/lira/dictation_tools.py:11: 'pending不是成功，不可用pause_agent_task代替电视暂停。写好了或下一词用confirm，重播用replay，上一词用previous，结束用cancel。手动模式每次只播报一遍，等待用户控制，不自行重播或推进。')",
+        "device/lira/dictation_tools.py:56 records child_ack only when s['state']=='waiting_child'; line 103 rejects confirm without that acknowledgement. tv-receiver/src/DictationEngineV2.java:64 accepts manual confirm in playing, and Screen.java:40 maps the right key to confirm in manual mode."
+      ],
+      "pre_existing": false
+    }
+  ],
+  "residual_risks": [],
+  "testing_gaps": [
+    "No targeted test covers a spoken next-word request arriving during manual-mode playback and the subsequent confirm call."
+  ]
+}

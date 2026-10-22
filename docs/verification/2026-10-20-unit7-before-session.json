@@ -1,0 +1,7 @@
+{
+  "mode": "doubao_realtime",
+  "state": "standby",
+  "realtime_audio_output": "device_with_tv_dictation",
+  "cloud_active": false,
+  "error": "语音上传积压，已停止会话，避免延迟播放旧语音；请重新唤醒。"
+}

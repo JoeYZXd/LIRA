@@ -1,0 +1,7 @@
+{
+  "android": "6.0.1",
+  "audio_skipped": "Final video-only retest; prior 5s USB PCM retained",
+  "camera_count": 1,
+  "camera_api": "Camera1 NV21 preview",
+  "camera_error": "java.lang.RuntimeException: Fail to connect to camera service"
+}

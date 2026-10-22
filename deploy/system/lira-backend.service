@@ -1,0 +1,17 @@
+[Unit]
+Description=LIRA 子女管理后台（FastAPI + SQLite, :8000）
+# user unit（systemctl --user）：与设备主循环同模式，Linger=yes 开机自启。
+# 库文件 backend/data/lira-backend.db 由应用首启自动创建（0600, WAL）。
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/orangepi/lira/backend
+# 与设备主循环同纪律：启动前清旧字节码（scp 更新源码后 pyc 未失效会崩）
+ExecStartPre=/bin/sh -c 'find /home/orangepi/lira/backend/app -name __pycache__ -exec rm -rf {} +'
+ExecStart=/home/orangepi/lira/backend/.venv/bin/python -m app.main
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

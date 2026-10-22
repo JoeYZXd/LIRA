@@ -1,0 +1,81 @@
+{
+  "review_run_id": "20261021-152733-ba62daf9",
+  "review_status": "complete",
+  "applied_findings": [
+    1,
+    2,
+    4,
+    5,
+    6,
+    7,
+    8
+  ],
+  "rejected_findings": [
+    3
+  ],
+  "additional_residuals_fixed": [
+    "orphan PCM on preparation persistence failure",
+    "lease renewal before failed event poll"
+  ],
+  "verification": {
+    "python311": {
+      "passed": 501,
+      "seconds": 40.55,
+      "source_snapshot_matches": true
+    },
+    "management_browser": {
+      "passed": 10,
+      "channel": "msedge"
+    },
+    "h5_offline": {
+      "passed": 2,
+      "explicit_real_case_skipped": 1,
+      "seconds": 53.08,
+      "counters": {
+        "regression_runs_started": 1,
+        "initial_requests": 1,
+        "new_task_ids": 1,
+        "task_completed": 1,
+        "prepare_after_ready": 0,
+        "child_turns": 28
+      },
+      "cleanup": {
+        "h5": {
+          "timers": 0,
+          "audioActive": false,
+          "pendingInputs": 0
+        },
+        "browser_closed": true,
+        "worker_done": true,
+        "server_pending": 0,
+        "pending_continue_inputs": 0
+      }
+    },
+    "java": {
+      "entrypoints_passed": 9
+    },
+    "android": "built and signature verified; no hardware installation"
+  },
+  "source_sha256": {
+    "device/lira/dictation_tools.py": "860d21acde7d4d1f53e77e13cafcc83937958b2b5bd6d9b4ade115bcf327a023",
+    "device/lira/audio/doubao_realtime.py": "1be35fb44f95c2365dec2dc9a779652405d4ac3dd4f8d2a307380e01d450912b",
+    "device/lira/llm/client.py": "8a41f657dded444f8a2b03c0533fda982a23075e8405cc9f45383cf5e6545986",
+    "device/lira/main.py": "55a919dfa5f7076cc205b86b5c32bf779ab3a791de5a5b9c4493b6a625013e72",
+    "device/tests/test_dictation_dialogue.py": "b0ebf6b24e73b5d8e3842422416d28c168df1b449ea344f54b31eb7c2e2b7976",
+    "device/lira/dictation_service.py": "3d03dc8f933731796f5e31af9348d11bc50e2ff3f30f9bfda015f423ab5a40b0",
+    "device/tests/test_dictation_model_context_gate.py": "72f1ee9f710bc9cb4cdc27ba2989c426356ee643c48129b30978a3968933af8f",
+    "device/lira/ui/static/dictation.js": "83cf2ea6e96db9e878d60bf083f06a5bb64eb54301c7b09dc4be1f1b1a531b65",
+    "device/tests/browser/test_dictation_management_ui.py": "8b5f3f6cf7f0c4963c61c4f1e3853b172f83d6ed17a452a62a728f9ed32f9059",
+    "tv-receiver/src/ReceiverService.java": "a712c19053c1fb5938403a8f36325b5958fe25dd319dd1f36e150454d8eecc88",
+    "tv-receiver/src/AudioReceiver.java": "3f14f4c71fd1788e6851686f42d579679ee98692296f9aec518d95a920bec621",
+    "tv-receiver/src/DictationEngine.java": "57e5a004dfced28974ef71ecaced84a39f75a8ed8359110793cebc6665fa1066",
+    "tv-receiver/src/DictationEngineV2.java": "7c81174d488541cf026644af5a622e6ccb28c9ea3fda4f8eaacc90d694ba72a5",
+    "tv-receiver/tests/DictationEngineV2Test.java": "30648019e3d6e7de3ed849b3fd1ca91667b006eb266033a8e13cf8ff3d9b3d30",
+    "device/tests/test_dictation_worker_lease.py": "a4f1056986e7765a486c9a2950c0df7f25b786efffca0a9b86118e021e751e02"
+  },
+  "remaining": [
+    "real TC1 terminal failed, one actual model call, zero tasks/completions, no rerun",
+    "physical TV/acoustic/remote acceptance not executed"
+  ],
+  "cache_cleanup": "automatic approval rejected recursive __pycache__ deletion: blocked by policy; retained"
+}

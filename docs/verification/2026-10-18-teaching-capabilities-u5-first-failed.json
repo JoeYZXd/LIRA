@@ -1,0 +1,134 @@
+[
+  {
+    "case": "complete",
+    "passed": false,
+    "error_type": "TimeoutError",
+    "events": [
+      {
+        "at": 1.053,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.65,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 23.874,
+        "kind": "assistant_text",
+        "text": "正在播报中，请稍等。"
+      },
+      {
+        "at": 24.124,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 26.457,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 26.468,
+        "kind": "assistant_delivered",
+        "text": "正在播报中，请稍等。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.608,
+        "name": "start_exact_speech"
+      }
+    ],
+    "repeat": 1
+  },
+  {
+    "case": "interrupt",
+    "passed": false,
+    "error_type": "TimeoutError",
+    "events": [
+      {
+        "at": 1.12,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.696,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 23.986,
+        "kind": "assistant_text",
+        "text": "正在按要求播报内容，请稍等片刻。"
+      },
+      {
+        "at": 24.433,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 27.849,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 28.028,
+        "kind": "assistant_delivered",
+        "text": "正在按要求播报内容，请稍等片刻。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.667,
+        "name": "start_exact_speech"
+      }
+    ],
+    "repeat": 1
+  },
+  {
+    "case": "cancel",
+    "passed": false,
+    "error_type": "TimeoutError",
+    "events": [
+      {
+        "at": 1.051,
+        "kind": "input_started",
+        "text": ""
+      },
+      {
+        "at": 9.642,
+        "kind": "user_text",
+        "text": "请调用精确播报工具，竹子播报，青色盒子，橙色纸船，紫色风筝。这是一段合成播报测试。"
+      },
+      {
+        "at": 23.771,
+        "kind": "assistant_text",
+        "text": "正在按要求播报指定内容，请稍等。"
+      },
+      {
+        "at": 24.176,
+        "kind": "audio_done",
+        "text": ""
+      },
+      {
+        "at": 27.477,
+        "kind": "response_done",
+        "text": ""
+      },
+      {
+        "at": 27.598,
+        "kind": "assistant_delivered",
+        "text": "正在按要求播报指定内容，请稍等。"
+      }
+    ],
+    "tools": [
+      {
+        "at": 10.593,
+        "name": "start_exact_speech"
+      }
+    ],
+    "repeat": 1
+  }
+]

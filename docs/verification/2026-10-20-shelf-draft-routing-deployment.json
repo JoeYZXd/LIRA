@@ -1,0 +1,22 @@
+{
+  "deployed": true,
+  "backup": "/home/orangepi/lira/deploy-backups/shelf-draft-routing-20261020-070800",
+  "before_service": {
+    "MainPID": "69903",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "after_service": {
+    "MainPID": "72724",
+    "NRestarts": "0",
+    "ActiveState": "active"
+  },
+  "files": {
+    "lira/textbook_practice.py": "e599b20ffd86e75343d107e0a9a1ffe44c0742442da7eec549c2588fac2a1026",
+    "lira/ui/textbooks.py": "e174ed0b8a7c2106ec4ea710158d551b106926a1affcdfd3defd8fbad933f9ae"
+  },
+  "protected_files_unchanged": true,
+  "textbook_data_unchanged": true,
+  "mode_unchanged": true,
+  "capabilities_flag": "false"
+}

@@ -1,0 +1,25 @@
+{
+  "passed": true,
+  "checks": {
+    "card_width_1080": true,
+    "book_shelf_matches_library": true,
+    "no_upload_form_before_click": true,
+    "four_book_sheets": true,
+    "all_imported_pages_selectable": true,
+    "page_navigation": true,
+    "thumbnail_list_matches_pages": true,
+    "thumbnail_opens_original": true,
+    "authenticated_small_thumbnail": true,
+    "linked_lessons_match_data": true,
+    "real_linked_lesson_roundtrip": true,
+    "cover_selection_in_info": true,
+    "lesson_fields_visible": true,
+    "navigation_inside_card": true,
+    "mobile_no_horizontal_overflow": true,
+    "model_extensions_off": true,
+    "no_javascript_errors": true
+  },
+  "javascript_errors": [],
+  "read_only_device_browser_test": true,
+  "household_content_not_exported": true
+}

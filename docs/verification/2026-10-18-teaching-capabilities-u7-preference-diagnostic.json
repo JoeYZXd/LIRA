@@ -1,0 +1,113 @@
+{
+  "model": "kimi-k3",
+  "rows": [
+    {
+      "repeat": 1,
+      "case": "natural_domain",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 3.698
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "natural_original",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\":true}",
+        "elapsed": 5.556
+      }
+    },
+    {
+      "repeat": 1,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.812
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "natural_domain",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 4.431
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "natural_original",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 4.653
+      }
+    },
+    {
+      "repeat": 2,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 4.908
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "natural_domain",
+      "expected": true,
+      "actual": true,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": true}",
+        "elapsed": 4.496
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "natural_original",
+      "expected": true,
+      "actual": false,
+      "passed": false,
+      "diagnostic": {
+        "finish_reason": "length",
+        "content": "",
+        "elapsed": 7.528
+      }
+    },
+    {
+      "repeat": 3,
+      "case": "today",
+      "expected": false,
+      "actual": false,
+      "passed": true,
+      "diagnostic": {
+        "finish_reason": "stop",
+        "content": "{\"accepted\": false}",
+        "elapsed": 5.552
+      }
+    }
+  ]
+}

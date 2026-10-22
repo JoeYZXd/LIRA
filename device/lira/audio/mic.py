@@ -31,6 +31,10 @@ class AudioSink(Protocol):
         """接收一段 float32 波形（[-1, 1] 归一化，16kHz 单声道）。"""
 
 
+class AudioInputError(RuntimeError):
+    """Input discontinuity: callers must invalidate buffered recognition."""
+
+
 class SoundDeviceMic(AudioIO):
     """sounddevice 单实例麦克风采集（16kHz/mono/int16）。
 
@@ -47,19 +51,32 @@ class SoundDeviceMic(AudioIO):
         self._samplerate = samplerate
         self._blocksize = blocksize
         self._device = device
-        self._queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=100)
+        self._queue: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._closed = True
         self._stream: object | None = None
 
     async def open(self) -> None:
         import sounddevice as sd
 
         loop = asyncio.get_running_loop()
+        self._queue = asyncio.Queue(maxsize=100)
+        self._closed = False
         queue = self._queue
+
+        def enqueue(data, failed):
+            if self._closed or queue is not self._queue:
+                return
+            if failed or self._queue.full():
+                while not self._queue.empty():
+                    self._queue.get_nowait()
+                self._queue.put_nowait(AudioInputError("Microphone overflow; audio continuity lost"))
+                return
+            self._queue.put_nowait(data)
 
         def callback(indata, frames, time_info, status) -> None:  # noqa: ANN001 - sd 回调签名
             if status:
                 logging.warning("麦克风溢出/状态异常: %s", status)
-            loop.call_soon_threadsafe(queue.put_nowait, bytes(indata))
+            loop.call_soon_threadsafe(enqueue, bytes(indata), bool(status))
 
         self._stream = sd.InputStream(
             samplerate=self._samplerate,
@@ -73,14 +90,21 @@ class SoundDeviceMic(AudioIO):
         logging.info("sounddevice 采集已启动: %s Hz @ %s", self._samplerate, self._device)
 
     async def close(self) -> None:
+        self._closed = True
+        while not self._queue.empty():
+            self._queue.get_nowait()
+        self._queue.put_nowait(b"")
         if self._stream is not None:
             self._stream.stop()
             self._stream.close()
             self._stream = None
 
     async def read_chunk(self, size: int) -> bytes:
-        """阻塞取一块采集数据（真实麦克风是无限流，不会返回 b""）。"""
-        return await self._queue.get()
+        """阻塞取一块采集数据；关闭返回 EOF，溢出报告连续性错误。"""
+        chunk = await self._queue.get()
+        if isinstance(chunk, Exception):
+            raise chunk
+        return chunk
 
     async def play(self, data: bytes) -> None:
         """采集端不播放；TTS 播放走独立输出设备（见 tts.py player 注入）。"""

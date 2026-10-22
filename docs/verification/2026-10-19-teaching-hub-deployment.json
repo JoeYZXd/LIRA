@@ -1,0 +1,31 @@
+{
+  "deployed": true,
+  "scope": "teaching card UI only",
+  "backup": "/home/orangepi/lira/deploy-backups/teaching-hub-20261019-223113",
+  "files": {
+    "lira/ui/templates/dev.html": "90aeca26ee9b815fe8aec7700b0217a9a668a86c2ada3b3963e1d9e4e8bfd13e",
+    "lira/ui/templates/teaching_hub.html": "4987046d0b9df0f7c424e9de66a1c92632ed23bb285c73af2838759df813619a",
+    "lira/ui/templates/teaching.html": "909b2d3f9707bc190383b5bece3d835a369b6ec31d595f01b60c1db346f114d1",
+    "lira/ui/templates/textbooks.html": "f6b0de60ce8ecb80f50b9ae453eae5c8a4978a44ec37dd6ff715525d18868abe",
+    "lira/ui/static/teaching-hub.css": "46f389a5370385b252acd8159b78ba489390bf3c6f6ffb1214a9703bc9a06e57",
+    "lira/ui/static/teaching-hub.js": "aa8f8e92b4849c34ebec36644830cd05834b615abf63eaeac50ba3853b426592",
+    "lira/ui/static/teaching-embed.js": "07eaddec3a1270c718b9e1fa705ca97d30e3969076f74b4be463b1197aae2c66",
+    "lira/ui/static/teaching.js": "56f6f156fc9da761daaf54edf39b6fa889764f66d99e37ef3edefcee19c7bd96",
+    "lira/ui/static/textbooks.js": "1434fcd36e653ebf021cc93272d06476b68f0c215258536d89bd77373b929356"
+  },
+  "before": {
+    "lira/ui/templates/dev.html": "cf7fa1b66b2e17e9233438abd8cf083ddff10e6cefe10b6334f11c79396855b1",
+    "lira/ui/templates/teaching_hub.html": null,
+    "lira/ui/templates/teaching.html": "7bc93e5c7dd71dbebaeaaeba712ad0c8950ea97652e39b935dedcda4087fceec",
+    "lira/ui/templates/textbooks.html": "851a8aff8bd73cf578664115ea87bf10d1882e0a633fe38896117a364729e0c9",
+    "lira/ui/static/teaching-hub.css": null,
+    "lira/ui/static/teaching-hub.js": null,
+    "lira/ui/static/teaching-embed.js": null,
+    "lira/ui/static/teaching.js": "a1a9882d7909b01d8d6a6abb5d9860cbfe9e8974b68dd1bff097d150f0cbb099",
+    "lira/ui/static/textbooks.js": "cebb01238862e04124b6829097b0dbd9a5f42d5011861d1b80d6f4c18e1a7cd9"
+  },
+  "pid": "50644",
+  "service_restarted": false,
+  "capabilities_flag": "false",
+  "protected_files_unchanged": 122
+}

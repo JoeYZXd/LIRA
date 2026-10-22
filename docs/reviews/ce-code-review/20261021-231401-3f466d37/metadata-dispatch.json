@@ -1,0 +1,43 @@
+{
+  "run_id": "20261021-231401-3f466d37",
+  "artifact_path": "D:\\Projects\\LIRA\\docs\\reviews\\ce-code-review\\20261021-231401-3f466d37",
+  "intent": "Add optional pinned Doubao Vivi cloud TTS (seed-tts-2.0, zh_female_vv_uranus_bigtts, pitch0 speed-20 volume30 and accepted reading instruction), and manual one-play navigation: left previous/clamp, right next/finalcomplete, center replay. Preserve pause/Q&A audio gates, old task compatibility, privacy, and unchanged KIMI scheduling.",
+  "files": [
+    "device/lira/dictation_settings.py",
+    "device/lira/dictation_task_contract.py",
+    "device/lira/dictation_service.py",
+    "device/lira/conversation_paths.py",
+    "device/lira/dictation_transport.py",
+    "device/lira/dictation_repository.py",
+    "device/lira/dictation_tools.py",
+    "device/lira/ui/dictation.py",
+    "device/lira/ui/static/dictation.js",
+    "device/lira/ui/templates/dictation.html",
+    "device/lira/llm/chinese_dictation_skill.md",
+    "tv-receiver/src/DictationSpec.java",
+    "tv-receiver/src/DictationEngineV2.java",
+    "tv-receiver/src/ReceiverService.java",
+    "tv-receiver/src/Screen.java",
+    "device/lira/dictation_cloud_tts.py",
+    "device/tests/test_dictation_cloud_tts.py",
+    "device/tests/test_dictation_settings.py",
+    "tv-receiver/tests/DictationManualNavigationTest.java"
+  ],
+  "scope": "caller-supplied before/current snapshots, exact bounded diff",
+  "base": "tmp/dictation-vivi-manual/before",
+  "branch": "feat/home-console-chat",
+  "head_sha": "a20791d15dbd679df2b5abed8491c9356e006cc6",
+  "reviewers": [
+    "correctness",
+    "security",
+    "testing",
+    "maintainability",
+    "agent-native",
+    "api-contract",
+    "reliability",
+    "adversarial",
+    "julik-frontend-races"
+  ],
+  "scope_helper": "not representable by helper git endpoint contract; caller forbids whole-repo diff or commits; full roster used fail-closed",
+  "cross_model": "auto route claude installed, no configured allowlist restrictions; external peer cannot be safely scoped because fixed worker uses git diff base against hugely dirty tree and caller explicitly restricts exact snapshots. No job or egress; local adversarial fallback."
+}

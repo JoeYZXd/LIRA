@@ -1,0 +1,462 @@
+--- before/device/lira/dictation_settings.py
++++ after/device/lira/dictation_settings.py
+@@ -21,12 +21,15 @@
+ 
+     def save_v2(self, parameters, *, expected_revision):
+         revision(expected_revision)
+-        if type(parameters) is not dict or set(parameters)!={'phases','playback'}:
++        if type(parameters) is not dict or not {'phases','playback'}<=set(parameters) or set(parameters)-{'phases','playback','tts'}:
+             raise ContractError('parameters: expected phases and playback')
+         phases=parameters['phases']
+         if type(phases) is not list or not phases or any(type(p) is not str or p not in ('recognition','dictation') for p in phases) or len(set(phases))!=len(phases):
+             raise ContractError('phases: expected ordered enabled subset')
+         checked={'phases':list(phases),'playback':validate_parameters_v2(parameters['playback'])}
++        if 'tts' in parameters:
++            from .dictation_cloud_tts import validate_tts
++            checked['tts']=validate_tts(parameters['tts'])
+         with atomic(self.db):
+             latest=self.get_v2()
+             if (latest['revision'] if latest else 0)!=expected_revision:raise ContractError('revision: conflict')
+--- before/device/lira/dictation_task_contract.py
++++ after/device/lira/dictation_task_contract.py
+@@ -118,7 +118,10 @@
+ V2_CAPABILITY = 'dictation_task_v2'
+ 
+ def validate_parameters_v2(value):
+-    obj(value,('repeat_count','interval_ms','speech_rate'),'playback')
++    if type(value) is not dict:fail('playback','expected object')
++    obj(value,('repeat_count','interval_ms','speech_rate')+ (('manual_navigation',) if 'manual_navigation' in value else ()),'playback')
++    if 'manual_navigation' in value and type(value['manual_navigation']) is not bool:fail('playback.manual_navigation','expected boolean')
++    if value.get('manual_navigation') and value['repeat_count']!=1:fail('playback.repeat_count','manual navigation requires one playback')
+     integer(value['repeat_count'],1,5,'playback.repeat_count')
+     integer(value['interval_ms'],0,600000,'playback.interval_ms')
+     rate=value['speech_rate']
+--- before/device/lira/dictation_service.py
++++ after/device/lira/dictation_service.py
+@@ -17,8 +17,10 @@
+ from .teaching_skills import TeachingSkills
+ 
+ class DictationService:
+-    def __init__(self,db,textbooks,root,tts=None,*,synthesize=None,member_exists=None,privacy=None,repository=None):
++    def __init__(self,db,textbooks,root,tts=None,*,synthesize=None,member_exists=None,privacy=None,repository=None,cloud_api_key='',cloud_synthesize=None):
+         self.db,self.root,self.tts,self.synthesize=db,Path(root),tts,synthesize
++        self.cloud_api_key=cloud_api_key
++        self.cloud_synthesize=cloud_synthesize
+         self.member_exists=member_exists or (lambda n:bool(db.execute('SELECT 1 FROM members WHERE id=?',(n,)).fetchone()))
+         self.privacy=privacy or (lambda:False)
+         self.repository=repository or DictationRepository(db)
+@@ -72,8 +74,14 @@
+             session['request']['book_id']=result['book_id']
+         return result
+ 
+-    async def _audio(self,text,speed):
+-        if self.synthesize:
++    async def _audio(self,text,speed,tts_settings=None):
++        if tts_settings is not None:
++            if self.cloud_synthesize:
++                data=await self.cloud_synthesize(text,copy.deepcopy(tts_settings),allowed=lambda:not self.privacy())
++            else:
++                from .dictation_cloud_tts import synthesize_cloud
++                data=await synthesize_cloud(text,tts_settings,self.cloud_api_key,allowed=lambda:not self.privacy())
++        elif self.synthesize:
+             data=self.synthesize(text,speed)
+             if inspect.isawaitable(data):data=await data
+         elif self.tts:
+@@ -168,7 +176,7 @@
+             blobs={};total=0
+             try:
+                 for aid,text in texts.items():
+-                    blobs[aid]=await self._audio(text,task['playback']['speech_rate']);total+=len(blobs[aid])
++                    blobs[aid]=await self._audio(text,task['playback']['speech_rate'],session['config']['parameters'].get('tts'));total+=len(blobs[aid])
+                     if total>MAX_TASK_BYTES:raise ValueError('task audio quota exceeded')
+                     task['audio_assets'].append(dict(asset_id=aid,sha256=hashlib.sha256(blobs[aid]).hexdigest(),media_type='audio/pcm'))
+             except Exception as exc:return dict(status='audio_unavailable',reason=str(exc))
+--- before/device/lira/conversation_paths.py
++++ after/device/lira/conversation_paths.py
+@@ -95,7 +95,8 @@
+         self.dictation_service = DictationService(runtime.store._conn,
+             TextbookPractice(env.get('LIRA_TEXTBOOK_DIR')),
+             Path(getattr(runtime.store, '_path', 'lira.db')).parent / 'dictation-v2',
+-            tts=getattr(runtime, 'tts', None),privacy=lambda:runtime.privacy.is_on)
++            tts=getattr(runtime, 'tts', None),privacy=lambda:runtime.privacy.is_on,
++            cloud_api_key=env.get('LIRA_ONLINE_TTS_API_KEY') or env.get('LIRA_DOUBAO_REALTIME_API_KEY',''))
+         def owner():
+             identity=getattr(self,'speaker_input',None)
+             if identity is None or identity.state!='recognized':return None
+--- before/device/lira/dictation_transport.py
++++ after/device/lira/dictation_transport.py
+@@ -36,6 +36,7 @@
+     caps=r.json().get('capabilities',[])
+     if 'dictation_task_v2' not in caps:raise ValueError('v2 capability required')
+     if any(p['type']=='recognition' and any(len(i['text'])>1 for i in p['items']) for p in prepared['task']['phases']) and 'dictation_recognition_words_v1' not in caps:raise ValueError('recognition words capability required; upgrade TV')
++    if prepared['task']['playback'].get('manual_navigation') and 'dictation_manual_navigation_v1' not in caps:raise ValueError('manual navigation capability required; upgrade TV')
+     await DictationAssets('.',None).upload(prepared['manifest'],prepared['folder'],self.client,base=self.base,token=self.token)
+     await self._post('/dictation/start',dict(task=prepared['task'],manifest=prepared['manifest'],run_epoch=scope['run_epoch']))
+     await self.poll(tid)
+--- before/device/lira/dictation_repository.py
++++ after/device/lira/dictation_repository.py
+@@ -150,7 +150,7 @@
+   fields={'schema_version','command_id','task_id','content_hash','run_epoch','expected_state_revision','phase_id','item_id','action'}
+   if type(command) is not dict or set(command)!=fields or type(command['schema_version']) is not int or command['schema_version']!=2:raise RepositoryError('invalid command fields')
+   if type(command['command_id']) is not str or not 0<len(command['command_id'])<=128:raise RepositoryError('invalid command id')
+-  if command['action'] not in ('start','confirm','pause','resume','replay','cancel'):raise RepositoryError('unsupported command')
++  if command['action'] not in ('start','confirm','pause','resume','replay','previous','cancel'):raise RepositoryError('unsupported command')
+   raw=canonical_json(command)
+   with self._transaction():
+    t,_=self._v2_context(command)
+@@ -181,7 +181,7 @@
+   for key in ('run_epoch','sequence','state_revision'):
+    if type(event[key]) is not int or not 1<=event[key]<=2147483647:raise RepositoryError('invalid '+key)
+   if type(event['actual_repeats']) is not int or not 0<=event['actual_repeats']<=2147483647:raise RepositoryError('invalid actual_repeats')
+-  actions={'task_received','page_presented','playback_started','playback_completed','waiting_child','item_confirmed','paused','resumed','replayed','item_failed','task_completed','cancelled','lesson_completed','resume_requested'}
++  actions={'task_received','page_presented','playback_started','playback_completed','waiting_child','item_confirmed','paused','resumed','replayed','item_failed','task_completed','cancelled','lesson_completed','resume_requested','navigated_previous'}
+   states={'waiting_start','presenting','playing','waiting_child','paused','failed_item','completed','cancelled'}
+   if event['action'] not in actions or event['state'] not in states:raise RepositoryError('unsupported action/state')
+   if (event['state']=='completed')!=(event['action']=='task_completed'):raise RepositoryError('invalid completion state')
+--- before/device/lira/dictation_tools.py
++++ after/device/lira/dictation_tools.py
+@@ -8,7 +8,7 @@
+ INSTRUCTIONS = ('语文默写使用get_dictation_context和prepare_dictation_task，读取业务skill并由模型决定词序。'
+  '准备后deliver_dictation_task，start需孩子确认。执行期间孩子提问必须先control_dictation_task(action=pause)，'
+  '只有实际暂停回执后才能解释。回答后询问是否继续，真实孩子确认且回答音频排空后才能resume；'
+- 'pending不是成功，不可用pause_agent_task代替电视暂停。写好了用confirm，重播用replay，结束用cancel。')
++ 'pending不是成功，不可用pause_agent_task代替电视暂停。写好了或下一词用confirm，重播用replay，上一词用previous，结束用cancel。手动模式每次只播报一遍，等待用户控制，不自行重播或推进。')
+ 
+ class DictationCoordinator:
+  def __init__(self,service,owner,identity_stamp=None):
+@@ -184,7 +184,7 @@
+   for name,desc,props,required in [
+    ('deliver_dictation_task','发送已准备任务到电视，离线保留等待。',{'task_id':{'type':'string'}},['task_id']),
+    ('get_dictation_task_status','读取当前真实电视状态。',{},[]),
+-   ('control_dictation_task','控制电视；暂停必须等实际回执，恢复校验真实确认及回答排空。',{'action':{'type':'string','enum':['start','confirm','pause','resume','replay','cancel']}},['action'])]:
++   ('control_dictation_task','控制电视；暂停必须等实际回执，恢复校验真实确认及回答排空。',{'action':{'type':'string','enum':['start','confirm','pause','resume','replay','previous','cancel']}},['action'])]:
+    async def handler(args,_name=name):return await self.call(_name,args)
+    registry.register(name,desc,dict(type='object',properties=props,required=required,additionalProperties=False),handler)
+  async def call(self,name,args):
+@@ -330,7 +330,7 @@
+     continue
+    answer=message.content or ''
+    if not c.allow_output():
+-    if any(r['tool']=='control_dictation_task' and r['arguments'].get('action') in ('start','resume','confirm','replay') and r['result'].get('status')=='applied' for r in trace):return dict(status='controlled',text='',trace=trace)
++    if any(r['tool']=='control_dictation_task' and r['arguments'].get('action') in ('start','resume','confirm','replay','previous') and r['result'].get('status')=='applied' for r in trace):return dict(status='controlled',text='',trace=trace)
+     return dict(status='output_blocked',text='',reason='actual_pause_receipt_required',trace=trace)
+    if self.speak and answer:
+     ticket=c.answer_started()
+--- before/device/lira/ui/dictation.py
++++ after/device/lira/ui/dictation.py
+@@ -57,7 +57,7 @@
+         prepared=s.db.execute('SELECT payload FROM dictation_preparation_context WHERE task_id=?',(tid,)).fetchone()
+         import json
+         provenance=json.loads(prepared[0]).get('provenance',[]) if prepared else []
+-        return dict(task=s.repository.snapshot(tid),state=s.repository.status(tid),events=s.repository.events(tid),review=s.results.get(mid,tid),photos=s.results.photos(mid,tid),provenance=provenance)
++        return dict(task=s.repository.snapshot(tid),state=s.repository.status(tid),events=s.repository.events(tid),review=s.results.get(mid,tid),photos=s.results.photos(mid,tid),provenance=provenance,tts=json.loads(prepared[0]).get('context',{}).get('config',{}).get('parameters',{}).get('tts') if prepared else None)
+ 
+     def tools_for(s,mid,tid):
+         existing=getattr(s,'_task_workers',{}).get(tid)
+--- before/device/lira/ui/static/dictation.js
++++ after/device/lira/ui/static/dictation.js
+@@ -8,17 +8,19 @@
+ async function api(path,options={}){const r=await fetch('/dev/api/dictation'+path,options);const data=await r.json();if(!r.ok)throw Error(data.error||'操作失败');return data;}
+ const post=(action,data)=>api('/'+action,{method:'POST',headers:{'Content-Type':'application/json'},body:json(data)});
+ $('read-versions').onclick=()=>run(async()=>{const fresh=await api('');$('latest-versions').hidden=false;$('latest-versions').textContent='服务器最新内容（请与当前编辑合并后保存）：\n'+json({skill:fresh.skill,config:fresh.config});state.skill.revision=fresh.skill.revision;state.config.revision=fresh.config.revision;if(mid){const data=await api('/member/'+mid);profile=data.profile;}if(tid){const latest=await api('/member/'+mid+'/task/'+tid);detail.review.revision=latest.review.revision;}});
+-async function run(fn){if(busy)return;busy=true;const controls=[...root.querySelectorAll('button,input,select,textarea')].map(el=>[el,el.disabled]);controls.forEach(([el])=>el.disabled=true);show('正在处理…');try{await fn();show('操作已完成');}catch(e){show(e.message);}finally{busy=false;controls.forEach(([el,disabled])=>el.disabled=disabled);}}
++async function run(fn){if(busy)return;busy=true;const controls=[...root.querySelectorAll('button,input,select,textarea')].map(el=>[el,el.disabled]);controls.forEach(([el])=>el.disabled=true);show('正在处理…');try{await fn();show('操作已完成');}catch(e){show(e.message);}finally{busy=false;controls.forEach(([el,disabled])=>el.disabled=disabled);syncConfigFields(true);}}
+ function option(select,value,text){const o=document.createElement('option');o.value=value;o.textContent=text;select.append(o);}
+ function member(){if(!mid)throw Error('请先选择孩子');return mid;}
+-function renderConfig(){const c=state.config;const p=c.parameters;$('phase-order').value=p.phases.join(',');$('repeat').value=p.playback.repeat_count;$('interval').value=p.playback.interval_ms;$('rate').value=p.playback.speech_rate;$('config-version').textContent='当前版本 '+c.revision;}
++function syncConfigFields(preserve=false){const manual=$('manual-navigation').checked,cloud=$('tts-provider').value==='doubao';$('repeat').disabled=manual||(preserve&&$('repeat').disabled);$('interval').disabled=manual||(preserve&&$('interval').disabled);if(manual){$('repeat').value=1;$('interval').value=0;}$('rate').disabled=cloud||(preserve&&$('rate').disabled);$('cloud-tts').hidden=!cloud;$('cloud-tts').disabled=!cloud;}
++$('manual-navigation').onchange=()=>syncConfigFields();$('tts-provider').onchange=()=>syncConfigFields();
++function renderConfig(){const c=state.config;const p=c.parameters;$('phase-order').value=p.phases.join(',');$('repeat').value=p.playback.repeat_count;$('interval').value=p.playback.interval_ms;$('rate').value=p.playback.speech_rate;$('manual-navigation').checked=!!p.playback.manual_navigation;const t=p.tts||{};$('tts-provider').value=t.provider||'local';for(const [id,key,fallback] of [['tts-resource','resource_id','seed-tts-2.0'],['tts-speaker','speaker','zh_female_vv_uranus_bigtts'],['tts-pitch','pitch',0],['tts-rate','speech_rate',-20],['tts-volume','loudness_rate',30],['tts-instruction','instruction','朗读 播音 拉长音 着重强调 标准普通话']])$(id).value=t[key]??fallback;syncConfigFields();$('config-version').textContent='当前版本 '+c.revision;}
+ async function init(){state=await api('');for(const m of state.members)option($('member'),m.id,m.name);for(const b of state.books.books)option($('book'),b.book_id,b.title);$('skill').value=state.skill.content;$('skill-version').textContent='当前版本 '+state.skill.revision;renderConfig();}
+ async function tasks(){const data=await api('/member/'+member());profile=data.profile;const p=profile?.progress||{};if(!dirty.has('profile-form')){$('book').value=profile?.book_id||'';$('unit').value=p.unit||'';$('lesson').value=p.lesson||'';}$('tasks').replaceChildren();for(const t of data.tasks){const b=document.createElement('button');b.textContent=t.task_id+' · '+t.state;b.addEventListener('click',()=>{if(leave())run(()=>load(t.task_id,true));});$('tasks').append(b);}}
+ $('member').addEventListener('change',()=>{const next=Number($('member').value)||null;if(!leave()){$('member').value=mid||'';return;}mid=next;sid=null;tid=null;dirty.clear();$('task-detail').hidden=true;if(mid)run(tasks);});
+ for(const id of ['profile','config','skill','prepare','review','facts'])$(id+'-form').addEventListener('submit',e=>{e.preventDefault();run(async()=>{
+ if(id==='profile'){const progress={};if($('unit').value)progress.unit=Number($('unit').value);if($('lesson').value)progress.lesson=Number($('lesson').value);profile=(await post('profile',{member_id:member(),book_id:$('book').value,progress,expected_revision:profile?.revision||0})).profile;}
+ if(id==='skill'){state.skill=(await post('skill',{content:$('skill').value,expected_revision:state.skill.revision})).skill;$('skill-version').textContent='当前版本 '+state.skill.revision;}
+-if(id==='config'){state.config=(await post('config',{expected_revision:state.config.revision,parameters:{phases:$('phase-order').value.split(','),playback:{repeat_count:Number($('repeat').value),interval_ms:Number($('interval').value),speech_rate:Number($('rate').value)}}})).config;renderConfig();}
++if(id==='config'){const parameters={phases:$('phase-order').value.split(','),playback:{repeat_count:Number($('repeat').value),interval_ms:Number($('interval').value),speech_rate:Number($('rate').value)}};if($('manual-navigation').checked)parameters.playback.manual_navigation=true;if($('tts-provider').value==='doubao')parameters.tts={provider:'doubao',resource_id:$('tts-resource').value,speaker:$('tts-speaker').value,pitch:Number($('tts-pitch').value),speech_rate:Number($('tts-rate').value),loudness_rate:Number($('tts-volume').value),instruction:$('tts-instruction').value};state.config=(await post('config',{expected_revision:state.config.revision,parameters})).config;renderConfig();}
+ if(id==='prepare')await prepare(false);
+ if(id==='facts')$('facts').textContent=json(await post('facts',{member_id:member(),book_id:$('book').value,scope_type:'lesson',unit:Number($('facts-unit').value),start:Number($('facts-lesson').value)}));
+ if(id==='review'){const errors=[];for(const row of $('wrong-words').children){if(row.querySelector('.wrong').checked)errors.push({item_id:row.dataset.item,wrong_characters:[...row.querySelectorAll('.char:checked')].map(n=>n.value),note:row.querySelector('input[type=text]').value});}await post('review',{member_id:member(),task_id:tid,status:$('review-state').value,errors,recognition_errors:[...$('recognition-errors').querySelectorAll('input:checked')].map(n=>n.value),note:$('review-note').value,expected_revision:detail.review.revision,request_id:uid()});dirty.delete('review-form');await load(tid);}
+@@ -26,7 +28,7 @@
+ async function prepare(approve){const text=$('request-text').value;const data=await post(approve?'confirm_candidates':'prepare',{member_id:member(),session_id:sid,text:sid?text:text+'\n选用课本编号：'+$('book').value,confirmation_id:pending?.confirmation_id});sid=data.session_id;pending=data.pending_candidates;$('candidate-box').hidden=!pending;$('candidates').textContent=pending?'词库外候选：'+pending.candidates.join('、')+'。请确认是否采用。':'';const line=document.createElement('p');line.textContent=(approve?'家长：确认采用':('家长：'+text))+'\nLIRA：'+(data.text||data.reason||data.status);$('conversation').append(line);if(data.task){$('prepared').textContent=json({task_id:data.task.task_id,content_hash:data.task.content_hash,config_revision:data.task.config_revision,skill_revision:data.task.skill_revision,provenance:data.result?.provenance});await tasks();await load(data.task.task_id);}}
+ $('approve').onclick=()=>run(()=>prepare(true));$('new-session').onclick=()=>{if(!leave())return;sid=null;pending=null;$('candidate-box').hidden=true;$('conversation').replaceChildren();$('prepared').textContent='';};
+ function check(parent,text,cls,value,checked){const label=document.createElement('label'),input=document.createElement('input');input.type='checkbox';input.className=cls;input.value=value;input.checked=checked;label.append(input,document.createTextNode(text));parent.append(label);return input;}
+-async function load(id,confirmed=false){const switching=id!==tid;if(switching&&dirty.has('review-form')&&!confirmed&&!confirm('有尚未保存的编辑，仍要切换吗？'))return;const next=await api('/member/'+member()+'/task/'+id);if(switching)dirty.delete('review-form');detail=next;tid=id;$('task-detail').hidden=false;const t=detail.task;$('task-summary').textContent='任务 '+id+' · '+detail.state.state+' · 当前项 '+(detail.state.item_id||'尚未开始');$('task-json').textContent=json({task:t,provenance:detail.provenance});$('event-log').textContent=json(detail.events);$('review-status').textContent='照片 '+detail.photos.length+' 张；核对状态：'+detail.review.status+'。照片上传与家长核对分别记录。';
++async function load(id,confirmed=false){const switching=id!==tid;if(switching&&dirty.has('review-form')&&!confirmed&&!confirm('有尚未保存的编辑，仍要切换吗？'))return;const next=await api('/member/'+member()+'/task/'+id);if(switching)dirty.delete('review-form');detail=next;tid=id;$('task-detail').hidden=false;const t=detail.task;$('task-summary').textContent='任务 '+id+' · '+detail.state.state+' · 当前项 '+(detail.state.item_id||'尚未开始');$('task-json').textContent=json({task:t,provenance:detail.provenance,tts:detail.tts});$('event-log').textContent=json(detail.events);$('review-status').textContent='照片 '+detail.photos.length+' 张；核对状态：'+detail.review.status+'。照片上传与家长核对分别记录。';
+ if(!dirty.has('review-form')){$('review-state').value=detail.review.status;$('review-note').value=detail.review.note;$('wrong-words').replaceChildren();$('recognition-errors').replaceChildren();for(const p of t.phases)for(const i of p.items){if(p.type==='dictation'){const row=document.createElement('div');row.className='word-row';row.dataset.item=i.item_id;const error=detail.review.errors.find(e=>e.item_id===i.item_id);check(row,i.text,'wrong',i.item_id,!!error);for(const c of new Set(i.text))check(row,'错字：'+c,'char',c,error?.wrong_characters.includes(c));const label=document.createElement('label');label.textContent='此词备注';const note=document.createElement('input');note.type='text';note.maxLength=4000;note.value=error?.note||'';label.append(note);row.append(label);$('wrong-words').append(row);}else check($('recognition-errors'),i.text,'recognition',i.text,detail.review.recognition_errors.includes(i.text));}}
+ $('photo-list').replaceChildren();for(const photo of detail.photos){const box=document.createElement('div'),img=document.createElement('img');img.className='photo';img.alt='家长上传的默写纸面照片';img.src='/dev/api/dictation/member/'+mid+'/photo/'+photo.attachment_id;const remove=document.createElement('button');remove.textContent='删除照片';remove.onclick=()=>run(async()=>{await post('delete_photo',{member_id:member(),task_id:tid,attachment_id:photo.attachment_id});await load(tid);});const label=document.createElement('label');label.textContent='替换这张照片';const input=document.createElement('input');input.type='file';input.accept='image/png,image/jpeg';input.onchange=()=>run(async()=>{await upload(input.files[0],photo.attachment_id);await load(tid);});label.append(input);box.append(img,remove,label);$('photo-list').append(box);}}
+ async function upload(file,replace){if(!file)return;if(file.size>10*1024*1024)throw Error('每张照片不能超过 10 MiB');await api('/member/'+member()+'/task/'+tid+'/photo'+(replace?'?replace_id='+encodeURIComponent(replace):''),{method:'POST',headers:{'Content-Type':file.type},body:file});}
+--- before/device/lira/ui/templates/dictation.html
++++ after/device/lira/ui/templates/dictation.html
+@@ -6,9 +6,9 @@
+ <div id="dictation-management"><h1>语文默写管理</h1><p>二会字认读、四会字扩词默写。纸面结果由家长核对，不自动认定掌握程度。</p><p id="notice" role="status" aria-live="polite"></p><button id="read-versions" type="button">读取最新版本号，保留当前编辑</button><pre id="latest-versions" hidden></pre>
+ <section class="card"><h2>孩子与教材进度</h2><label for="member">孩子</label><select id="member"><option value="">请选择孩子</option></select><form id="profile-form"><label for="book">语文课本</label><select id="book"><option value="">请选择课本</option></select><label for="unit">已学到单元</label><input id="unit" type="number" min="1" max="999"><label for="lesson">已学到课次</label><input id="lesson" type="number" min="1" max="999"><button>保存教材进度</button></form><a href="/dev/textbooks" target="_blank" rel="noopener">管理课本与核对原文</a></section>
+ <section class="card"><h2>准备默写</h2><p>模型读取业务 skill、所选孩子的课本和学习记录。有疑问会在这里询问。</p><form id="prepare-form"><label for="request-text">任务或回复</label><textarea id="request-text" rows="3" maxlength="4000" required placeholder="例如：默写第二课"></textarea><div class="actions"><button>发送给大模型</button><button id="new-session" type="button">新建准备会话</button></div></form><div id="conversation"></div><div id="candidate-box" hidden><p id="candidates"></p><button id="approve" type="button">确认采用这些候选词</button></div><pre id="prepared"></pre></section>
+-<section class="card"><h2>任务与实际执行</h2><button id="refresh-tasks" type="button">刷新任务列表</button><div id="tasks"></div><div id="task-detail" hidden><p id="task-summary"></p><div class="actions"><button data-action="deliver">发送／重试发送</button><button data-action="start">确认开始</button><button data-action="confirm">确认本项完成</button><button data-action="pause">暂停</button><button data-action="resume">确认继续</button><button data-action="replay">重播当前项</button><button data-action="cancel">结束默写</button><button id="refresh-detail">刷新实际回执</button></div><details><summary>任务全文、版本与选词理由（家长）</summary><pre id="task-json"></pre></details><details><summary>实际事件日志</summary><pre id="event-log"></pre></details>
++<section class="card"><h2>任务与实际执行</h2><button id="refresh-tasks" type="button">刷新任务列表</button><div id="tasks"></div><div id="task-detail" hidden><p id="task-summary"></p><div class="actions"><button data-action="deliver">发送／重试发送</button><button data-action="start">确认开始</button><button data-action="previous">上一词并播放</button><button data-action="confirm">下一词／确认本项完成</button><button data-action="pause">暂停</button><button data-action="resume">确认继续</button><button data-action="replay">重播当前项</button><button data-action="cancel">结束默写</button><button id="refresh-detail">刷新实际回执</button></div><details><summary>任务全文、版本与选词理由（家长）</summary><pre id="task-json"></pre></details><details><summary>实际事件日志</summary><pre id="event-log"></pre></details>
+ <h3>纸面照片与家长核对</h3><p id="review-status"></p><label for="photos">上传照片（可多选 PNG / JPEG，每张最大 10 MiB）</label><input id="photos" type="file" accept="image/png,image/jpeg" multiple><div id="photo-list"></div><form id="review-form"><label for="review-state">核对状态</label><select id="review-state"><option value="unreviewed">尚未核对</option><option value="reviewed_with_errors">已核对，有错误</option><option value="reviewed_all_correct">已核对，全部正确</option></select><fieldset><legend>错误词语及可选错字</legend><div id="wrong-words"></div></fieldset><fieldset><legend>认读困难的二会字</legend><div id="recognition-errors"></div></fieldset><label for="review-note">核对备注</label><textarea id="review-note" rows="3" maxlength="4000"></textarea><button>保存核对结果</button></form></div></section>
+ <section class="card"><h2>学习事实查询</h2><form id="facts-form"><label for="facts-unit">单元</label><input id="facts-unit" type="number" min="1" required><label for="facts-lesson">课次</label><input id="facts-lesson" type="number" min="1" required><button>读取孩子本课知识记录</button></form><pre id="facts"></pre></section>
+-<section class="card"><h2>可配置流程</h2><form id="config-form"><label for="phase-order">阶段与顺序</label><select id="phase-order"><option value="recognition,dictation">先二会字认读，再四会字默写</option><option value="dictation,recognition">先四会字默写，再二会字认读</option><option value="recognition">只认读二会字</option><option value="dictation">只默写四会字</option></select><label for="repeat">每项播报次数</label><input id="repeat" type="number" min="1" max="5" required><label for="interval">播报间隔（毫秒）</label><input id="interval" type="number" min="0" max="600000" required><label for="rate">语速</label><input id="rate" type="number" min="0.5" max="2" step="0.1" required><p id="config-version"></p><button>保存流程新版本</button></form></section>
++<section class="card"><h2>可配置流程</h2><form id="config-form"><label for="phase-order">阶段与顺序</label><select id="phase-order"><option value="recognition,dictation">先二会字认读，再四会字默写</option><option value="dictation,recognition">先四会字默写，再二会字认读</option><option value="recognition">只认读二会字</option><option value="dictation">只默写四会字</option></select><label><input id="manual-navigation" type="checkbox">遥控手动播报：每词播报一次后等待，左键上一词、右键下一词、确认键重播</label><label for="repeat">每项播报次数</label><input id="repeat" type="number" min="1" max="5" required><label for="interval">播报间隔（毫秒）</label><input id="interval" type="number" min="0" max="600000" required><label for="rate">本地合成语速</label><input id="rate" type="number" min="0.5" max="2" step="0.1" required><label for="tts-provider">默写语音合成</label><select id="tts-provider"><option value="local">本地合成（历史配置）</option><option value="doubao">豆包语音合成 2.0</option></select><fieldset id="cloud-tts"><legend>豆包播报参数</legend><p>使用设备已有 API 密钥，密钥不在此展示。新任务固定参数与音频，修改只影响新准备会话。</p><label for="tts-resource">资源编号</label><input id="tts-resource" value="seed-tts-2.0" readonly><label for="tts-speaker">音色编号（Vivi 2.0）</label><input id="tts-speaker" maxlength="128" value="zh_female_vv_uranus_bigtts"><label for="tts-pitch">音调</label><input id="tts-pitch" type="number" min="-12" max="12" value="0"><label for="tts-rate">豆包语速</label><input id="tts-rate" type="number" min="-50" max="100" value="-20"><label for="tts-volume">音量</label><input id="tts-volume" type="number" min="-50" max="100" value="30"><label for="tts-instruction">语音指令</label><textarea id="tts-instruction" maxlength="2000">朗读 播音 拉长音 着重强调 标准普通话</textarea></fieldset><p id="config-version"></p><button>保存流程新版本</button></form></section>
+ <section class="card"><h2>默写业务 skill</h2><p>更新后供新准备会话使用；已生成任务保留原版本。</p><form id="skill-form"><label for="skill">教学规则</label><textarea id="skill" rows="12" required></textarea><p id="skill-version"></p><button>保存 skill 新版本</button></form></section></div>
+ {% endblock %}
+--- before/device/lira/llm/chinese_dictation_skill.md
++++ after/device/lira/llm/chinese_dictation_skill.md
+@@ -11,3 +11,5 @@
+ 孩子执行中提问时，先调用暂停工具，收到当前任务和项目的电视实际已暂停回执后才回答，不能把发送成功、accepted 或口头说明当暂停。暂停失败或未知时明确提示，不先解释。可解释字词、词义、组词和例句，并记录本项辅导。回答后询问是否继续；孩子真实确认并且设备回答播放排空后才请求恢复。恢复保留当前项，被打断的播报重新播放；离线或重启先暂停待确认，不突然播放。
+ 
+ 不推算未经核对的正确率，不把等待耗时当纯书写速度。家长核对和照片操作属于管理服务，不得由模型冒充提交。
++
++当绑定流程的 manual_navigation=true 时，四会词每次只播报一次，结束后保持当前词等待遥控操作：左键返回上一词并播放，右键下一词并播放，确认键重播当前词。首词左键重播首词，末词右键结束；不循环、不计时重播或自动跳词。模型不能自行推进；收到孩子明确“下一个／写好了”才调用确认下一项，重播或上一词也须有对应请求。认读仍用确认键翻页；暂停后的确认键恢复当前词，不能绕过提问解释的暂停与继续确认。
+--- before/tv-receiver/src/DictationSpec.java
++++ after/tv-receiver/src/DictationSpec.java
+@@ -74,7 +74,7 @@
+         return new DictationSpec(value);
+     }
+     public static void validateParametersV2(JSONObject p)throws Exception {
+-        keys(p,"repeat_count","interval_ms","speech_rate");integer(p.get("repeat_count"),1,5);integer(p.get("interval_ms"),0,600000);
++        if(p.has("manual_navigation")){keys(p,"repeat_count","interval_ms","speech_rate","manual_navigation");require(p.get("manual_navigation") instanceof Boolean,"manual_navigation boolean");require(!p.getBoolean("manual_navigation")||p.getInt("repeat_count")==1,"manual navigation plays once");}else keys(p,"repeat_count","interval_ms","speech_rate");integer(p.get("repeat_count"),1,5);integer(p.get("interval_ms"),0,600000);
+         Object rate=p.get("speech_rate");require(rate instanceof Number&&((Number)rate).doubleValue()>=0.5&&((Number)rate).doubleValue()<=2,"playback.speech_rate");
+     }
+     public static DictationSpec parse(JSONObject value,Set<String> capabilities)throws Exception {
+--- before/tv-receiver/src/DictationEngineV2.java
++++ after/tv-receiver/src/DictationEngineV2.java
+@@ -46,10 +46,11 @@
+  public synchronized JSONObject lease(JSONObject x)throws Exception{scope(x);long ms=x.getLong("lease_ms");if(ms<1||ms>15000)throw new IllegalArgumentException("lease_range");leaseUntil=clock.now()+ms;return new JSONObject().put("lease_ms",ms);}
+  public synchronized void pause(String reason)throws Exception{if(!active()||s.getString("state").equals("paused"))return;generation++;nextRepeat=0;audio.stop();s.put("state","paused").put("pause_reason",safeReason(reason));event("paused",null);render();}
+  private String safeReason(String r){return Arrays.asList("foreground_exit","service_stop","focus_loss","lease_expired").contains(r)?r:"control";}
++ private boolean manual()throws Exception{return task().getJSONObject("playback").optBoolean("manual_navigation")&&current().getString("kind").equals("dictation");}
+  private void enter(String command)throws Exception{
+   // Commit the confirmed cursor before starting the next item's audio.
+   if(batch){batch=false;save();}
+-  reminder=false;remindAt=clock.now()+60000;s.put("cycle_repeats",0).put("cycle_target",replayOnce?1:task().getJSONObject("playback").getInt("repeat_count"));replayOnce=false;if(current().getString("kind").equals("recognition")){planPage();s.put("state","presenting");event("page_presented",command);s.put("state","waiting_child");event("waiting_child",null);render();}else play(command);
++  reminder=false;remindAt=clock.now()+60000;s.put("cycle_repeats",0).put("cycle_target",replayOnce||manual()?1:task().getJSONObject("playback").getInt("repeat_count"));replayOnce=false;if(current().getString("kind").equals("recognition")){planPage();s.put("state","presenting");event("page_presented",command);s.put("state","waiting_child");event("waiting_child",null);render();}else play(command);
+  }
+  private void planPage()throws Exception{JSONArray candidates=new JSONArray();String phase=current().getString("phase_id");for(int i=s.getInt("index");i<steps().length();i++){JSONObject item=steps().getJSONObject(i);if(!item.getString("phase_id").equals(phase))break;candidates.put(item);}JSONArray pages=WordPageLayout.pages(candidates,width,Math.max(200,height-(debug?360:180)));s.put("page_end",s.getInt("index")+pages.getJSONArray(0).length()-1);}
+  private void play(String command)throws Exception{
+@@ -60,14 +61,18 @@
+  public synchronized JSONObject control(JSONObject x)throws Exception{
+   scope(x);String id=x.getString("command_id"),fingerprint=DictationSpec.canonical(x);JSONObject commands=s.getJSONObject("commands");if(commands.has(id)){if(!commands.getString(id).equals(fingerprint))throw new IllegalArgumentException("command_conflict");return status();}
+   if(x.getInt("schema_version")!=2||x.getLong("expected_state_revision")!=s.getLong("state_revision")||!current().getString("phase_id").equals(x.getString("phase_id"))||!current().getString("item_id").equals(x.getString("item_id")))throw new IllegalArgumentException("stale_context");if(!active())throw new IllegalArgumentException("task_terminal");String action=x.getString("action"),state=s.getString("state");
+-  if(!(action.equals("start")&&state.equals("waiting_start")||action.equals("confirm")&&state.equals("waiting_child")||action.equals("pause")||action.equals("resume")&&state.equals("paused")||action.equals("replay")&&Arrays.asList("waiting_child","failed_item").contains(state)||action.equals("cancel")))throw new IllegalArgumentException("invalid_action");
+-  if(Arrays.asList("start","confirm","resume","replay").contains(action)&&explanationBusy())throw new IllegalStateException("explanation_audio_busy");
+-  if(Arrays.asList("start","confirm","resume","replay").contains(action)&&(leaseUntil==0||clock.now()>=leaseUntil)){pause("lease_expired");throw new IllegalStateException("device_disconnected");}
++  if(!(action.equals("start")&&state.equals("waiting_start")||action.equals("confirm")&&(state.equals("waiting_child")||manual()&&state.equals("playing"))||action.equals("pause")||action.equals("resume")&&state.equals("paused")||action.equals("replay")&&(Arrays.asList("waiting_child","failed_item").contains(state)||manual()&&state.equals("playing"))||action.equals("previous")&&manual()&&Arrays.asList("waiting_child","playing","failed_item").contains(state)||action.equals("cancel")))throw new IllegalArgumentException("invalid_action");
++  if(Arrays.asList("start","confirm","resume","replay","previous").contains(action)&&explanationBusy())throw new IllegalStateException("explanation_audio_busy");
++  if(Arrays.asList("start","confirm","resume","replay","previous").contains(action)&&(leaseUntil==0||clock.now()>=leaseUntil)){pause("lease_expired");throw new IllegalStateException("device_disconnected");}
+   if(commands.length()>=4096)throw new IllegalArgumentException("command_capacity");commands.put(id,fingerprint);generation++;audio.stop();nextRepeat=0;
+   if(action.equals("pause")){s.put("remote_pause_lock",s.optBoolean("remote_pause_lock")||!localCommand).put("state","paused");event("paused",id);render();}
+   else if(action.equals("cancel")){s.put("state","cancelled");event("cancelled",id);render();}
++  else if(action.equals("previous")){
++   int index=s.getInt("index");if(index>0&&steps().getJSONObject(index-1).getString("kind").equals("dictation"))s.put("index",index-1).put("actual_repeats",0);
++   s.put("state","presenting");event("navigated_previous",id);save();replayOnce=true;enter(null);
++  }
+   else if(action.equals("confirm")){batch=true;int end=current().getString("kind").equals("recognition")?s.getInt("page_end"):s.getInt("index");while(s.getInt("index")<end){event("item_confirmed",id);s.put("index",s.getInt("index")+1);}event("item_confirmed",id);if(s.getInt("index")+1==steps().length()){s.put("state","completed");event("task_completed",id);render();}else{s.put("index",s.getInt("index")+1).put("actual_repeats",0);enter(null);}}
+   else {replayOnce=action.equals("replay")&&state.equals("waiting_child");if(action.equals("resume")){validateAssets(task(),s.getJSONObject("manifest"));s.put("remote_pause_lock",false).put("state","presenting");event("resumed",id);}else if(action.equals("replay")){s.put("state","presenting");event("replayed",id);}enter(action.equals("start")?id:null);}batch=false;save();return status();
+  }
+- public synchronized void render()throws Exception{if(s==null)return;String state=s.getString("state"),kind=current().getString("kind");JSONArray words=new JSONArray();if(kind.equals("recognition")&&Arrays.asList("presenting","waiting_child").contains(state)){for(int i=s.getInt("index");i<=s.optInt("page_end",s.getInt("index"));i++)words.put(new JSONObject().put("text",steps().getJSONObject(i).getString("text")));}String text=state.equals("waiting_start")?"收到默写任务，按确认开始":state.equals("paused")?"已暂停，按确认恢复":state.equals("failed_item")?"播放失败，按重播重试":state.equals("completed")?"默写完成":state.equals("cancelled")?"默写已结束":state.equals("waiting_child")?"完成后按确认继续":"请听写词语";StringBuilder log=new StringBuilder();if(debug){JSONArray events=s.optJSONArray("safe_log");if(events==null)events=new JSONArray();for(int j=Math.max(0,events.length()-5);j<events.length();j++){JSONObject e=events.getJSONObject(j);log.append("\n#").append(e.getLong("sequence")).append(" ").append(e.getString("action")).append(" / ").append(e.getString("state")).append(" · 播报 ").append(e.getInt("actual_repeats"));}}display.show("v2_"+state,words,(reminder&&state.equals("waiting_child")?"写好后请按确认，仍在等你。":"")+text+"\n阶段 "+(kind.equals("recognition")?"二会字":"四会词语")+" · 第 "+(s.getInt("index")+1)+"/"+steps().length()+" 项 · 已完成播报 "+s.optInt("actual_repeats")+" 次"+log.toString());}
++ public synchronized void render()throws Exception{if(s==null)return;String state=s.getString("state"),kind=current().getString("kind");JSONArray words=new JSONArray();if(kind.equals("recognition")&&Arrays.asList("presenting","waiting_child").contains(state)){for(int i=s.getInt("index");i<=s.optInt("page_end",s.getInt("index"));i++)words.put(new JSONObject().put("text",steps().getJSONObject(i).getString("text")));}String text=state.equals("waiting_start")?"收到默写任务，按确认开始":state.equals("paused")?"已暂停，按确认恢复":state.equals("failed_item")?"播放失败，按重播重试":state.equals("completed")?"默写完成":state.equals("cancelled")?"默写已结束":state.equals("waiting_child")?(manual()?"播报结束，等待遥控：左上一词 · 右下一词 · 确认重播":"完成后按确认继续"):"请听写词语";StringBuilder log=new StringBuilder();if(debug){JSONArray events=s.optJSONArray("safe_log");if(events==null)events=new JSONArray();for(int j=Math.max(0,events.length()-5);j<events.length();j++){JSONObject e=events.getJSONObject(j);log.append("\n#").append(e.getLong("sequence")).append(" ").append(e.getString("action")).append(" / ").append(e.getString("state")).append(" · 播报 ").append(e.getInt("actual_repeats"));}}display.show("v2_"+state,words,(reminder&&state.equals("waiting_child")?(manual()?"等待遥控操作，不会自动重播或跳词。":"写好后请按确认，仍在等你。"):"")+text+"\n阶段 "+(kind.equals("recognition")?"二会字":"四会词语")+" · 第 "+(s.getInt("index")+1)+"/"+steps().length()+" 项 · 已完成播报 "+s.optInt("actual_repeats")+" 次"+log.toString());}
+ }
+--- before/tv-receiver/src/ReceiverService.java
++++ after/tv-receiver/src/ReceiverService.java
+@@ -105,7 +105,7 @@
+         if(request[0].equals("GET")&&request[1].equals("/status")) {
+             reply(socket,200,new JSONObject().put("interactive",awake()).put("foreground",Screen.active!=null)
+                 .put("instance",instance).put("rendered_id",renderedId).put("version","0.3").put("audio",audio.status())
+-                .put("capabilities",new JSONArray().put("clear_content_id").put("pcm_audio_v1").put(dictation==null?"dictation_unavailable":DictationSpec.CAPABILITY).put(dictation==null?"dictation_unavailable":"dictation_task_v2").put(dictation==null?"dictation_unavailable":"dictation_recognition_words_v1")));return;
++                .put("capabilities",new JSONArray().put("clear_content_id").put("pcm_audio_v1").put(dictation==null?"dictation_unavailable":DictationSpec.CAPABILITY).put(dictation==null?"dictation_unavailable":"dictation_task_v2").put(dictation==null?"dictation_unavailable":"dictation_recognition_words_v1").put(dictation==null?"dictation_unavailable":"dictation_manual_navigation_v1")));return;
+         }
+         if(request[0].equals("GET")&&request[1].equals("/dictation/status")){if(dictation==null){error(socket,503,"dictation unavailable");return;}reply(socket,200,dictation.status());return;}
+         if(!request[0].equals("POST")||!(request[1].equals("/show")||request[1].equals("/clear")||request[1].matches("/audio/(start|chunk|end|stop)")||request[1].matches("/dictation/(start|control|events|ack|lease|assets/(start|chunk|commit))"))){error(socket,404,"not found");return;}
+--- before/tv-receiver/src/Screen.java
++++ after/tv-receiver/src/Screen.java
+@@ -29,14 +29,15 @@
+         super.onPause();
+     }
+     @Override public void onDestroy() { unregisterReceiver(sleep); super.onDestroy(); }
++    private boolean manualDictation(){try{JSONObject s=ReceiverService.dictation.status();return s.getJSONObject("task").getJSONObject("playback").optBoolean("manual_navigation")&&s.getJSONArray("steps").getJSONObject(s.getInt("index")).getString("kind").equals("dictation");}catch(Exception ignored){return false;}}
+     void renderTask(String kind,JSONArray words,String text) {
+         LinearLayout root=new LinearLayout(this);root.setOrientation(LinearLayout.VERTICAL);root.setPadding(40,24,40,24);root.setBackgroundColor(Color.rgb(15,27,32));root.addView(label("LIRA小助手",20,Color.WHITE));
+         try{if(words.length()>0){root.addView(new WordPageView(this,words),new LinearLayout.LayoutParams(-1,0,1));if(kind.startsWith("v2_"))root.addView(label(text,16,Color.LTGRAY));}else {TextView t=label(text,kind.startsWith("v2_")?24:44,Color.WHITE);t.setGravity(Gravity.CENTER);root.addView(t,new LinearLayout.LayoutParams(-1,0,1));}}catch(Exception ignored){}
+-        root.addView(label(kind.startsWith("v2_")?"确认：开始/下一项/恢复 · 左键：暂停 · 右键：重播 · 长按返回：结束":"返回上一项并暂停 · 确认继续 · 右键下一项",18,Color.LTGRAY));setContentView(root);
++        root.addView(label(kind.startsWith("v2_")?(manualDictation()?"左：上一词并播放 · 右：下一词/末项结束 · 确认：重播 · 返回：暂停/长按结束":"确认：开始/下一项/恢复 · 左键：暂停 · 右键：重播 · 长按返回：结束"):"返回上一项并暂停 · 确认继续 · 右键下一项",18,Color.LTGRAY));setContentView(root);
+     }
+     @Override public boolean onKeyDown(int key,KeyEvent event){
+         if(ReceiverService.dictation!=null&&ReceiverService.dictation.active()){
+-            try{JSONObject s=ReceiverService.dictation.status();if(s.optInt("schema_version")==2){if(key!=KeyEvent.KEYCODE_BACK&&!dictationKeys.accept(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER,event.getRepeatCount(),android.os.SystemClock.elapsedRealtime()))return true;if(key==KeyEvent.KEYCODE_MENU){ReceiverService.dictation.toggleDebug();return true;}String state=s.getString("state"),action=null;if(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER)action=state.equals("waiting_start")?"start":state.equals("paused")?"resume":"confirm";else if(key==KeyEvent.KEYCODE_BACK)action=event.getRepeatCount()>0?"cancel":"pause";else if(key==KeyEvent.KEYCODE_DPAD_LEFT)action="pause";else if(key==KeyEvent.KEYCODE_DPAD_RIGHT)action="replay";if(action!=null){ReceiverService.dictation.localControl(action);return true;}return super.onKeyDown(key,event);}}catch(Exception ignored){return true;}
++            try{JSONObject s=ReceiverService.dictation.status();if(s.optInt("schema_version")==2){if(key!=KeyEvent.KEYCODE_BACK&&!dictationKeys.accept(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER||manualDictation()&&(key==KeyEvent.KEYCODE_DPAD_LEFT||key==KeyEvent.KEYCODE_DPAD_RIGHT),event.getRepeatCount(),android.os.SystemClock.elapsedRealtime()))return true;if(key==KeyEvent.KEYCODE_MENU){ReceiverService.dictation.toggleDebug();return true;}String state=s.getString("state"),action=null;if(key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER)action=state.equals("waiting_start")?"start":state.equals("paused")?"resume":manualDictation()?"replay":"confirm";else if(key==KeyEvent.KEYCODE_BACK)action=event.getRepeatCount()>0?"cancel":"pause";else if(key==KeyEvent.KEYCODE_DPAD_LEFT)action=manualDictation()?"previous":"pause";else if(key==KeyEvent.KEYCODE_DPAD_RIGHT)action=manualDictation()?"confirm":"replay";if(action!=null){ReceiverService.dictation.localControl(action);return true;}return super.onKeyDown(key,event);}}catch(Exception ignored){return true;}
+             String command=key==KeyEvent.KEYCODE_BACK?"previous":key==KeyEvent.KEYCODE_DPAD_CENTER||key==KeyEvent.KEYCODE_ENTER?"continue":key==KeyEvent.KEYCODE_DPAD_RIGHT?"next":null;
+             if(command!=null){try{JSONObject s=ReceiverService.dictation.status();boolean recitation=command.equals("continue")&&s.getString("state").equals("running")&&s.getJSONArray("steps").getJSONObject(s.getInt("index")).getString("kind").equals("recitation")&&s.getJSONObject("task").getJSONObject("parameters").getString("recitation_end_mode").equals("remote_confirm");ReceiverService.dictation.control(new JSONObject().put("task_id",s.getJSONObject("task").getString("task_id")).put("expected_state_revision",s.getLong("state_revision")).put("command_id",UUID.randomUUID().toString()).put("command",recitation?"recitation_complete":command).put("source","remote_confirm"));}catch(Exception ignored){}return true;}
+         }return super.onKeyDown(key,event);
+--- before/device/lira/dictation_cloud_tts.py
++++ after/device/lira/dictation_cloud_tts.py
+@@ -0,0 +1,56 @@
++"""Finite cloud dictation assets. No fallback, playback, or household context."""
++import asyncio
++import base64
++import copy
++import json
++import re
++import uuid
++import httpx
++
++DEFAULT_TTS = dict(provider='doubao',resource_id='seed-tts-2.0',speaker='zh_female_vv_uranus_bigtts',pitch=0,speech_rate=-20,loudness_rate=30,instruction='朗读 播音 拉长音 着重强调 标准普通话')
++ENDPOINT='https://openspeech.bytedance.com/api/v3/tts/unidirectional'
++
++def validate_tts(value):
++    if type(value) is not dict or set(value)!=set(DEFAULT_TTS):raise ValueError('tts: 参数缺失或包含未知字段')
++    if value['provider']!='doubao' or value['resource_id']!='seed-tts-2.0':raise ValueError('tts: 请选择豆包语音合成2.0')
++    if type(value['speaker']) is not str or not re.fullmatch(r'[A-Za-z0-9_-]{1,128}',value['speaker']):raise ValueError('tts: 音色编号无效')
++    for key,lo,hi in [('pitch',-12,12),('speech_rate',-50,100),('loudness_rate',-50,100)]:
++        if type(value[key]) is not int or not lo<=value[key]<=hi:raise ValueError('tts: '+key+' 超出范围')
++    if type(value['instruction']) is not str or len(value['instruction'])>2000 or any(ord(c)<32 and c not in '\n\t' for c in value['instruction']):raise ValueError('tts: 语音指令无效')
++    return copy.deepcopy(value)
++
++async def synthesize_cloud(text,settings,api_key,*,allowed,client=None):
++    settings=validate_tts(settings)
++    if not api_key:raise ValueError('豆包语音合成 API 密钥未配置')
++    def guard():
++        if not allowed():raise ValueError('语音合成已撤销')
++    guard()
++    params=dict(text=text+'。',speaker=settings['speaker'],audio_params=dict(format='pcm',sample_rate=24000,speech_rate=settings['speech_rate'],loudness_rate=settings['loudness_rate']),additions=json.dumps(dict(post_process=dict(pitch=settings['pitch']),context_texts=[settings['instruction']]),ensure_ascii=False))
++    async def request(c):
++        data=bytearray();terminal=False
++        try:
++            async with c.stream('POST',ENDPOINT,headers={'X-Api-Key':api_key,'X-Api-Resource-Id':settings['resource_id'],'X-Api-Request-Id':uuid.uuid4().hex},json=dict(user={'uid':'lira-dictation'},req_params=params)) as response:
++                if response.status_code!=200:raise ValueError('豆包语音合成 HTTP '+str(response.status_code))
++                async for line in response.aiter_lines():
++                    guard()
++                    if not line:continue
++                    if line.startswith('data:'):line=line[5:].strip()
++                    row=json.loads(line)
++                    if type(row) is not dict or type(row.get('code')) is not int:raise ValueError('豆包语音合成响应格式无效')
++                    code=row['code']
++                    if code not in (0,20000000):raise ValueError('豆包语音合成错误码 '+str(code))
++                    if terminal:raise ValueError('豆包语音合成结束后仍有数据')
++                    if row.get('data'):data.extend(base64.b64decode(row['data'],validate=True))
++                    if len(data)>24000*2*120:raise ValueError('豆包语音资源过大')
++                    if code==20000000:terminal=True
++            guard()
++            if not terminal or not data or len(data)%2:raise ValueError('豆包语音资源不完整')
++            return bytes(data)
++        except (httpx.HTTPError,json.JSONDecodeError,TypeError,KeyError) as exc:
++            # Transport errors must never expose headers, keys or echoed prompts.
++            raise ValueError('豆包语音合成连接或响应失败') from None
++    async def run():
++        if client is not None:return await request(client)
++        async with httpx.AsyncClient(timeout=40,trust_env=False) as c:return await request(c)
++    try:return await asyncio.wait_for(run(),45)
++    except asyncio.TimeoutError:raise ValueError('豆包语音合成超时') from None
+--- before/device/tests/test_dictation_cloud_tts.py
++++ after/device/tests/test_dictation_cloud_tts.py
+@@ -0,0 +1,27 @@
++import base64,json
++import httpx,pytest
++from lira.dictation_cloud_tts import DEFAULT_TTS,synthesize_cloud
++
++@pytest.mark.asyncio
++async def test_cloud_exact_approved_parameters_and_complete_pcm():
++    def reply(request):
++        body=json.loads(request.content)['req_params'];assert body['text']=='山顶。'
++        assert body['speaker']==DEFAULT_TTS['speaker'];assert body['audio_params']==dict(format='pcm',sample_rate=24000,speech_rate=-20,loudness_rate=30)
++        assert json.loads(body['additions'])==dict(post_process=dict(pitch=0),context_texts=[DEFAULT_TTS['instruction']])
++        assert request.headers['X-Api-Resource-Id']=='seed-tts-2.0'
++        return httpx.Response(200,text='\n'.join(json.dumps(r) for r in [dict(code=0,data=base64.b64encode(b'\x01\x00').decode()),dict(code=0,data=base64.b64encode(b'\x02\x00').decode()),dict(code=20000000)]))
++    async with httpx.AsyncClient(transport=httpx.MockTransport(reply)) as client:
++        assert await synthesize_cloud('山顶',DEFAULT_TTS,'private-key',allowed=lambda:True,client=client)==b'\x01\x00\x02\x00'
++
++@pytest.mark.asyncio
++@pytest.mark.parametrize('rows',[[],[dict(code=0,data='AQA=')],[dict(code=20000000)],[dict(code=0,data='AQ=='),dict(code=20000000)],[dict(code=9,message='private-key')]])
++async def test_cloud_rejects_incomplete_or_failed_audio(rows):
++    async with httpx.AsyncClient(transport=httpx.MockTransport(lambda req:httpx.Response(200,text='\n'.join(map(json.dumps,rows))))) as client:
++        with pytest.raises(ValueError) as error:await synthesize_cloud('山顶',DEFAULT_TTS,'private-key',allowed=lambda:True,client=client)
++        assert 'private-key' not in str(error.value)
++
++@pytest.mark.asyncio
++async def test_cloud_privacy_blocks_network():
++    def unexpected(req):raise AssertionError('must not send')
++    async with httpx.AsyncClient(transport=httpx.MockTransport(unexpected)) as client:
++        with pytest.raises(ValueError,match='撤销'):await synthesize_cloud('山顶',DEFAULT_TTS,'private-key',allowed=lambda:False,client=client)
+--- before/device/tests/test_dictation_settings.py
++++ after/device/tests/test_dictation_settings.py
+@@ -0,0 +1,52 @@
++import sqlite3
++import pytest
++from lira.dictation_settings import DictationSettings
++
++def parameters():
++    return {'phases':['recognition','dictation'], 'playback':{'repeat_count':2,'interval_ms':3000,'speech_rate':1.0}}
++
++def test_v2_revision_history_and_conflict():
++    settings = DictationSettings(sqlite3.connect(':memory:'))
++    assert settings.get_v2() is None
++    first = settings.save_v2(parameters(), expected_revision=0)
++    changed = parameters(); changed['phases'].reverse()
++    assert settings.save_v2(changed, expected_revision=1)['revision'] == 2
++    assert settings.get_v2(1) == first
++    with pytest.raises(ValueError, match='conflict'):
++        settings.save_v2(changed, expected_revision=1)
++
++@pytest.mark.parametrize('patch', [{'phases':[]},{'phases':['recitation']},{'phases':['dictation','dictation']},{'font_size':50},{'auto_advance':True},{'playback':{'repeat_count':0,'interval_ms':0,'speech_rate':1}}])
++def test_v2_rejects_unsupported_or_invalid_parameters(patch):
++    value = parameters(); value.update(patch)
++    with pytest.raises(ValueError):
++        DictationSettings(sqlite3.connect(':memory:')).save_v2(value, expected_revision=0)
++
++@pytest.mark.parametrize('key,value', [('repeat_count',True),('repeat_count',6),('interval_ms',-1),('interval_ms',600001),('speech_rate',True),('speech_rate',0.49),('speech_rate',float('nan')),('speech_rate',float('inf'))])
++def test_playback_bounds(key,value):
++    settings = DictationSettings(sqlite3.connect(':memory:'))
++    config = parameters(); config['playback'][key] = value
++    with pytest.raises(ValueError):
++        settings.save_v2(config,expected_revision=0)
++
++def test_save_v2_preserves_outer_transaction_and_v1():
++    db = sqlite3.connect(':memory:')
++    settings = DictationSettings(db)
++    db.execute('BEGIN')
++    settings.save_v2(parameters(),expected_revision=0)
++    db.rollback()
++    assert settings.get_v2() is None
++    assert settings.get() is None
++
++
++def test_cloud_voice_and_manual_navigation_are_versioned():
++    settings=DictationSettings(sqlite3.connect(':memory:'))
++    p=parameters();p['playback'].update(manual_navigation=True,repeat_count=1)
++    p['tts']=dict(provider='doubao',resource_id='seed-tts-2.0',speaker='zh_female_vv_uranus_bigtts',pitch=0,speech_rate=-20,loudness_rate=30,instruction='朗读 播音 拉长音 着重强调 标准普通话')
++    first=settings.save_v2(p,expected_revision=0)
++    p['tts']['speech_rate']=-30
++    settings.save_v2(p,expected_revision=1)
++    assert settings.get_v2(1)==first
++    assert first['parameters']['tts']['speech_rate']==-20
++    assert settings.get_v2()['parameters']['tts']['speech_rate']==-30
++    p['playback']['repeat_count']=2
++    with pytest.raises(ValueError):settings.save_v2(p,expected_revision=2)
+--- before/tv-receiver/tests/DictationManualNavigationTest.java
++++ after/tv-receiver/tests/DictationManualNavigationTest.java
+@@ -0,0 +1,24 @@
++package org.lira.receiver;
++import org.json.*;import java.nio.file.*;import java.io.*;import java.security.*;
++public final class DictationManualNavigationTest {
++ static void check(boolean b,String message){if(!b)throw new AssertionError(message);}
++ public static void main(String[] args)throws Exception{
++  JSONObject task=new JSONObject(new String(Files.readAllBytes(Paths.get(args[0])),"UTF-8"));
++  task.getJSONObject("playback").put("manual_navigation",true).put("repeat_count",1);
++  JSONArray items=task.getJSONArray("phases").getJSONObject(1).getJSONArray("items");
++  items.put(new JSONObject(items.getJSONObject(0).toString()).put("item_id","dictate-2").put("text","晴朗"));
++  byte[] pcm={1,0};StringBuilder sha=new StringBuilder();for(byte b:MessageDigest.getInstance("SHA-256").digest(pcm))sha.append(String.format("%02x",b&255));
++  task.getJSONArray("audio_assets").getJSONObject(0).put("sha256",sha.toString());task.put("content_hash",DictationSpec.contentHash(task));DictationSpec.parse(task);
++  File root=Files.createTempDirectory("manual-navigation").toFile();TaskAssetStore assets=new TaskAssetStore(new File(root,"assets"));String tid=task.getString("task_id"),hash=task.getString("content_hash");assets.begin(tid,hash,"audio-2",2,sha.toString());assets.append(tid,hash,"audio-2",0,pcm);assets.commit(tid,hash,"audio-2");
++  JSONObject manifest=new JSONObject().put("task_id",tid).put("content_hash",hash).put("assets",new JSONArray().put(new JSONObject().put("asset_id","audio-2").put("sha256",sha.toString()).put("pcm_bytes",2).put("frames",1).put("sample_rate",24000).put("channels",1)));
++  DictationEngineTest.Time clock=new DictationEngineTest.Time();DictationEngineTest.Sound sound=new DictationEngineTest.Sound();DictationEngine engine=new DictationEngine(clock,sound,(k,w,t)->{},new DictationStateStore(new File(root,"state")),assets);
++  engine.start(new JSONObject().put("task",task).put("manifest",manifest).put("run_epoch",1));engine.control(DictationEngineV2Test.cmd(engine,"start"));engine.control(DictationEngineV2Test.cmd(engine,"confirm"));sound.drain();
++  check(engine.status().getString("state").equals("waiting_child"),"one playback then stop");clock.t+=5000;engine.lease(DictationEngineV2Test.scope(engine).put("lease_ms",10000));engine.tick();check(engine.status().getInt("index")==1&&engine.status().getInt("actual_repeats")==1,"no timed replay or advance");
++  engine.control(DictationEngineV2Test.cmd(engine,"replay"));sound.drain();check(engine.status().getInt("index")==1,"center replays current");
++  engine.control(DictationEngineV2Test.cmd(engine,"confirm"));sound.drain();check(engine.status().getInt("index")==2,"right advances and plays");
++  JSONObject previous=DictationEngineV2Test.cmd(engine,"previous");engine.control(previous);sound.drain();check(engine.status().getInt("index")==1,"left returns and plays");engine.control(previous);check(engine.status().getInt("index")==1,"duplicate left cannot navigate twice");
++  engine.control(DictationEngineV2Test.cmd(engine,"previous"));sound.drain();check(engine.status().getInt("index")==1,"first word does not wrap into recognition");
++  engine.control(DictationEngineV2Test.cmd(engine,"confirm"));sound.drain();engine.control(DictationEngineV2Test.cmd(engine,"confirm"));check(engine.status().getString("state").equals("completed"),"right after final word completes once");
++  System.out.println("manual: one play, wait, replay, previous, next, bounds, idempotency and completion passed");
++ }
++}
